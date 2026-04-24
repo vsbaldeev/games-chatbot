@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
@@ -18,8 +19,6 @@ from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-mcp = FastMCP("games-tools")
 
 __igdb_token: Optional[str] = None
 __igdb_token_expiry: float = 0.0
@@ -35,6 +34,32 @@ def sanitize_igdb_string(value: str) -> str:
     return IGDB_QUERY_UNSAFE.sub("", value).strip()[:200]
 
 
+@asynccontextmanager
+async def lifespan(server):
+    try:
+        await __get_igdb_token()
+        logger.info("Twitch/IGDB authentication OK")
+    except KeyError as error:
+        logger.error(
+            f"Missing environment variable {error} — "
+            "set TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET in your .env file"
+        )
+    except httpx.HTTPStatusError as error:
+        logger.error(
+            f"Twitch authentication failed (HTTP {error.response.status_code}: "
+            f"{error.response.text}) — "
+            "verify TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET at dev.twitch.tv/console"
+        )
+    except httpx.ConnectError as error:
+        logger.error(f"Cannot reach Twitch OAuth endpoint — check network connectivity: {error}")
+    except Exception as error:
+        logger.error(f"Twitch startup check failed: {type(error).__name__}: {error}")
+    yield
+
+
+mcp = FastMCP("games-tools", lifespan=lifespan)
+
+
 async def __get_igdb_token() -> str:
     global __igdb_token, __igdb_token_expiry
 
@@ -47,7 +72,7 @@ async def __get_igdb_token() -> str:
     async with httpx.AsyncClient() as client:
         response = await client.post(
             TWITCH_TOKEN_URL,
-            params={
+            data={
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "grant_type": "client_credentials",
@@ -92,6 +117,14 @@ async def search_games(query: str) -> str:
             f'search "{safe_query}"; fields id,name,summary,first_release_date; limit 5;',
         )
         return json.dumps(results, ensure_ascii=False, indent=2)
+    except httpx.HTTPStatusError as error:
+        msg = f"IGDB API error (HTTP {error.response.status_code}) — Twitch credentials may be invalid"
+        logger.error(f"search_games failed: {msg}")
+        return json.dumps({"error": msg})
+    except httpx.ConnectError as error:
+        msg = f"Cannot reach IGDB/Twitch — check network connectivity: {error}"
+        logger.error(f"search_games failed: {msg}")
+        return json.dumps({"error": msg})
     except Exception as error:
         logger.error(f"search_games failed: {error}")
         return json.dumps({"error": str(error)})
@@ -119,6 +152,14 @@ async def get_game_details(game_id: int) -> str:
             ),
         )
         return json.dumps(results, ensure_ascii=False, indent=2)
+    except httpx.HTTPStatusError as error:
+        msg = f"IGDB API error (HTTP {error.response.status_code}) — Twitch credentials may be invalid"
+        logger.error(f"get_game_details failed: {msg}")
+        return json.dumps({"error": msg})
+    except httpx.ConnectError as error:
+        msg = f"Cannot reach IGDB/Twitch — check network connectivity: {error}"
+        logger.error(f"get_game_details failed: {msg}")
+        return json.dumps({"error": msg})
     except Exception as error:
         logger.error(f"get_game_details failed: {error}")
         return json.dumps({"error": str(error)})
@@ -184,6 +225,14 @@ async def find_coop_games(player_count: int) -> str:
             ),
         )
         return json.dumps(results, ensure_ascii=False, indent=2)
+    except httpx.HTTPStatusError as error:
+        msg = f"IGDB API error (HTTP {error.response.status_code}) — Twitch credentials may be invalid"
+        logger.error(f"find_coop_games failed: {msg}")
+        return json.dumps({"error": msg})
+    except httpx.ConnectError as error:
+        msg = f"Cannot reach IGDB/Twitch — check network connectivity: {error}"
+        logger.error(f"find_coop_games failed: {msg}")
+        return json.dumps({"error": msg})
     except Exception as error:
         logger.error(f"find_coop_games failed: {error}")
         return json.dumps({"error": str(error)})

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -72,6 +73,7 @@ async def init_agent() -> None:
                 "transport": "stdio",
                 "command": sys.executable,
                 "args": [config.MCP_SERVER_PATH],
+                "env": dict(os.environ),
             }
         }
     )
