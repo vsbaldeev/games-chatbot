@@ -208,6 +208,78 @@ async def get_steam_player_count(game_name: str) -> str:
 
 
 @mcp.tool()
+async def find_new_ps5_online_games(days: int = 21) -> str:
+    """
+    Find PS5 games with online multiplayer released in the last N days.
+    Returns up to 8 games sorted by release date descending, with multiplayer details.
+    Use get_game_details for crossplay inference on specific results.
+    PS5 platform ID in IGDB is 167.
+    """
+    try:
+        safe_days = max(1, min(int(days), 180))
+        cutoff = int(time.time()) - safe_days * 86400
+        now = int(time.time())
+        results = await __igdb_request(
+            "games",
+            (
+                f"fields name,summary,rating,multiplayer_modes.*,genres.name,first_release_date; "
+                f"where platforms = (167) & multiplayer_modes != null "
+                f"& first_release_date > {cutoff} & first_release_date < {now}; "
+                f"sort first_release_date desc; limit 8;"
+            ),
+        )
+        return json.dumps(results, ensure_ascii=False, indent=2)
+    except httpx.HTTPStatusError as error:
+        msg = f"IGDB API error (HTTP {error.response.status_code})"
+        logger.error(f"find_new_ps5_online_games failed: {msg}")
+        return json.dumps({"error": msg})
+    except httpx.ConnectError as error:
+        msg = f"Cannot reach IGDB/Twitch — check network connectivity: {error}"
+        logger.error(f"find_new_ps5_online_games failed: {msg}")
+        return json.dumps({"error": msg})
+    except Exception as error:
+        logger.error(f"find_new_ps5_online_games failed: {error}")
+        return json.dumps({"error": str(error)})
+
+
+@mcp.tool()
+async def get_ps_store_sales(limit: int = 12) -> str:
+    """
+    Fetch current PS Store sale titles from the psdeals.net RSS feed.
+    Returns a JSON list of discounted game title strings (up to `limit` entries).
+    Use search_games + get_game_details to check multiplayer support for any titles
+    that look interesting.
+    """
+    try:
+        safe_limit = max(1, min(int(limit), 50))
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            response = await client.get(
+                "https://psdeals.net/rss-feed",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            response.raise_for_status()
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(response.text)
+        titles = [
+            item.text.strip()
+            for item in root.findall(".//item/title")
+            if item.text
+        ][:safe_limit]
+        return json.dumps(titles, ensure_ascii=False)
+    except httpx.HTTPStatusError as error:
+        msg = f"psdeals.net error (HTTP {error.response.status_code})"
+        logger.error(f"get_ps_store_sales failed: {msg}")
+        return json.dumps({"error": msg})
+    except httpx.ConnectError as error:
+        msg = f"Cannot reach psdeals.net: {error}"
+        logger.error(f"get_ps_store_sales failed: {msg}")
+        return json.dumps({"error": msg})
+    except Exception as error:
+        logger.error(f"get_ps_store_sales failed: {error}")
+        return json.dumps({"error": str(error)})
+
+
+@mcp.tool()
 async def find_coop_games(player_count: int) -> str:
     """
     Find PS5 games that support online co-op for at least the given number of players.

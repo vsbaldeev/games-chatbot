@@ -24,7 +24,7 @@ from telegram.ext import (
     filters,
 )
 
-from src import achievements, config, features, game_filters, psstore, wishlist
+from src import achievements, config, features, game_filters, psstore, ranks, wishlist
 from src.agent import DailyLimitError, RateLimitError, init_agent, run_agent
 from src.memory import get_chat_history, get_recent_messages
 
@@ -49,6 +49,31 @@ TIME_PATTERN = re.compile(r"^\d{1,2}:\d{2}$")
 TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 # Poll question templates. {game} is substituted when a game name is provided.
+# Each entry is a distinct agent prompt for /games — rotated randomly each call.
+# All variants ask about PS5 online games and must cover crossplay + player count.
+GAMES_PROMPTS = [
+    (
+        "Используй find_new_ps5_online_games(21) чтобы найти свежие PS5 релизы для онлайна за последние 3 недели. "
+        "Для 2-3 самых интересных — проверь мультиплеер через get_game_details и живость через get_steam_player_count. "
+        "Обязательно укажи: есть ли кросплей с PC, сколько игроков поддерживается онлайн."
+    ),
+    (
+        "Используй get_ps_store_sales(15) чтобы найти текущие скидки в PS Store. "
+        "Из этого списка отбери 2-3 сетевые игры для PS5 и проверь их через search_games + get_game_details. "
+        "Для каждой расскажи: кросплей с PC есть или нет, сколько игроков онлайн, стоит ли брать по скидке."
+    ),
+    (
+        "Двойной удар: используй find_new_ps5_online_games(30) для новинок и get_ps_store_sales(15) для скидок. "
+        "Найди пересечение — есть ли свежие игры со скидкой? Если нет, дай по одному примеру из каждой категории. "
+        "Для каждой игры — кросплей с PC и максимальное число игроков онлайн."
+    ),
+    (
+        "Используй find_new_ps5_online_games(60) чтобы найти PS5 онлайн-игры за последние 2 месяца. "
+        "Для топ-3 по рейтингу проверь get_steam_player_count — реально ли живые? "
+        "Добавь: кросплей с PC через get_game_details. Итог: что сейчас реально стоит запускать."
+    ),
+]
+
 PLAY_QUESTIONS_WITH_GAME = [
     "Кто играет сегодня в {game}?",
     "Сегодняшняя сессия по {game} — кто идёт?",
@@ -90,7 +115,7 @@ AUTONOMOUS_COOLDOWN_SECONDS = 60
 # Per-user cooldown on /feature to prevent token abuse.
 FEATURE_COOLDOWN_SECONDS = 30
 
-# Per-chat cooldown on /roast to limit token burn on demand.
+# Per-chat cooldown on /prozharka to limit token burn on demand.
 ROAST_COOLDOWN_SECONDS = 120
 ROAST_MODEL = "llama-3.3-70b-versatile"
 __feature_last_used: dict[int, float] = {}
@@ -206,34 +231,31 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Команды:\n"
-        "/games — популярные игры для PS5 прямо сейчас\n"
+        "/games — свежие игры для PS5: новинки, скидки, кросплей\n"
+        "/chto_takoe <запрос> — что это? Игра, термин, технология — бот разберётся сам\n"
         "/crossplay <игра> — есть ли кросплей\n"
-        "/players <игра> — сколько людей страдает в Steam\n"
-        "/research <запрос> — полный анализ игры или темы\n"
+        "/players <игра> — сколько людей сейчас в Steam\n"
         "/coop <число> — PS5 игры с онлайн кооп на N игроков\n"
         "/play [ЧЧ:ММ] [игра] — опрос кто играет сегодня + напоминание\n"
         "/wish add|list|remove|all — вишлист игр\n"
-        "/explain <термин> — объяснение технического термина\n"
-        "/achievements [all] — твои достижения (или всех)\n"
-        "/feature <запрос> — предложить фичу (бот проверит, нет ли её уже)\n"
-        "/features — список ожидающих фич от этого чата\n"
-        "/roast — луркморский портрет случайного участника (бот выбирает сам)\n\n"
+        "/achievements [all] — достижения (свои или всех)\n"
+        "/rank — твой ранг и сколько очков заработал\n"
+        "/top — рейтинг всего чата\n"
+        "/prozharka — случайный участник получает по заслугам\n"
+        "/feature <запрос> — предложить фичу\n"
+        "/features — список ожидающих фич\n\n"
         "Фильтры рекомендаций:\n"
         "/ban <игра> — никогда не предлагать эту игру\n"
-        "/known <игра> — я уже знаю/играю, не предлагать\n"
+        "/known <игра> — уже знаю/играю, не предлагать\n"
         "/unban <игра> — убрать из фильтров\n"
         "/myfilters — посмотреть свои фильтры\n\n"
-        "Или просто упомяни меня или напиши про игры — я не слепой."
+        "Или просто упомяни меня или напиши про игры."
     )
 
 
 async def cmd_games(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     username = __get_username(update)
-    await __send_agent_reply(
-        update,
-        username,
-        "Какие сейчас популярные онлайн-игры для PS5? Особенно с активным сообществом и желательно с кросплеем с PC.",
-    )
+    await __send_agent_reply(update, username, random.choice(GAMES_PROMPTS))
 
 
 async def cmd_crossplay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -265,10 +287,12 @@ async def cmd_players(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
-async def cmd_research(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_chto_takoe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = " ".join(context.args) if context.args else None
     if not query:
-        await update.message.reply_text("Укажи что исследовать: /research Helldivers 2")
+        await update.message.reply_text(
+            "Что объяснить? Пример: /chto_takoe DLSS или /chto_takoe Elden Ring"
+        )
         return
     username = __get_username(update)
     await achievements.increment_stat(
@@ -277,23 +301,12 @@ async def cmd_research(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await __send_agent_reply(
         update,
         username,
-        f"Сделай полный анализ: {query}. Расскажи об игре, платформах, мультиплеере, кросплее и количестве игроков.",
-    )
-
-
-async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    term = " ".join(context.args) if context.args else None
-    if not term:
-        await update.message.reply_text("Что объяснить? Например: /explain ray tracing")
-        return
-    username = __get_username(update)
-    await achievements.increment_stat(
-        update.effective_user.id, update.effective_chat.id, username, "explain_queries"
-    )
-    await __send_agent_reply(
-        update,
-        username,
-        f"Объясни простым языком для неспециалиста что такое: {term}",
+        f"Что такое {query}? "
+        f"Сам разберись: если это технический термин или концепция (DLSS, ray tracing, fps, HDR и т.п.) — "
+        f"объясни своими словами, просто и с примерами, без лишних API-запросов. "
+        f"Если это игра — используй search_games + get_game_details, расскажи про платформы, "
+        f"мультиплеер, кросплей и живость по get_steam_player_count. "
+        f"Отвечай коротко и по делу.",
     )
 
 
@@ -501,6 +514,62 @@ async def cmd_features(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def cmd_rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    username = __get_username(update)
+    chat_id = update.effective_chat.id
+
+    points, rank, breakdown = await ranks.get_user_rank_info(user.id, chat_id)
+
+    lines = [
+        f"{rank.emoji} *{rank.title}*",
+        f"⭐ {ranks.pluralize_points(points)}",
+    ]
+    if breakdown:
+        lines.append("\nОткуда взялось:")
+        lines.extend(breakdown)
+    else:
+        lines.append("\nПока ноль. Начни общаться с ботом — очки сами придут.")
+
+    upcoming = ranks.next_rank(points)
+    if upcoming:
+        needed = upcoming.min_points - points
+        lines.append(f"\nДо *{upcoming.title}* {upcoming.emoji}: ещё {ranks.pluralize_points(needed)}")
+    else:
+        lines.append("\n👑 Это вершина. Дальше некуда.")
+
+    text = f"Ранг {username}:\n\n" + "\n".join(lines)
+    formatted = __to_telegram_md(text)
+    try:
+        await update.message.reply_text(formatted, parse_mode="Markdown")
+    except BadRequest:
+        await update.message.reply_text(text)
+
+
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    board = await ranks.get_chat_leaderboard(chat_id)
+
+    if not board:
+        await update.message.reply_text("Нет данных. Пишите боту — зарабатывайте очки.")
+        return
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    lines = []
+    for position, (username, points, rank) in enumerate(board, 1):
+        prefix = medals.get(position, f"{position}.")
+        lines.append(
+            f"{prefix} {rank.emoji} {username} — {ranks.pluralize_points(points)} ({rank.title})"
+        )
+
+    text = "🏆 Рейтинг чата:\n\n" + "\n".join(lines)
+    formatted = __to_telegram_md(text)
+    try:
+        await update.message.reply_text(formatted, parse_mode="Markdown")
+    except BadRequest:
+        await update.message.reply_text(text)
+
+
 async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     game_name = " ".join(context.args) if context.args else None
     if not game_name:
@@ -540,15 +609,15 @@ async def cmd_known(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def cmd_roast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_prozharka(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
 
     now = datetime.datetime.now().timestamp()
-    last_roast = context.chat_data.get("last_roast_ts", 0.0)
-    if now - last_roast < ROAST_COOLDOWN_SECONDS:
-        remaining = int(ROAST_COOLDOWN_SECONDS - (now - last_roast))
+    last_prozharka = context.chat_data.get("last_prozharka_ts", 0.0)
+    if now - last_prozharka < ROAST_COOLDOWN_SECONDS:
+        remaining = int(ROAST_COOLDOWN_SECONDS - (now - last_prozharka))
         await update.message.reply_text(
-            f"Роаст только что был. Остынь — ещё {remaining} сек."
+            f"Прожарка только что была. Остынь — ещё {remaining} сек."
         )
         return
 
@@ -563,21 +632,21 @@ async def cmd_roast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.chat.send_action("typing")
     try:
-        roast_text = await __generate_roast_text(chat_id, target_username)
-        context.chat_data["last_roast_ts"] = datetime.datetime.now().timestamp()
-        formatted = __to_telegram_md(roast_text)
+        prozharka_text = await __generate_prozharka_text(chat_id, target_username)
+        context.chat_data["last_prozharka_ts"] = datetime.datetime.now().timestamp()
+        formatted = __to_telegram_md(prozharka_text)
         try:
             await update.message.reply_text(
-                f"🔥 Луркморский портрет {target_username}:\n\n{formatted}",
+                f"🔥 Прожарка {target_username}:\n\n{formatted}",
                 parse_mode="Markdown",
             )
         except BadRequest:
             await update.message.reply_text(
-                f"🔥 Луркморский портрет {target_username}:\n\n{roast_text}"
+                f"🔥 Прожарка {target_username}:\n\n{prozharka_text}"
             )
     except Exception as error:
-        logger.error(f"Roast failed for {target_username} in chat {chat_id}: {error}")
-        await update.message.reply_text("Роаст не задался. Groq на перекуре — попробуй позже.")
+        logger.error(f"Prozharka failed for {target_username} in chat {chat_id}: {error}")
+        await update.message.reply_text("Прожарка не задалась. Groq на перекуре — попробуй позже.")
 
 
 async def cmd_myfilters(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -638,8 +707,8 @@ async def __get_user_history_text(chat_id: int, username: str) -> str:
     return "\n".join(user_messages)
 
 
-async def __generate_roast_text(chat_id: int, username: str) -> str:
-    """Call the LLM to produce an on-demand roast for a chat member."""
+async def __generate_prozharka_text(chat_id: int, username: str) -> str:
+    """Call the LLM to produce an on-demand prozharka for a chat member."""
     llm = ChatGroq(
         model=ROAST_MODEL,
         api_key=config.GROQ_API_KEY,
@@ -654,15 +723,15 @@ async def __generate_roast_text(chat_id: int, username: str) -> str:
     )
     response = await llm.ainvoke([
         SystemMessage(content=(
-            "Ты луркморский обозреватель. Пишешь короткие (3-5 предложений) язвительные луркморские "
-            "портреты участников чата на основе их активности. "
-            "Стиль: беспощадный, смешной — дружеский стёб в духе Луркоморья, без личных оскорблений. "
-            "Только русский язык. Опирайся на конкретные темы из сообщений."
+            "Ты бот в группе друзей-геймеров. Пишешь короткие (3-5 предложений) смешные роасты "
+            "на участников чата на основе их активности. "
+            "Стиль: дружеский стёб, как подкалывают друг друга в компании — остро, но без злобы и оскорблений. "
+            "Только русский язык. Опирайся на конкретные темы из сообщений: игры, вопросы, привычки."
         )),
         HumanMessage(content=(
             f"Участник для роаста: {username}\n\n"
             f"{context_line}\n\n"
-            f"Напиши луркморский роаст на {username}."
+            f"Напиши смешной дружеский роаст на {username}."
         )),
     ])
     return response.content
@@ -696,24 +765,24 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             response = await llm.ainvoke([
                 SystemMessage(content=(
-                    "Ты луркморский оракул. Пишешь короткие (2-3 предложения) утренние псевдо-гороскопы "
-                    "для геймеров на основе их реальной активности в чате. "
-                    "Стиль: циничный, пессимистичный, смешной. Только русский язык. "
-                    "Опирайся на конкретные темы из сообщений пользователя — игры, вопросы, жалобы."
+                    "Ты бот в группе друзей-геймеров. Пишешь короткие (2-3 предложения) смешные утренние прогнозы "
+                    "для участников чата на основе их активности. "
+                    "Стиль: ироничный, немного саркастичный, но по-дружески. Только русский язык. "
+                    "Опирайся на конкретные темы из сообщений — игры, вопросы, жалобы."
                 )),
                 HumanMessage(content=(
                     f"Участник: {username}\n\n"
                     f"{context_line}\n\n"
-                    f"Напиши утренний гороскоп для {username}."
+                    f"Напиши смешной утренний прогноз для {username}."
                 )),
             ])
-            logger.info(f"Daily roast tokens for chat {chat_id}: {response.response_metadata.get('token_usage')}")
+            logger.info(f"Daily prozharka tokens for chat {chat_id}: {response.response_metadata.get('token_usage')}")
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"🌅 Утренний прогноз для {username}:\n\n{response.content}",
+                text=f"🌅 Доброе утро, {username}:\n\n{response.content}",
             )
         except Exception as error:
-            logger.warning(f"Daily roast failed for chat {chat_id}: {error}")
+            logger.warning(f"Daily prozharka failed for chat {chat_id}: {error}")
 
 
 # --- Background tracking handler (runs before all others) ---
@@ -803,15 +872,16 @@ def main() -> None:
     app.add_handler(CommandHandler("games", cmd_games))
     app.add_handler(CommandHandler("crossplay", cmd_crossplay))
     app.add_handler(CommandHandler("players", cmd_players))
-    app.add_handler(CommandHandler("research", cmd_research))
+    app.add_handler(CommandHandler("chto_takoe", cmd_chto_takoe))
     app.add_handler(CommandHandler("coop", cmd_coop))
     app.add_handler(CommandHandler("play", cmd_play))
     app.add_handler(CommandHandler("wish", cmd_wish))
-    app.add_handler(CommandHandler("explain", cmd_explain))
     app.add_handler(CommandHandler("achievements", cmd_achievements))
     app.add_handler(CommandHandler("feature", cmd_feature))
     app.add_handler(CommandHandler("features", cmd_features))
-    app.add_handler(CommandHandler("roast", cmd_roast))
+    app.add_handler(CommandHandler("rank", cmd_rank))
+    app.add_handler(CommandHandler("top", cmd_top))
+    app.add_handler(CommandHandler("prozharka", cmd_prozharka))
     app.add_handler(CommandHandler("ban", cmd_ban))
     app.add_handler(CommandHandler("unban", cmd_unban))
     app.add_handler(CommandHandler("known", cmd_known))

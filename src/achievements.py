@@ -188,6 +188,10 @@ async def increment_interaction(user_id: int, chat_id: int, username: str) -> No
         await db.commit()
 
 
+async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
+    return await __get_stats(user_id, chat_id)
+
+
 async def __get_stats(user_id: int, chat_id: int) -> dict[str, int]:
     async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
         cursor = await db.execute(

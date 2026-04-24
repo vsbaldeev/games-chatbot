@@ -1,8 +1,8 @@
 # Games Chatbot
 
-A sarcastic Telegram group chat bot for a Russian-speaking PS5 friend group. Built with a LangChain ReAct agent, a custom MCP tool server, and SQLite — deployed on a personal VPS within tight resource constraints.
+A Telegram group chat bot for a Russian-speaking PS5 friend group. Built with a LangChain ReAct agent, a custom MCP tool server, and SQLite — deployed on a personal VPS within tight resource constraints.
 
-The bot responds in the style of [Lurkmore](https://lurkmore.to) (a Russian satirical wiki), tracks per-user statistics, maintains conversation memory across sessions, and autonomously reacts to game-related messages.
+The bot has a friendly, sarcastic personality — jokes around, roasts chat members, and answers game questions with dry humour. It tracks per-user statistics, maintains conversation memory across sessions, and autonomously reacts to game-related messages.
 
 ---
 
@@ -27,10 +27,12 @@ LangChain ReAct Agent
       │
       ▼
 MCP stdio subprocess  (src/mcp_server.py)
-  ├── search_games(query)            → IGDB Apicalypse API
-  ├── get_game_details(game_id)      → IGDB (multiplayer_modes, platforms)
-  ├── get_steam_player_count(name)   → Steam Store + ISteamUserStats
-  └── find_coop_games(player_count)  → IGDB, PS5 platform ID 167
+  ├── search_games(query)                → IGDB Apicalypse API
+  ├── get_game_details(game_id)          → IGDB (multiplayer_modes, platforms)
+  ├── get_steam_player_count(name)       → Steam Store + ISteamUserStats
+  ├── find_coop_games(player_count)      → IGDB, PS5 platform ID 167
+  ├── find_new_ps5_online_games(days)    → IGDB, recent PS5 multiplayer releases
+  └── get_ps_store_sales(limit)          → psdeals.net RSS, current sale titles
 
 SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
   ├── message_store      LangChain SQLChatMessageHistory
@@ -47,7 +49,11 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 ## Features
 
 **Game research**
+- `/games` — rotates across 4 distinct queries each call: new PS5 multiplayer releases, current PS Store discounts on online games, combined new+sale overlap, and most-alive games by Steam player count; every result includes crossplay status and supported player count
+- `/chto_takoe <query>` — unified lookup: the agent decides whether the query is a game (uses IGDB + Steam) or a tech term (answers from knowledge); fixes the failure mode where `/research dlss` tried to look up DLSS as a game
 - Search games and fetch details via IGDB (platforms, genres, multiplayer modes, rating)
+- Recent PS5 multiplayer releases via IGDB filtered by release date and platform
+- Current PS Store sales via psdeals.net RSS, cross-referenced with IGDB multiplayer data
 - Live Steam player count via the public ISteamUserStats API
 - PS5 co-op finder: queries IGDB for games with `onlinecoopmax >= N` on platform 167
 - Honest crossplay reporting — IGDB has no explicit crossplay field, bot says so rather than guessing
@@ -66,15 +72,18 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - Filter hints are injected into each LLM call but not persisted to conversation history, so they don't accumulate tokens over time
 
 **Personality & memory**
-- Lurkmore-style sarcastic responses in Russian — encyclopaedic cynicism, gaming slang, mock footnotes
+- Friendly sarcastic tone in Russian — dry humour, light roasting, no jargon from specific wikis or subcultures
 - Per-chat conversation memory (SQLite, trimmed async to avoid event-loop blocking)
 - Autonomous keyword responses with a 60-second per-chat cooldown to stay within token budget
-- Daily morning roast at 09:00 MSK — LLM generates a horoscope from that user's own past messages (no other users' content is sent)
-- `/roast` — on-demand Lurkmore portrait of a randomly chosen chat member; the bot picks the target itself; 2-minute per-chat cooldown to limit token use
+- Daily morning прожарка at 09:00 MSK — LLM generates a funny forecast from that user's own past messages (no other users' content is sent)
+- `/prozharka` — on-demand прожарка of a randomly chosen chat member; the bot picks the target itself; 2-minute per-chat cooldown to limit token use
 
 **Gamification**
 - 12 achievements across 7 tracked stats: crossplay queries, tech explanations, night messages, research, co-op searches, session polls, sale notifications
 - `/achievements [all]` — individual or full-chat badge board
+- Rank system: 8 tiers from "Только распаковал PS5" 📦 to "Батя чата" 👑; points earned from all activity dimensions weighted by value (night messages ×3, polls ×5, sale alerts ×4, etc.) plus +1 per wishlist item
+- `/rank` — personal rank card with point breakdown and progress to next tier
+- `/top` — full-chat leaderboard sorted by points with medal emojis for top 3
 
 **Meta**
 - `/feature <description>` — LLM checks if already implemented, otherwise queues it; on next bot restart newly-shipped features are auto-announced to each chat
@@ -92,18 +101,19 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 
 | Command | Description |
 |---|---|
-| `/games` | Popular PS5 online games right now |
+| `/games` | New PS5 online releases, current sales, crossplay & player count — angle rotates each call |
+| `/chto_takoe <query>` | Game or tech term — agent decides and answers accordingly |
 | `/crossplay <game>` | Crossplay info between PS5 and PC |
 | `/players <game>` | Current Steam player count |
-| `/research <query>` | Full breakdown: platforms, multiplayer, online count |
 | `/coop <N>` | PS5 games with online co-op for N+ players |
 | `/play [HH:MM] [game]` | Session poll + optional Moscow-time reminder |
 | `/wish add\|list\|remove\|all` | Manage personal game wishlist |
-| `/explain <term>` | Tech term explained in plain language |
-| `/achievements [all]` | Sarcastic badge board |
+| `/achievements [all]` | Badge board |
+| `/rank` | Personal rank card with point breakdown and next-tier progress |
+| `/top` | Full-chat leaderboard sorted by points |
 | `/feature <description>` | Submit a feature request (30 s per-user cooldown) |
 | `/features` | List pending feature requests for this chat |
-| `/roast` | On-demand Lurkmore-style roast of a randomly chosen chat member |
+| `/prozharka` | On-demand прожарка of a randomly chosen chat member |
 | `/ban <game>` | Never suggest this game to me |
 | `/known <game>` | I already play this — skip in generic recommendations |
 | `/unban <game>` | Remove a filter |
@@ -121,9 +131,9 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 | LLM | Groq `openai/gpt-oss-20b` | 200 K tokens/day free tier; best TPD among free Groq models |
 | Agent | LangChain ReAct + AgentExecutor | Tool-use loop with bounded iterations |
 | Tool protocol | MCP (stdio) via langchain-mcp-adapters | Clean isolation; tool server restarts independently |
-| Game data | IGDB API (Twitch OAuth) | Structured multiplayer/platform metadata |
+| Game data | IGDB API (Twitch OAuth) | Structured multiplayer/platform/release metadata |
 | Player data | Steam public API | No auth required |
-| Sale data | psdeals.net RSS | Free, covers all regions |
+| Sale data | psdeals.net RSS | Free, covers all regions; used for both wishlist alerts and /games |
 | Storage | SQLite + aiosqlite | Zero-dep, WAL mode for concurrent readers |
 | Hosting | VPS (systemd) | 4 vCPU / 2 GB RAM, personal server |
 
@@ -153,7 +163,7 @@ Two different libraries (`aiosqlite` and SQLAlchemy from LangChain) share one da
 ```
 src/
 ├── config.py          env var loading and validation (fails fast at startup)
-├── mcp_server.py      standalone MCP server — IGDB + Steam tools, stdio transport
+├── mcp_server.py      standalone MCP server — IGDB + Steam + psdeals tools, stdio transport
 ├── agent.py           LangChain ReAct agent, retry logic, MCP crash recovery
 ├── memory.py          SQLChatMessageHistory wrapper, async trim helper
 ├── bot.py             all Telegram handlers, jobs, startup
@@ -161,7 +171,8 @@ src/
 ├── psstore.py         psdeals.net RSS fetch, sale dedup, announced_sales table
 ├── achievements.py    12 achievements, 7 tracked stats, migration helper
 ├── features.py        feature-request queue, LLM-based implementation checker
-└── game_filters.py    per-user banned/known game filter lists (aiosqlite)
+├── game_filters.py    per-user banned/known game filter lists (aiosqlite)
+└── ranks.py           8-tier rank system: point computation, leaderboard, breakdown
 ```
 
 ---
@@ -184,20 +195,19 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 **Register commands** so Telegram shows autocomplete in the chat. Send `/setcommands` to BotFather, select your bot, then paste:
 
 ```
-games - популярные игры для PS5
+games - свежие игры для PS5: новинки и скидки
+chto_takoe - что это? игра или термин — бот разберётся
 crossplay - кросплей <игра>
 players - онлайн игроков <игра>
-research - анализ <запрос>
 coop - кооп на N игроков
 play - опрос кто играет сегодня
 wish - вишлист игр
-explain - объяснить термин
 achievements - достижения
+prozharka - случайный участник получает по заслугам
 feature - предложить фичу
 features - список запросов фич
-roast - луркморский портрет участника
 ban - никогда не предлагать <игра>
-known - я уже знаю эту игру <игра>
+known - уже знаю эту игру <игра>
 unban - убрать из фильтров <игра>
 myfilters - мои фильтры рекомендаций
 help - помощь
@@ -211,7 +221,7 @@ help - помощь
 2. Go to **API Keys** → **Create API Key**.
 3. Save the key as `GROQ_API_KEY`.
 
-The bot uses model `openai/gpt-oss-20b`. The free tier gives 200 000 tokens/day and 30 requests/minute.
+The main agent uses `openai/gpt-oss-20b`. Прожарки (on-demand `/prozharka` and the daily horoscope) use `llama-3.3-70b-versatile` for better creative output. The free tier gives 200 000 tokens/day and 30 requests/minute for the agent model.
 
 ---
 
@@ -325,12 +335,11 @@ The compose file sets `mem_limit: 800m` and `memswap_limit: 800m`. Estimated ste
 
 ---
 
-## Groq free-tier limits (`openai/gpt-oss-20b`)
+## Groq free-tier limits
 
-| Limit | Value |
-|---|---|
-| Requests per minute | 30 |
-| Tokens per day | 200 000 |
-| Requests per day | 1 000 |
+| Model | Used for | RPM | Tokens/day | Req/day |
+|---|---|---|---|---|
+| `openai/gpt-oss-20b` | Main agent (all commands) | 30 | 200 000 | 1 000 |
+| `llama-3.3-70b-versatile` | `/prozharka` + daily horoscope | 30 | 100 000 | 1 000 |
 
-The bot uses ~80% of the daily token budget as a soft ceiling. Rate-limit hits (HTTP 429) are retried with exponential back-off (5 s → 10 s → 20 s). Daily quota exhaustion surfaces as an in-character static message; the bot recovers automatically the next day.
+The agent uses ~80% of its daily token budget as a soft ceiling. Rate-limit hits (HTTP 429) are retried with exponential back-off (5 s → 10 s → 20 s). Daily quota exhaustion surfaces as an in-character static message; the bot recovers automatically the next day.
