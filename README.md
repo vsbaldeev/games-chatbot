@@ -38,7 +38,8 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
   ├── chat_members       member registry for achievements
   ├── user_stats         per-user counters (7 tracked dimensions)
   ├── announced_sales    dedup table, 7-day TTL
-  └── feature_requests   pending feature queue
+  ├── feature_requests   pending feature queue
+  └── game_filters       per-user banned/known game lists
 ```
 
 ---
@@ -57,11 +58,19 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - Daily PS Store sale scan via [psdeals.net](https://psdeals.net) RSS; notifies chats when wishlist games are discounted (7-day deduplication prevents re-spam)
 - `/explain` — explains technical terms (ray tracing, DLSS, VRR…) in plain language
 
+**Recommendation filters**
+- `/ban <game>` — permanently excludes a game from suggestions for that user
+- `/known <game>` — marks a game as already known/played; excluded from generic recommendations
+- `/unban <game>` — removes either kind of filter
+- `/myfilters` — lists active filters
+- Filter hints are injected into each LLM call but not persisted to conversation history, so they don't accumulate tokens over time
+
 **Personality & memory**
 - Lurkmore-style sarcastic responses in Russian — encyclopaedic cynicism, gaming slang, mock footnotes
 - Per-chat conversation memory (SQLite, trimmed async to avoid event-loop blocking)
 - Autonomous keyword responses with a 60-second per-chat cooldown to stay within token budget
 - Daily morning roast at 09:00 MSK — LLM generates a horoscope from that user's own past messages (no other users' content is sent)
+- `/roast` — on-demand Lurkmore portrait of a randomly chosen chat member; the bot picks the target itself; 2-minute per-chat cooldown to limit token use
 
 **Gamification**
 - 12 achievements across 7 tracked stats: crossplay queries, tech explanations, night messages, research, co-op searches, session polls, sale notifications
@@ -94,6 +103,11 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 | `/achievements [all]` | Sarcastic badge board |
 | `/feature <description>` | Submit a feature request (30 s per-user cooldown) |
 | `/features` | List pending feature requests for this chat |
+| `/roast` | On-demand Lurkmore-style roast of a randomly chosen chat member |
+| `/ban <game>` | Never suggest this game to me |
+| `/known <game>` | I already play this — skip in generic recommendations |
+| `/unban <game>` | Remove a filter |
+| `/myfilters` | Show active filters |
 | `/help` | Command list |
 
 ---
@@ -138,15 +152,16 @@ Two different libraries (`aiosqlite` and SQLAlchemy from LangChain) share one da
 
 ```
 src/
-├── config.py        env var loading and validation (fails fast at startup)
-├── mcp_server.py    standalone MCP server — IGDB + Steam tools, stdio transport
-├── agent.py         LangChain ReAct agent, retry logic, MCP crash recovery
-├── memory.py        SQLChatMessageHistory wrapper, async trim helper
-├── bot.py           all Telegram handlers, jobs, startup
-├── wishlist.py      wishlist CRUD (aiosqlite)
-├── psstore.py       psdeals.net RSS fetch, sale dedup, announced_sales table
-├── achievements.py  12 achievements, 7 tracked stats, migration helper
-└── features.py      feature-request queue, LLM-based implementation checker
+├── config.py          env var loading and validation (fails fast at startup)
+├── mcp_server.py      standalone MCP server — IGDB + Steam tools, stdio transport
+├── agent.py           LangChain ReAct agent, retry logic, MCP crash recovery
+├── memory.py          SQLChatMessageHistory wrapper, async trim helper
+├── bot.py             all Telegram handlers, jobs, startup
+├── wishlist.py        wishlist CRUD (aiosqlite)
+├── psstore.py         psdeals.net RSS fetch, sale dedup, announced_sales table
+├── achievements.py    12 achievements, 7 tracked stats, migration helper
+├── features.py        feature-request queue, LLM-based implementation checker
+└── game_filters.py    per-user banned/known game filter lists (aiosqlite)
 ```
 
 ---
@@ -180,6 +195,11 @@ explain - объяснить термин
 achievements - достижения
 feature - предложить фичу
 features - список запросов фич
+roast - луркморский портрет участника
+ban - никогда не предлагать <игра>
+known - я уже знаю эту игру <игра>
+unban - убрать из фильтров <игра>
+myfilters - мои фильтры рекомендаций
 help - помощь
 ```
 

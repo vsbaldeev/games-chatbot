@@ -8,6 +8,8 @@ import logging
 import random
 import re
 
+from telegram.error import BadRequest
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from telegram import Update
@@ -22,7 +24,7 @@ from telegram.ext import (
     filters,
 )
 
-from src import achievements, config, features, psstore, wishlist
+from src import achievements, config, features, game_filters, psstore, wishlist
 from src.agent import DailyLimitError, RateLimitError, init_agent, run_agent
 from src.memory import get_chat_history, get_recent_messages
 
@@ -44,6 +46,41 @@ GAME_KEYWORDS = re.compile(
 )
 
 TIME_PATTERN = re.compile(r"^\d{1,2}:\d{2}$")
+TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
+
+# Poll question templates. {game} is substituted when a game name is provided.
+PLAY_QUESTIONS_WITH_GAME = [
+    "Кто играет сегодня в {game}?",
+    "Сегодняшняя сессия по {game} — кто идёт?",
+    "Собираем отряд в {game} — ты как?",
+    "{game} сегодня — кто в деле?",
+    "Кто готов страдать в {game} этим вечером?",
+    "Залетаем в {game}? Отмечайтесь.",
+]
+PLAY_QUESTIONS_NO_GAME = [
+    "Кто играет сегодня вечером?",
+    "Собираем лобби — кто в деле?",
+    "Игровая сессия сегодня — ты как?",
+    "Кто готов страдать этим вечером?",
+    "Вечерний гейминг — отмечайтесь.",
+    "Залетаем сегодня? Кто есть?",
+]
+
+# Each entry is one complete set of poll options (2–4 items).
+PLAY_OPTION_SETS = [
+    ["Я в деле 🎮", "Может быть 🤔", "Не смогу 😢"],
+    ["Врываюсь 🔥", "Подумаю 🤷", "Пасс 🙅"],
+    ["Готов 👾", "Возможно 🎲", "Занят 😴"],
+    ["Буду! 🎯", "Может чуть позже ⏰", "Без меня 🫡"],
+    ["Уже качаю 📥", "Посмотрим 👀", "Нет сил 💀"],
+    ["Первым в лобби 🏆", "Скорее всего ✅", "Нет 🚫"],
+    ["Да! 🙌", "Буду поздно 🌙", "Только посмотреть 👁", "Пасс 💨"],
+    ["Врываюсь 🚀", "Приду чуть позже ⏰", "Может быть 🤔", "Не сегодня 😵"],
+    ["Уже в лобби 🟢", "Ещё думаю 🟡", "Не могу 🔴"],
+    ["ГГ 🏅", "Может быть 🃏", "АФК сегодня 💤"],
+    ["Да, точно 💪", "Постараюсь 🤞", "Вряд ли 😬", "Точно нет ❌"],
+    ["Готов к бою ⚔️", "Залечу позже 🌙", "Пасс 🛌"],
+]
 MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
 # Cooldown between autonomous (keyword-triggered) responses in a chat.
@@ -52,7 +89,25 @@ AUTONOMOUS_COOLDOWN_SECONDS = 60
 
 # Per-user cooldown on /feature to prevent token abuse.
 FEATURE_COOLDOWN_SECONDS = 30
+
+# Per-chat cooldown on /roast to limit token burn on demand.
+ROAST_COOLDOWN_SECONDS = 120
+ROAST_MODEL = "llama-3.3-70b-versatile"
 __feature_last_used: dict[int, float] = {}
+
+
+def __to_telegram_md(text: str) -> str:
+    """Sanitise LLM output for Telegram Markdown v1.
+
+    The LLM sometimes produces standard Markdown (**bold**, tables) despite
+    the system prompt. This converts the most common offenders so parse_mode
+    does not silently corrupt the message.
+    """
+    # **bold** → *bold*  (Telegram v1 uses single asterisk)
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text, flags=re.DOTALL)
+    # Drop table separator rows (|---|---| etc.) — Telegram renders them as raw pipes
+    lines = [line for line in text.splitlines() if not TABLE_SEPARATOR_RE.match(line)]
+    return "\n".join(lines)
 
 
 def fallback_username(user_id: int) -> str:
@@ -109,10 +164,17 @@ async def __send_agent_reply(update: Update, username: str, message_text: str) -
     user_id = update.effective_user.id
     numeric_chat_id = update.effective_chat.id
 
+    user_filter_map = await game_filters.get_filters(user_id, numeric_chat_id)
+    filter_hint = game_filters.build_filter_hint(user_filter_map)
+
     await update.message.chat.send_action("typing")
     try:
-        response = await run_agent(chat_id, username, message_text)
-        await update.message.reply_text(response)
+        response = await run_agent(chat_id, username, message_text, filter_hint=filter_hint)
+        formatted = __to_telegram_md(response)
+        try:
+            await update.message.reply_text(formatted, parse_mode="Markdown")
+        except BadRequest:
+            await update.message.reply_text(response)
         await achievements.increment_interaction(user_id, numeric_chat_id, username)
     except DailyLimitError:
         logger.warning(f"Daily token quota exhausted for chat {chat_id}")
@@ -154,7 +216,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/explain <термин> — объяснение технического термина\n"
         "/achievements [all] — твои достижения (или всех)\n"
         "/feature <запрос> — предложить фичу (бот проверит, нет ли её уже)\n"
-        "/features — список ожидающих фич от этого чата\n\n"
+        "/features — список ожидающих фич от этого чата\n"
+        "/roast — луркморский портрет случайного участника (бот выбирает сам)\n\n"
+        "Фильтры рекомендаций:\n"
+        "/ban <игра> — никогда не предлагать эту игру\n"
+        "/known <игра> — я уже знаю/играю, не предлагать\n"
+        "/unban <игра> — убрать из фильтров\n"
+        "/myfilters — посмотреть свои фильтры\n\n"
         "Или просто упомяни меня или напиши про игры — я не слепой."
     )
 
@@ -251,12 +319,14 @@ async def cmd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_play(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reminder_time, game_name = __parse_play_args(context.args or [])
 
-    poll_question = (
-        f"Кто играет сегодня в {game_name}?" if game_name else "Кто играет сегодня вечером?"
-    )
+    if game_name:
+        poll_question = random.choice(PLAY_QUESTIONS_WITH_GAME).format(game=game_name)
+    else:
+        poll_question = random.choice(PLAY_QUESTIONS_NO_GAME)
+
     await update.message.reply_poll(
         question=poll_question,
-        options=["Я в деле 🎮", "Может быть 🤔", "Не смогу 😢"],
+        options=random.choice(PLAY_OPTION_SETS),
         is_anonymous=False,
     )
 
@@ -431,6 +501,104 @@ async def cmd_features(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    game_name = " ".join(context.args) if context.args else None
+    if not game_name:
+        await update.message.reply_text("Какую игру баним? Пример: /ban Fortnite")
+        return
+    user = update.effective_user
+    await game_filters.set_filter(user.id, update.effective_chat.id, game_name, game_filters.FILTER_BANNED)
+    await update.message.reply_text(
+        f"«{game_name}» — в чёрный список. Бот больше не будет это предлагать."
+    )
+
+
+async def cmd_unban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    game_name = " ".join(context.args) if context.args else None
+    if not game_name:
+        await update.message.reply_text("Что разбаниваем? Пример: /unban Fortnite")
+        return
+    user = update.effective_user
+    removed = await game_filters.remove_filter(user.id, update.effective_chat.id, game_name)
+    if removed:
+        await update.message.reply_text(f"«{game_name}» — убрана из фильтров.")
+    else:
+        await update.message.reply_text(
+            f"«{game_name}» не найдена в фильтрах. Проверь /myfilters."
+        )
+
+
+async def cmd_known(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    game_name = " ".join(context.args) if context.args else None
+    if not game_name:
+        await update.message.reply_text("Какую игру знаешь? Пример: /known Apex Legends")
+        return
+    user = update.effective_user
+    await game_filters.set_filter(user.id, update.effective_chat.id, game_name, game_filters.FILTER_KNOWN)
+    await update.message.reply_text(
+        f"«{game_name}» — помечена как известная. Бот не будет предлагать в общих рекомендациях."
+    )
+
+
+async def cmd_roast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+
+    now = datetime.datetime.now().timestamp()
+    last_roast = context.chat_data.get("last_roast_ts", 0.0)
+    if now - last_roast < ROAST_COOLDOWN_SECONDS:
+        remaining = int(ROAST_COOLDOWN_SECONDS - (now - last_roast))
+        await update.message.reply_text(
+            f"Роаст только что был. Остынь — ещё {remaining} сек."
+        )
+        return
+
+    members = await achievements.get_chat_members(chat_id)
+    if not members:
+        await update.message.reply_text(
+            "В базе нет участников. Пусть сначала кто-нибудь напишет в чат."
+        )
+        return
+
+    target_username = random.choice(members)[1]
+
+    await update.message.chat.send_action("typing")
+    try:
+        roast_text = await __generate_roast_text(chat_id, target_username)
+        context.chat_data["last_roast_ts"] = datetime.datetime.now().timestamp()
+        formatted = __to_telegram_md(roast_text)
+        try:
+            await update.message.reply_text(
+                f"🔥 Луркморский портрет {target_username}:\n\n{formatted}",
+                parse_mode="Markdown",
+            )
+        except BadRequest:
+            await update.message.reply_text(
+                f"🔥 Луркморский портрет {target_username}:\n\n{roast_text}"
+            )
+    except Exception as error:
+        logger.error(f"Roast failed for {target_username} in chat {chat_id}: {error}")
+        await update.message.reply_text("Роаст не задался. Groq на перекуре — попробуй позже.")
+
+
+async def cmd_myfilters(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    user_filter_map = await game_filters.get_filters(user.id, update.effective_chat.id)
+    banned = user_filter_map.get(game_filters.FILTER_BANNED, [])
+    known = user_filter_map.get(game_filters.FILTER_KNOWN, [])
+    if not banned and not known:
+        await update.message.reply_text(
+            "Фильтров нет. Используй /ban <игра> или /known <игра> чтобы добавить."
+        )
+        return
+    lines = []
+    if banned:
+        lines.append("🚫 Забанено:\n" + "\n".join(f"  • {game}" for game in banned))
+    if known:
+        lines.append("✅ Уже знаю:\n" + "\n".join(f"  • {game}" for game in known))
+    lines.append("\nУбрать фильтр: /unban <игра>")
+    await update.message.reply_text("\n".join(lines))
+
+
 # --- Job callbacks ---
 
 async def __session_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -456,13 +624,57 @@ async def __check_ps_store_sales(context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+async def __get_user_history_text(chat_id: int, username: str) -> str:
+    """Return recent messages by username as a plain text block."""
+    history = get_chat_history(str(chat_id))
+    recent = await get_recent_messages(history, 40)
+    user_prefix = f"[{username}]:"
+    user_messages = [
+        msg.content for msg in recent
+        if hasattr(msg, "content")
+        and isinstance(msg.content, str)
+        and msg.content.startswith(user_prefix)
+    ]
+    return "\n".join(user_messages)
+
+
+async def __generate_roast_text(chat_id: int, username: str) -> str:
+    """Call the LLM to produce an on-demand roast for a chat member."""
+    llm = ChatGroq(
+        model=ROAST_MODEL,
+        api_key=config.GROQ_API_KEY,
+        temperature=0.95,
+        max_tokens=250,
+    )
+    history_text = await __get_user_history_text(chat_id, username)
+    context_line = (
+        f"Последние сообщения {username}:\n{history_text}"
+        if history_text
+        else f"{username} почти не писал — роастим по легенде, с фантазией."
+    )
+    response = await llm.ainvoke([
+        SystemMessage(content=(
+            "Ты луркморский обозреватель. Пишешь короткие (3-5 предложений) язвительные луркморские "
+            "портреты участников чата на основе их активности. "
+            "Стиль: беспощадный, смешной — дружеский стёб в духе Луркоморья, без личных оскорблений. "
+            "Только русский язык. Опирайся на конкретные темы из сообщений."
+        )),
+        HumanMessage(content=(
+            f"Участник для роаста: {username}\n\n"
+            f"{context_line}\n\n"
+            f"Напиши луркморский роаст на {username}."
+        )),
+    ])
+    return response.content
+
+
 async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_ids = await achievements.get_all_chat_ids()
     if not chat_ids:
         return
 
     llm = ChatGroq(
-        model="openai/gpt-oss-20b",
+        model=ROAST_MODEL,
         api_key=config.GROQ_API_KEY,
         temperature=0.9,
         max_tokens=200,
@@ -472,22 +684,12 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
         members = await achievements.get_chat_members(chat_id)
         if not members:
             continue
-        user_id, username = random.choice(members)
+        target_user_id, username = random.choice(members)
 
-        history = get_chat_history(str(chat_id))
-        recent = await get_recent_messages(history, 30)
-
-        # Only use messages from the roasted user to avoid leaking other people's content.
-        user_prefix = f"[{username}]:"
-        user_messages = [
-            msg.content for msg in recent
-            if hasattr(msg, "content")
-            and isinstance(msg.content, str)
-            and msg.content.startswith(user_prefix)
-        ]
-        history_text = (
-            "\n".join(user_messages)
-            if user_messages
+        history_text = await __get_user_history_text(chat_id, username)
+        context_line = (
+            f"Последние сообщения {username}:\n{history_text}"
+            if history_text
             else f"{username} ещё не проявил себя в чате — пишем гороскоп вслепую."
         )
 
@@ -501,7 +703,7 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )),
                 HumanMessage(content=(
                     f"Участник: {username}\n\n"
-                    f"Последние сообщения {username}:\n{history_text}\n\n"
+                    f"{context_line}\n\n"
                     f"Напиши утренний гороскоп для {username}."
                 )),
             ])
@@ -556,6 +758,7 @@ async def __on_startup(application: Application) -> None:
     await wishlist.init_tables()
     await achievements.init_tables()
     await features.init_table()
+    await game_filters.init_tables()
     await psstore.init_sale_tracking()
 
     # Check pending feature requests against current feature set and announce newly implemented ones
@@ -608,6 +811,11 @@ def main() -> None:
     app.add_handler(CommandHandler("achievements", cmd_achievements))
     app.add_handler(CommandHandler("feature", cmd_feature))
     app.add_handler(CommandHandler("features", cmd_features))
+    app.add_handler(CommandHandler("roast", cmd_roast))
+    app.add_handler(CommandHandler("ban", cmd_ban))
+    app.add_handler(CommandHandler("unban", cmd_unban))
+    app.add_handler(CommandHandler("known", cmd_known))
+    app.add_handler(CommandHandler("myfilters", cmd_myfilters))
 
     app.add_handler(
         MessageHandler(
