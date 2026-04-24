@@ -3,11 +3,10 @@ import logging
 import sys
 from typing import Optional
 
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
 
 from src import config
 from src.memory import get_chat_history, trim_history
@@ -25,7 +24,7 @@ class DailyLimitError(Exception):
 
 __mcp_client: Optional[MultiServerMCPClient] = None
 __agent_tools: Optional[list] = None
-__agent_executor: Optional[RunnableWithMessageHistory] = None
+__agent_executor = None
 
 SYSTEM_PROMPT = """Ты — игровой бот, статья о котором была бы на Луркоморье под заголовком «Нихуя не знает, но мнение имеет».
 Обслуживаешь группу деградантов с PS5, которые называют это «гейминг-сессиями».
@@ -85,29 +84,7 @@ async def init_agent() -> None:
         max_tokens=512,
     )
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ]
-    )
-
-    agent = create_react_agent(llm, __agent_tools, prompt)
-    executor = AgentExecutor(
-        agent=agent,
-        tools=__agent_tools,
-        verbose=False,
-        handle_parsing_errors=True,
-        max_iterations=5,
-    )
-    __agent_executor = RunnableWithMessageHistory(
-        executor,
-        get_chat_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-    )
+    __agent_executor = create_react_agent(llm, __agent_tools, prompt=SYSTEM_PROMPT)
     logger.info(f"MCP agent initialized with {len(__agent_tools)} tools")
 
 
@@ -117,16 +94,24 @@ async def run_agent(chat_id: str, username: str, message_text: str) -> str:
 
     history = get_chat_history(chat_id)
     await trim_history(history, config.MAX_HISTORY_MESSAGES)
+    past_messages = await asyncio.to_thread(lambda: history.messages)
     prefixed_input = f"[{username}]: {message_text}"
+    input_messages = past_messages + [HumanMessage(content=prefixed_input)]
 
     for reinit_attempt in range(2):
         try:
             result = await __invoke_with_retry(
                 __agent_executor,
-                {"input": prefixed_input},
-                config={"configurable": {"session_id": chat_id}},
+                {"messages": input_messages},
             )
-            return result["output"]
+            ai_message = result["messages"][-1]
+
+            def save_to_history() -> None:
+                history.add_user_message(prefixed_input)
+                history.add_message(ai_message)
+
+            await asyncio.to_thread(save_to_history)
+            return ai_message.content
         except (BrokenPipeError, EOFError, ConnectionResetError) as error:
             if reinit_attempt == 0:
                 logger.warning(f"MCP subprocess crashed, reinitializing: {error}")
