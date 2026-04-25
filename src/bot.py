@@ -850,18 +850,38 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await tg_file.download_to_memory(buffer)
         b64_image = base64.b64encode(buffer.getvalue()).decode()
 
+        llm = ChatGroq(
+            model=VISION_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.1,
+            max_tokens=5,
+        )
+        check = await llm.ainvoke([
+            HumanMessage(content=[
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
+                {"type": "text", "text": (
+                    "Is this a real photograph taken by a person with a camera "
+                    "(photo of real life, people, places, objects, setups)? "
+                    "Answer only YES or NO."
+                )},
+            ]),
+        ])
+        if not check.content.strip().upper().startswith("YES"):
+            logger.info(f"Photo skipped (not real photo) in chat {chat_id}")
+            return
+
         user_text = (
             msg.caption
             or "Прокомментируй это изображение в своём стиле — саркастично, по-геймерски, коротко."
         )
 
-        llm = ChatGroq(
+        llm_reply = ChatGroq(
             model=VISION_MODEL,
             api_key=config.GROQ_API_KEY,
             temperature=0.8,
             max_tokens=300,
         )
-        response = await llm.ainvoke([
+        response = await llm_reply.ainvoke([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=[
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
