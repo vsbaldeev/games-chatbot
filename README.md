@@ -38,9 +38,10 @@ MCP stdio subprocess  (src/mcp_server.py)
   ├── search_games(query)                → IGDB Apicalypse API
   ├── get_game_details(game_id)          → IGDB (multiplayer_modes, platforms)
   ├── get_steam_player_count(name)       → Steam Store + ISteamUserStats
-  ├── find_coop_games(player_count)      → IGDB, PS5 platform ID 167
+  ├── find_coop_games(player_count, offset) → IGDB, PS5 platform ID 167; offset paginates results
   ├── find_new_ps5_online_games(days)    → IGDB, recent PS5 multiplayer releases
-  └── get_ps_store_sales(limit)          → psdeals.net RSS, current sale titles
+  ├── get_ps_store_sales(limit)          → psdeals.net RSS, current sale titles
+  └── get_ps_store_price_tr(game_name)   → Turkish PS Store link + TRY price via psdeals.net
 
 SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
   ├── message_store      LangChain SQLChatMessageHistory (capped: 40 user msgs per chat)
@@ -55,12 +56,13 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 ## Features
 
 **Game research**
-- `/games` — rotates across 4 distinct queries each call: new PS5 multiplayer releases, current PS Store discounts on online games, combined new+sale overlap, and most-alive games by Steam player count; every result includes crossplay status and supported player count
-- `/coop` — finds one PS5 co-op game suitable for 3–8 players; picks the best PS5-exclusive or crossplay option and explains multiplayer details
+- `/games` — rotates across 4 distinct queries each call: new PS5 multiplayer releases, current PS Store discounts, combined new+sale overlap, and most-alive games by Steam player count; every result includes crossplay status, player count, TRY price, and a direct Turkish PS Store link
+- `/coop` — finds one PS5 co-op game for 3–8 players using a random IGDB offset so suggestions vary each call; includes crossplay info, TRY price, and Turkish PS Store link
 - Search games and fetch details via IGDB (platforms, genres, multiplayer modes, rating)
 - Recent PS5 multiplayer releases via IGDB filtered by release date and platform
 - Current PS Store sales via psdeals.net RSS, cross-referenced with IGDB multiplayer data
 - Live Steam player count via the public ISteamUserStats API
+- Turkish PS Store prices fetched from psdeals.net; always returns a `store.playstation.com/tr-tr` search link as fallback
 
 **Group utilities**
 - Daily evening nudge at 21:00 MSK — bot sends a random "who's playing tonight?" message to all chats
