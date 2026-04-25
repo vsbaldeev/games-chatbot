@@ -93,18 +93,6 @@ MAX_ROASTS_PER_USER_PER_DAY = 2
 # Track per-user roast count per day per chat: {chat_id: {date_str: {username: count}}}
 __daily_roast_counts: dict[int, dict[str, dict[str, int]]] = {}
 
-ROAST_WORLD_THEMES = [
-    "который купил NFT на последние деньги",
-    "который ждёт реstock геймпада уже третий год",
-    "который объясняет маме что такое battle royale",
-    "который скачивает 150GB обновление по мобильному интернету",
-    "который проиграл 5 раз подряд и винит пинг",
-    "который читает гайд как пройти туториал",
-    "который покупает 99 DLC к игре за полную цену",
-    "который пытается найти трёх друзей для кооп-игры в 2 часа ночи",
-    "который пропустил старт продаж новой консоли",
-    "который требует кросплей с PS2",
-]
 
 ROULETTE_HIT = [
     "🔫 Барабан крутится... @{username} — *БАХ!* 💀 Сегодня не твой день. Бывает.",
@@ -500,8 +488,7 @@ async def __generate_prozharka_text(chat_id: int, target_username: str) -> str:
     if history_text and random.random() < 0.5:
         context_line = f"Последние сообщения @{target_username} в чате:\n{history_text}"
     else:
-        theme = random.choice(ROAST_WORLD_THEMES)
-        context_line = f"Придумай роаст на @{target_username} {theme}."
+        context_line = f"Придумай оригинальную тему для роаста на @{target_username} — что-нибудь из жизни геймера или просто абсурдное."
 
     response = await llm.ainvoke([
         SystemMessage(content=(
@@ -560,8 +547,7 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
         if history_text and random.random() < 0.5:
             context_line = f"Последние сообщения @{target_username}:\n{history_text}"
         else:
-            theme = random.choice(ROAST_WORLD_THEMES)
-            context_line = f"Придумай роаст на @{target_username} {theme}."
+            context_line = f"Придумай оригинальную тему для роаста на @{target_username} — что-нибудь из жизни геймера или просто абсурдное."
 
         try:
             response = await llm.ainvoke([
