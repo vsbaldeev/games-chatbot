@@ -591,12 +591,12 @@ async def __generate_prozharka_text(chat_id: int, target_username: str) -> str:
     if is_supportive:
         style_instruction = (
             f"Напиши искреннее тёплое поддерживающее сообщение для @{target_username} — "
-            f"как лучший друг, который реально верит в него. Без сарказма, с душой. До 3 предложений."
+            f"как лучший друг, который реально верит в него. Без сарказма, с душой. До 2 предложений."
         )
     else:
         style_instruction = (
             f"Напиши жёсткий саркастический роаст на @{target_username} в стиле стендап-комика. "
-            f"Максимум 3 предложения. Злой юмор, чёрный сарказм, смешно и больно. "
+            f"Максимум 2 предложения. Злой юмор, чёрный сарказм, смешно и больно. "
             f"Обязательно упомяни @{target_username} в тексте."
         )
 
@@ -850,7 +850,10 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await tg_file.download_to_memory(buffer)
         b64_image = base64.b64encode(buffer.getvalue()).decode()
 
-        user_text = msg.caption or "Прокомментируй это изображение."
+        user_text = (
+            msg.caption
+            or "Прокомментируй это изображение в своём стиле — саркастично, по-геймерски, коротко."
+        )
 
         llm = ChatGroq(
             model=VISION_MODEL,
