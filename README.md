@@ -63,14 +63,14 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - Live Steam player count via the public ISteamUserStats API
 
 **Group utilities**
-- `/play [HH:MM] [game]` — creates a Telegram poll, schedules a reminder in Moscow time
+- Daily evening nudge at 21:00 MSK — bot sends a random "who's playing tonight?" message to all chats
 - Daily PS Store sale scan via [psdeals.net](https://psdeals.net) RSS; notifies chats when wishlist games are discounted (7-day deduplication)
 - Reply by @mentioning the bot or replying to any of its messages — handles any question directly
 
 **Voice & video**
-- Bot listens to voice messages and circle video notes (50% chance per message)
-- Transcribes via Groq `whisper-large-v3-turbo`, replies with the transcript + a comment
-- Falls back to transcript-only if the LLM quota is exhausted
+- Bot listens to voice messages and circle video notes (25% chance in groups; 100% when bot is @mentioned in the caption)
+- Transcribes via Groq `whisper-large-v3-turbo`, replies with a comment (no transcript echo)
+- Always responds in private chat
 
 **Personality & memory**
 - Friendly sarcastic tone in Russian — dry humour, light roasting, no jargon from specific wikis or subcultures
@@ -89,7 +89,8 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - Each member can be roasted at most twice per day (shared limit between daily job and `/prozharka`)
 
 **Russian roulette**
-- Daily at 15:00 MSK the bot picks one random chat member as the day's "victim" and announces it dramatically
+- Daily at 15:00 MSK the bot picks one random chat member and fires — 50% chance to hit, 50% chance to miss
+- Both outcomes have distinct dramatic announcements (8 hit variants, 7 miss variants)
 - Requires at least 2 members in the chat
 
 **Gamification**
@@ -107,7 +108,6 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 |---|---|
 | `/games` | New PS5 online releases, current sales, crossplay & player count — angle rotates each call |
 | `/coop` | Find one PS5 co-op game for 3–8 players (exclusive or crossplay) |
-| `/play [HH:MM] [game]` | Session poll + optional Moscow-time reminder |
 | `/achievements [all]` | Badge board |
 | `/rank` | Personal rank card with point breakdown and next-tier progress |
 | `/top` | Full-chat leaderboard sorted by points |
@@ -198,7 +198,6 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 ```
 games - свежие игры для PS5: новинки и скидки
 coop - кооп-игра для 3-8 участников
-play - опрос кто играет сегодня
 achievements - достижения
 rank - мой ранг
 top - рейтинг чата
