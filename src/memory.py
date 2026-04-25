@@ -11,7 +11,7 @@ DB_URL = f"sqlite:///{config.SQLITE_DB_PATH}"
 def get_chat_history(session_id: str) -> SQLChatMessageHistory:
     return SQLChatMessageHistory(
         session_id=session_id,
-        connection_string=DB_URL,
+        connection=DB_URL,
         table_name="message_store",
     )
 
