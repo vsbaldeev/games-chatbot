@@ -16,24 +16,23 @@ class Rank:
 
 # Ordered lowest → highest. get_rank() returns the highest tier the user qualifies for.
 RANKS = [
-    Rank("Только распаковал PS5",         "📦",   0),
-    Rank("Читает инструкцию к геймпаду", "📖",  15),
-    Rank("Случайный казуал",              "🕹️",  35),
-    Rank("Задрот с потенциалом",          "😤",  70),
-    Rank("Чемпион дивана",                "🛋️", 120),
-    Rank("Хардкорный нормис",             "⚡",  200),
-    Rank("Профессиональный задрот",       "🏆",  300),
-    Rank("Батя чата",                     "👑",  450),
+    Rank("Коробка ещё тёплая",             "📦",   0),
+    Rank("Читает инструкцию к пульту",     "📖",  15),
+    Rank("Казуал с амбициями",             "🕹️",  35),
+    Rank("Диванный эксперт",               "🛋️",  70),
+    Rank("Ночная легенда своей комнаты",   "🌙",  120),
+    Rank("Задрот в отрицании",             "😤",  200),
+    Rank("Легенда среди своих",            "🔥",  300),
+    Rank("Батя чата",                      "👑",  450),
 ]
 
 # (stat_key, multiplier, human label for breakdown)
 POINT_SOURCES = [
     ("total_interactions",  1, "взаимодействий с ботом"),
     ("night_messages",      3, "ночных подвигов"),
-    ("play_polls_created",  5, "организованных сессий"),
-    ("sale_notifications",  4, "найденных скидок"),
+    ("coop_queries",        4, "кооп-запросов"),
+    ("sale_notifications",  3, "найденных скидок"),
     ("research_queries",    2, "исследований"),
-    ("coop_queries",        2, "кооп-запросов"),
     ("crossplay_queries",   1, "проверок кросплея"),
 ]
 
