@@ -36,62 +36,62 @@ ALL_ACHIEVEMENTS = [
     Achievement(
         "crossplay_paranoid", "🔍",
         "ПК-шник в душе",
-        "Спрашивал про кросплей 3+ раз. Очевидно, надеялся, что ответ изменится.",
+        "Спрашивал про кросплей 3+ раз. Хочет играть с другом на PC, который купил только GTA на PS4.",
     ),
     Achievement(
         "explain_noob", "📚",
         "Гугл сломан",
-        "Просил объяснить термин 3+ раз. FPS — это frames per second. Нет, не та игра.",
+        "Просил объяснить термин 3+ раз. «Ray tracing — это когда красиво?» — Да, именно.",
     ),
     Achievement(
         "night_owl", "🦉",
-        "Сова в отрицании",
-        "Писал боту между полуночью и 5 утра. Режим дня уехал без обратного адреса.",
+        "Ещё одна игра и сплю",
+        "Писал боту ночью. Застрял в Elden Ring и не мог выйти — классика.",
     ),
     Achievement(
         "chronic_night_owl", "🌑",
-        "Ночная легенда",
-        "5+ ночных сообщений. Солнце для него — просто слух. Шторы куплены, не открывались.",
+        "Завтра точно лягу раньше",
+        "5+ ночных сообщений. В Dark Souls так не гриндили. Или гриндили.",
     ),
     Achievement(
         "night_creature", "🦇",
-        "Летучая мышь чата",
-        "10+ ночных сообщений. Врач бы поставил диагноз, но он тоже спит.",
+        "Режим дня — это не про меня",
+        "10+ ночей у бота. GTA Online в 4 утра — это не проблема, это образ жизни.",
     ),
     Achievement(
         "hoarder", "📦",
-        "Коллекционер несыгранного",
-        "5+ игр в вишлисте. Купить — не значит играть. Это инвестиция в вечность.",
+        "Куплю — пройду потом",
+        "5+ игр в вишлисте. Как Steam-библиотека, только с кривым курсом лиры.",
     ),
     Achievement(
         "mega_hoarder", "🏗️",
-        "Вишлист — это крик о помощи",
-        "10+ игр. Библиотека строится, пыль копится, совесть молчит.",
+        "Вишлист — это завещание",
+        "10+ игр. Cyberpunk 2077 ждёт. RDR2 ждёт. Все ждут.",
     ),
     Achievement(
         "veteran", "🏅",
         "Зависимость подтверждена",
-        "20+ обращений к боту. Диагноз поставлен, лечение не предусмотрено.",
+        "20+ обращений. Знает бота лучше, чем патчноты своей любимой игры.",
     ),
     Achievement(
         "legend", "💀",
         "Клинический случай",
-        "50+ обращений. Бот знает о нём больше, чем врач. И мама.",
+        "50+ обращений. На этом уровне в игре уже должен быть именной скин.",
     ),
     Achievement(
         "analyst", "🧠",
-        "Диванный эксперт",
-        "5+ игровых исследований. Зачем Гугл, когда есть бот и самомнение.",
+        "Диванный аналитик",
+        "5+ игровых исследований. Методично. Как чекать углы в CS2.",
     ),
     Achievement(
         "coop_evangelist", "👥",
-        "Социофоб с кооп-зависимостью",
-        "3+ раза искал кооп-игры. Людей ненавидит — но в одиночку скучно.",
+        "Кооп или смерть",
+        "3+ кооп-запроса. Потому что Destiny 2 в соло — это просто боль.",
     ),
     Achievement(
         "sale_hunter", "💸",
-        "Скидка — смысл жизни",
-        "Игра из вишлиста вышла на распродажу. Купит. Не сыграет. Классика жанра.",
+        "Скидка — смысл существования",
+        "Игра из вишлиста ушла на распродажу. Купит. Пройдёт туториал. Удалит.",
     ),
 ]
 
@@ -130,6 +130,14 @@ async def init_tables() -> None:
             except sqlite3.OperationalError as err:
                 if "duplicate column" not in str(err).lower():
                     raise
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS announced_achievements (
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                key     TEXT NOT NULL,
+                PRIMARY KEY (user_id, chat_id, key)
+            )
+        """)
         await db.commit()
 
 
@@ -252,6 +260,55 @@ def __compute(stats: dict[str, int], wishlist_count: int) -> list[Achievement]:
     if stats.get("sale_notifications", 0) >= 1:
         earned.append(ACHIEVEMENT_MAP["sale_hunter"])
     return earned
+
+
+async def __get_announced_keys(user_id: int, chat_id: int) -> set[str]:
+    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT key FROM announced_achievements WHERE user_id = ? AND chat_id = ?",
+            (user_id, chat_id),
+        )
+        rows = await cursor.fetchall()
+    return {row[0] for row in rows}
+
+
+async def __mark_announced(user_id: int, chat_id: int, keys: list[str]) -> None:
+    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
+        await db.executemany(
+            "INSERT OR IGNORE INTO announced_achievements (user_id, chat_id, key) VALUES (?, ?, ?)",
+            [(user_id, chat_id, key) for key in keys],
+        )
+        await db.commit()
+
+
+async def check_new_achievements(user_id: int, chat_id: int, username: str) -> list[Achievement]:
+    """Return achievements earned since last call and mark them announced."""
+    stats = await __get_stats(user_id, chat_id)
+    wishlist_count = await __get_wishlist_count(user_id)
+    earned = __compute(stats, wishlist_count)
+    announced = await __get_announced_keys(user_id, chat_id)
+    new_ones = [ach for ach in earned if ach.key not in announced]
+    if new_ones:
+        await __mark_announced(user_id, chat_id, [ach.key for ach in new_ones])
+    return new_ones
+
+
+async def check_new_ranks(user_id: int, chat_id: int, points: int, ranks_data: list) -> list:
+    """Return rank tiers newly reached since last call and mark them announced.
+
+    ranks_data is duck-typed (each item has .min_points, .title, .emoji).
+    The starting rank (min_points == 0) is never announced.
+    """
+    announced = await __get_announced_keys(user_id, chat_id)
+    new_ones = [
+        rank for rank in ranks_data
+        if rank.min_points > 0
+        and points >= rank.min_points
+        and f"rank:{rank.min_points}" not in announced
+    ]
+    if new_ones:
+        await __mark_announced(user_id, chat_id, [f"rank:{r.min_points}" for r in new_ones])
+    return new_ones
 
 
 async def get_user_achievements(user_id: int, chat_id: int) -> list[Achievement]:

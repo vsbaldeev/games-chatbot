@@ -194,7 +194,42 @@ def __is_night_message(update: Update) -> bool:
     return 0 <= moscow_time.hour < 5
 
 
-async def __send_agent_reply(update: Update, username: str, message_text: str) -> None:
+async def __notify_unlocks(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    user_id: int,
+    username: str,
+) -> None:
+    try:
+        new_ach = await achievements.check_new_achievements(user_id, chat_id, username)
+        for ach in new_ach:
+            text = (
+                f"🏆 @{username} получил достижение!\n\n"
+                f"{ach.emoji} *{ach.title}*\n_{ach.description}_"
+            )
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+            except BadRequest:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🏆 {username}: {ach.emoji} {ach.title} — {ach.description}",
+                )
+        points, _, _ = await ranks.get_user_rank_info(user_id, chat_id)
+        new_ranks = await achievements.check_new_ranks(user_id, chat_id, points, ranks.RANKS)
+        if new_ranks:
+            top = new_ranks[-1]
+            text = f"⬆️ @{username} вышел на новый уровень — {top.emoji} *{top.title}*"
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+            except BadRequest:
+                await context.bot.send_message(
+                    chat_id=chat_id, text=f"⬆️ {username}: {top.emoji} {top.title}"
+                )
+    except Exception as error:
+        logger.warning(f"Achievement notification failed for user {user_id} in chat {chat_id}: {error}")
+
+
+async def __send_agent_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str, message_text: str) -> None:
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     numeric_chat_id = update.effective_chat.id
@@ -208,6 +243,7 @@ async def __send_agent_reply(update: Update, username: str, message_text: str) -
         except BadRequest:
             await update.message.reply_text(response)
         await achievements.increment_interaction(user_id, numeric_chat_id, username)
+        await __notify_unlocks(context, numeric_chat_id, user_id, username)
     except DailyLimitError:
         logger.warning(f"Daily token quota exhausted for chat {chat_id}")
         await update.message.reply_text(
@@ -227,7 +263,7 @@ async def __send_agent_reply(update: Update, username: str, message_text: str) -
         )
 
 
-async def __send_lightweight_reply(update: Update, username: str, message_text: str) -> None:
+async def __send_lightweight_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, username: str, message_text: str) -> None:
     """Reply via the lightweight model — used for keyword-triggered passive responses."""
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
@@ -242,6 +278,7 @@ async def __send_lightweight_reply(update: Update, username: str, message_text: 
         except BadRequest:
             await update.message.reply_text(response)
         await achievements.increment_interaction(user_id, numeric_chat_id, username)
+        await __notify_unlocks(context, numeric_chat_id, user_id, username)
     except (DailyLimitError, RateLimitError):
         # Keyword-triggered: user wasn't addressing the bot, so silently skip on quota issues.
         logger.warning(f"Lightweight reply skipped (quota) for chat {chat_id}")
@@ -272,7 +309,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_games(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     username = __get_username(update)
-    await __send_agent_reply(update, username, random.choice(GAMES_PROMPTS))
+    await __send_agent_reply(update, context, username, random.choice(GAMES_PROMPTS))
 
 
 async def cmd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -283,6 +320,7 @@ async def cmd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     coop_offset = random.choice([0, 8, 16, 24])
     await __send_agent_reply(
         update,
+        context,
         username,
         (
             f"Вызови инструменты в таком порядке, без текста между ними: "
@@ -640,9 +678,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             update.effective_user.id, update.effective_chat.id, username, "night_messages"
         )
     if is_direct:
-        await __send_agent_reply(update, username, update.message.text)
+        await __send_agent_reply(update, context, username, update.message.text)
     else:
-        await __send_lightweight_reply(update, username, update.message.text)
+        await __send_lightweight_reply(update, context, username, update.message.text)
 
 
 # --- Voice / video-note handler ---
@@ -714,6 +752,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         except BadRequest:
             await msg.reply_text(response.content)
         await achievements.increment_interaction(update.effective_user.id, numeric_chat_id, username)
+        await __notify_unlocks(context, numeric_chat_id, update.effective_user.id, username)
     except Exception as error:
         logger.error(f"Voice reply error in chat {chat_id}: {error}")
 
