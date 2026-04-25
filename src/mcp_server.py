@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sys
+from urllib.parse import quote
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -280,20 +281,22 @@ async def get_ps_store_sales(limit: int = 12) -> str:
 
 
 @mcp.tool()
-async def find_coop_games(player_count: int) -> str:
+async def find_coop_games(player_count: int, offset: int = 0) -> str:
     """
     Find PS5 games that support online co-op for at least the given number of players.
     Returns up to 8 games sorted by rating, with multiplayer details.
+    Use offset (0, 8, 16 …) to page through results and get different suggestions each call.
     PS5 platform ID in IGDB is 167.
     """
     try:
         safe_count = int(player_count)
+        safe_offset = max(0, min(int(offset), 64))
         results = await __igdb_request(
             "games",
             (
                 f"fields name,summary,rating,multiplayer_modes.*,genres.name; "
                 f"where multiplayer_modes.onlinecoopmax >= {safe_count} & platforms = (167); "
-                f"sort rating desc; limit 8;"
+                f"sort rating desc; limit 8; offset {safe_offset};"
             ),
         )
         return json.dumps(results, ensure_ascii=False, indent=2)
@@ -308,6 +311,67 @@ async def find_coop_games(player_count: int) -> str:
     except Exception as error:
         logger.error(f"find_coop_games failed: {error}")
         return json.dumps({"error": str(error)})
+
+
+@mcp.tool()
+async def get_ps_store_price_tr(game_name: str) -> str:
+    """
+    Get the Turkish PlayStation Store link for a game and try to fetch its current price
+    in TRY from psdeals.net (tr-TR store). Always returns a ps_store_search_url.
+    Price data is best-effort: only games currently tracked by psdeals.net will have prices.
+    """
+    store_url = f"https://store.playstation.com/tr-tr/search/{quote(game_name)}"
+    result: dict = {"game": game_name, "ps_store_search_url": store_url}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            response = await client.get(
+                "https://psdeals.net/tr-store",
+                params={"q": game_name},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+            )
+            response.raise_for_status()
+
+        next_data_match = re.search(
+            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+            response.text,
+            re.DOTALL,
+        )
+        if next_data_match:
+            page_data = json.loads(next_data_match.group(1))
+            games_list = (
+                page_data
+                .get("props", {})
+                .get("pageProps", {})
+                .get("gamesList", [])
+            )
+            name_lower = game_name.lower()
+            for game in games_list[:20]:
+                if name_lower not in game.get("name", "").lower():
+                    continue
+                price_obj = game.get("price") or {}
+                result["name"] = game.get("name", game_name)
+                if price_obj.get("regular"):
+                    result["regular_price_try"] = price_obj["regular"]
+                if price_obj.get("discount"):
+                    result["sale_price_try"] = price_obj["discount"]
+                if price_obj.get("discountPercent"):
+                    result["discount_percent"] = price_obj["discountPercent"]
+                psdeals_id = game.get("id") or game.get("slug") or ""
+                if psdeals_id:
+                    result["psdeals_url"] = f"https://psdeals.net/tr-store/game/{psdeals_id}"
+                break
+        else:
+            result["note"] = "Price unavailable — use ps_store_search_url"
+
+    except Exception as error:
+        logger.warning(f"get_ps_store_price_tr price lookup failed for '{game_name}': {error}")
+        result["note"] = "Price lookup failed — use ps_store_search_url"
+
+    return json.dumps(result, ensure_ascii=False)
 
 
 if __name__ == "__main__":
