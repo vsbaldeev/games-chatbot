@@ -297,9 +297,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Команды:\n"
-        "/multiplayer — одна мультиплеерная игра PS5/PC с ценой в TRY\n"
+        "/multiplayer — одна кооп/онлайн игра PS5/PC с ценой в TRY\n"
         "/singleplayer — одна одиночная игра PS5/PC с ценой в TRY\n"
-        "/coop — PS5 кооп-игра для 3-8 участников\n"
         "/achievements [all] — достижения (свои или всех)\n"
         "/rank — твой ранг и сколько очков заработал\n"
         "/top — рейтинг всего чата\n"
@@ -354,7 +353,8 @@ async def cmd_multiplayer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     prompt = (
         "Вызови инструменты последовательно, без единого слова между ними: "
-        f"1) find_coop_games(2, offset={offset}) — выбери одну игру для PS5, которой НЕТ в этом списке: [{excluded_str}] "
+        f"1) find_coop_games(2, offset={offset}) — выбери одну PS5-игру с онлайн-коопом или мультиплеером, "
+        f"которой НЕТ в этом списке: [{excluded_str}] "
         "2) get_game_details для выбранной игры — нужно для определения кросплея с PC по наличию PC в платформах "
         "3) get_ps_store_price_tr для выбранной игры. "
         "После всех инструментов выведи ТОЛЬКО этот блок — никаких заголовков, никаких промежуточных итогов, "
@@ -390,25 +390,6 @@ async def cmd_singleplayer(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     await __send_game_command(update, context, "singleplayer", prompt)
 
-
-async def cmd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    username = __get_username(update)
-    await achievements.increment_stat(
-        update.effective_user.id, update.effective_chat.id, username, "coop_queries"
-    )
-    coop_offset = random.choice([0, 8, 16, 24])
-    await __send_agent_reply(
-        update,
-        context,
-        username,
-        (
-            f"Вызови инструменты в таком порядке, без текста между ними: "
-            f"1) find_coop_games(3, offset={coop_offset}) "
-            f"2) get_game_details для самой интересной игры из результата (PS5-эксклюзив или кросплей с PC) "
-            f"3) get_ps_store_price_tr для той же игры. "
-            f"Затем напиши финальный ответ: название, жанр, макс. онлайн-игроков, кросплей с PC, цена в TRY, ссылка на турецкий PS Store."
-        ),
-    )
 
 
 async def cmd_achievements(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -882,7 +863,6 @@ def main() -> None:
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("multiplayer", cmd_multiplayer))
     app.add_handler(CommandHandler("singleplayer", cmd_singleplayer))
-    app.add_handler(CommandHandler("coop", cmd_coop))
     app.add_handler(CommandHandler("achievements", cmd_achievements))
     app.add_handler(CommandHandler("rank", cmd_rank))
     app.add_handler(CommandHandler("top", cmd_top))

@@ -60,7 +60,6 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 **Game research**
 - `/multiplayer` — picks one PS5 co-op or online multiplayer game from IGDB, checks crossplay with PC, fetches TRY price and a direct Turkish PS Store link; deduplicates per chat so the same game is never suggested twice
 - `/singleplayer` — picks one highly-rated PS5 single-player game (IGDB rating ≥ 75, no multiplayer modes), fetches TRY price and Turkish PS Store link; deduplicates per chat
-- `/coop` — finds one PS5 co-op game for 3–8 players using a random IGDB offset so suggestions vary each call; includes crossplay info, TRY price, and Turkish PS Store link
 - Search games and fetch details via IGDB (platforms, genres, multiplayer modes, rating)
 - Recent PS5 multiplayer releases via IGDB filtered by release date and platform
 - Current PS Store sales via psdeals.net RSS, cross-referenced with IGDB multiplayer data
@@ -113,7 +112,6 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 |---|---|
 | `/multiplayer` | One PS5/PC co-op or online game — crossplay status, TRY price, PS Store link; no repeats per chat |
 | `/singleplayer` | One PS5 single-player game (IGDB rating ≥ 75) — TRY price, PS Store link; no repeats per chat |
-| `/coop` | Find one PS5 co-op game for 3–8 players (exclusive or crossplay) |
 | `/achievements [all]` | Badge board |
 | `/rank` | Personal rank card with point breakdown and next-tier progress |
 | `/top` | Full-chat leaderboard sorted by points |
@@ -203,9 +201,8 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 **Register commands** so Telegram shows autocomplete in the chat. Send `/setcommands` to BotFather, select your bot, then paste:
 
 ```
-multiplayer - одна мультиплеерная игра PS5/PC с ценой в TRY
+multiplayer - одна кооп/онлайн игра PS5/PC с ценой в TRY
 singleplayer - одна одиночная игра PS5 с ценой в TRY
-coop - кооп-игра для 3-8 участников
 achievements - достижения
 rank - мой ранг
 top - рейтинг чата
