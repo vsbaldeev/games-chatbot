@@ -51,6 +51,19 @@ GAME_KEYWORDS = re.compile(
 
 TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
+OFFENSE_RE = re.compile(
+    r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
+    r"отстой|бесполезн|сломан|не работает|глупый|глупая|дерьм[оа]|придур|долбо|"
+    r"ёбан|еба[нл]|заткн|иди нах|иди в|stupid|useless|broken|dumb|trash|"
+    r"garbage|sucks|piece of shit|fuck)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+BOT_REFERENCE_RE = re.compile(
+    r"(бот[аеуыь]?|bot)",
+    re.IGNORECASE | re.UNICODE,
+)
+
 
 PLAY_EVENING_SUGGESTIONS = [
     "Сегодня кто в деле? Пишите.",
@@ -186,6 +199,13 @@ def __should_respond(update: Update, bot_id: int) -> bool:
         __is_bot_mentioned(update)
         or __is_reply_to_bot(update, bot_id)
         or bool(GAME_KEYWORDS.search(text))
+    )
+
+
+def __is_offense_toward_bot(update: Update) -> bool:
+    text = update.message.text or ""
+    return bool(OFFENSE_RE.search(text)) and (
+        bool(BOT_REFERENCE_RE.search(text)) or __is_bot_mentioned(update)
     )
 
 
@@ -608,7 +628,7 @@ async def __generate_prozharka_text(chat_id: int, target_username: str) -> str:
     response = await llm.ainvoke([
         SystemMessage(content=(
             "Ты стендап-комик в группе друзей-геймеров. "
-            "Пишешь короткие роасты — строго до 3 предложений. "
+            "Пишешь короткие роасты — строго до 2 предложений. "
             "Можно использовать мат и крепкие выражения. "
             "Только русский язык."
         )),
@@ -650,12 +670,12 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
         if is_supportive:
             style_instruction = (
                 f"Напиши тёплое утреннее поддерживающее сообщение для @{target_username}. "
-                f"Как лучший друг — искренне, без сарказма. До 3 предложений."
+                f"Как лучший друг — искренне, без сарказма. До 2 предложений."
             )
         else:
             style_instruction = (
                 f"Напиши жёсткий утренний роаст-прогноз для @{target_username} в стиле стендап-комика. "
-                f"Максимум 3 предложения. Злой юмор, сарказм, смешно. "
+                f"Максимум 2 предложения. Злой юмор, сарказм, смешно. "
                 f"Упомяни @{target_username} в тексте."
             )
 
@@ -668,7 +688,7 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
             response = await llm.ainvoke([
                 SystemMessage(content=(
                     "Ты стендап-комик в группе друзей-геймеров. "
-                    "Пишешь короткие утренние роасты — строго до 3 предложений. "
+                    "Пишешь короткие утренние роасты — строго до 2 предложений. "
                     "Можно использовать мат и крепкие выражения. "
                     "Только русский язык."
                 )),
@@ -723,12 +743,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     bot_id = context.bot.id
-    if not __should_respond(update, bot_id):
+    is_direct = __is_bot_mentioned(update) or __is_reply_to_bot(update, bot_id)
+    is_offense = __is_offense_toward_bot(update)
+
+    if not is_direct and not is_offense and not __should_respond(update, bot_id):
         return
 
-    is_direct = __is_bot_mentioned(update) or __is_reply_to_bot(update, bot_id)
-
-    if not is_direct:
+    if not is_direct and not is_offense:
         now = datetime.datetime.now().timestamp()
         last = context.chat_data.get("last_auto_ts", 0.0)
         if now - last < AUTONOMOUS_COOLDOWN_SECONDS:
