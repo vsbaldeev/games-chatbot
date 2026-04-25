@@ -47,7 +47,6 @@ GAME_KEYWORDS = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
-TIME_PATTERN = re.compile(r"^\d{1,2}:\d{2}$")
 TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 GAMES_PROMPTS = [
@@ -73,36 +72,13 @@ GAMES_PROMPTS = [
     ),
 ]
 
-PLAY_QUESTIONS_WITH_GAME = [
-    "Кто играет сегодня в {game}?",
-    "Сегодняшняя сессия по {game} — кто идёт?",
-    "Собираем отряд в {game} — ты как?",
-    "{game} сегодня — кто в деле?",
-    "Кто готов страдать в {game} этим вечером?",
-    "Залетаем в {game}? Отмечайтесь.",
-]
-PLAY_QUESTIONS_NO_GAME = [
-    "Кто играет сегодня вечером?",
-    "Собираем лобби — кто в деле?",
-    "Игровая сессия сегодня — ты как?",
-    "Кто готов страдать этим вечером?",
-    "Вечерний гейминг — отмечайтесь.",
-    "Залетаем сегодня? Кто есть?",
-]
-
-PLAY_OPTION_SETS = [
-    ["Я в деле 🎮", "Может быть 🤔", "Не смогу 😢"],
-    ["Врываюсь 🔥", "Подумаю 🤷", "Пасс 🙅"],
-    ["Готов 👾", "Возможно 🎲", "Занят 😴"],
-    ["Буду! 🎯", "Может чуть позже ⏰", "Без меня 🫡"],
-    ["Уже качаю 📥", "Посмотрим 👀", "Нет сил 💀"],
-    ["Первым в лобби 🏆", "Скорее всего ✅", "Нет 🚫"],
-    ["Да! 🙌", "Буду поздно 🌙", "Только посмотреть 👁", "Пасс 💨"],
-    ["Врываюсь 🚀", "Приду чуть позже ⏰", "Может быть 🤔", "Не сегодня 😵"],
-    ["Уже в лобби 🟢", "Ещё думаю 🟡", "Не могу 🔴"],
-    ["ГГ 🏅", "Может быть 🃏", "АФК сегодня 💤"],
-    ["Да, точно 💪", "Постараюсь 🤞", "Вряд ли 😬", "Точно нет ❌"],
-    ["Готов к бою ⚔️", "Залечу позже 🌙", "Пасс 🛌"],
+PLAY_EVENING_SUGGESTIONS = [
+    "Сегодня в 21:00 МСК — кто в деле? Пишите.",
+    "Вечерняя сессия в 21:00 МСК. Кто будет — отзовитесь.",
+    "21:00 МСК сегодня. Собираемся? Кто живой?",
+    "Напоминаю про вечер: 21:00 МСК. Кто играет?",
+    "Традиционный сбор в 21:00 МСК. Пишите кто будет.",
+    "Сегодня в 21:00 МСК — залетаем? Отзовитесь.",
 ]
 
 MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
@@ -205,27 +181,6 @@ def __is_night_message(update: Update) -> bool:
     return 0 <= moscow_time.hour < 5
 
 
-def __parse_play_args(args: list[str]) -> tuple[datetime.datetime | None, str | None]:
-    """Returns (reminder_time, game_name) parsed from /play command args."""
-    if not args:
-        return None, None
-
-    reminder_time = None
-    game_parts = list(args)
-
-    if TIME_PATTERN.match(args[0]):
-        hour, minute = map(int, args[0].split(":"))
-        now = datetime.datetime.now(MOSCOW_TZ)
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now:
-            target += datetime.timedelta(days=1)
-        reminder_time = target
-        game_parts = args[1:]
-
-    game_name = " ".join(game_parts) if game_parts else None
-    return reminder_time, game_name
-
-
 async def __send_agent_reply(update: Update, username: str, message_text: str) -> None:
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
@@ -294,7 +249,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Команды:\n"
         "/games — свежие игры для PS5: новинки, скидки, кросплей\n"
         "/coop — PS5 кооп-игра для 3-8 участников\n"
-        "/play [ЧЧ:ММ] [игра] — опрос кто играет сегодня + напоминание\n"
         "/achievements [all] — достижения (свои или всех)\n"
         "/rank — твой ранг и сколько очков заработал\n"
         "/top — рейтинг всего чата\n"
@@ -323,41 +277,6 @@ async def cmd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Расскажи про неё: название, жанр, максимальное число онлайн-игроков, есть ли кросплей с PC."
         ),
     )
-
-
-async def cmd_play(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    reminder_time, game_name = __parse_play_args(context.args or [])
-
-    if game_name:
-        poll_question = random.choice(PLAY_QUESTIONS_WITH_GAME).format(game=game_name)
-    else:
-        poll_question = random.choice(PLAY_QUESTIONS_NO_GAME)
-
-    await update.message.reply_poll(
-        question=poll_question,
-        options=random.choice(PLAY_OPTION_SETS),
-        is_anonymous=False,
-    )
-
-    username = __get_username(update)
-    await achievements.increment_stat(
-        update.effective_user.id, update.effective_chat.id, username, "play_polls_created"
-    )
-
-    if reminder_time:
-        time_str = reminder_time.strftime("%H:%M")
-        now = datetime.datetime.now(MOSCOW_TZ)
-        delay = (reminder_time - now).total_seconds()
-        context.job_queue.run_once(
-            __session_reminder,
-            when=delay,
-            chat_id=update.effective_chat.id,
-            data={"game": game_name},
-        )
-        game_label = f" {game_name}" if game_name else ""
-        await update.message.reply_text(
-            f"⏰ Напомню в {time_str} МСК{game_label}. Можете пока поспорить кто виноват в прошлом проигрыше."
-        )
 
 
 async def cmd_achievements(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -504,14 +423,14 @@ async def cmd_prozharka(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # --- Job callbacks ---
 
-async def __session_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
-    game = context.job.data.get("game")
-    text = (
-        f"⏰ Время! Сессия по {game} начинается — все в лобби!"
-        if game
-        else "⏰ Время! Игровая сессия начинается — где все?"
-    )
-    await context.bot.send_message(chat_id=context.job.chat_id, text=text)
+async def __daily_play_suggestion(context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_ids = await achievements.get_all_chat_ids()
+    suggestion = random.choice(PLAY_EVENING_SUGGESTIONS)
+    for chat_id in chat_ids:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=suggestion)
+        except Exception as error:
+            logger.warning(f"Daily play suggestion failed for chat {chat_id}: {error}")
 
 
 async def __check_ps_store_sales(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -731,14 +650,14 @@ async def __transcribe_telegram_file(file_id: str, filename: str, bot) -> str:
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg:
+        return
+
     is_group = update.effective_chat.type in ("group", "supergroup")
     caption = (msg.caption or "").lower()
     bot_mentioned = config.BOT_USERNAME.lower() in caption
     if is_group and not bot_mentioned and random.random() > VOICE_RESPONSE_CHANCE:
-        return
-
-    msg = update.message
-    if not msg:
         return
 
     if msg.voice:
@@ -808,6 +727,11 @@ async def __on_startup(application: Application) -> None:
         __russian_roulette,
         time=datetime.time(hour=12, minute=0, tzinfo=datetime.timezone.utc),
     )
+    # Evening play suggestion daily at 21:00 Moscow time (18:00 UTC)
+    application.job_queue.run_daily(
+        __daily_play_suggestion,
+        time=datetime.time(hour=18, minute=0, tzinfo=datetime.timezone.utc),
+    )
     logger.info("Bot started, all tables and jobs initialized")
 
 
@@ -825,7 +749,6 @@ def main() -> None:
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("games", cmd_games))
     app.add_handler(CommandHandler("coop", cmd_coop))
-    app.add_handler(CommandHandler("play", cmd_play))
     app.add_handler(CommandHandler("achievements", cmd_achievements))
     app.add_handler(CommandHandler("rank", cmd_rank))
     app.add_handler(CommandHandler("top", cmd_top))
