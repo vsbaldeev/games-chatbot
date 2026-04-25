@@ -17,7 +17,7 @@ class Rank:
 # Ordered lowest → highest. get_rank() returns the highest tier the user qualifies for.
 RANKS = [
     Rank("Только распаковал PS5",         "📦",   0),
-    Rank("Читает инструкцию к джойстику", "📖",  15),
+    Rank("Читает инструкцию к геймпаду", "📖",  15),
     Rank("Случайный казуал",              "🕹️",  35),
     Rank("Задрот с потенциалом",          "😤",  70),
     Rank("Чемпион дивана",                "🛋️", 120),

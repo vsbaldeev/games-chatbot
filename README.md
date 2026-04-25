@@ -14,15 +14,23 @@ Telegram Group
       ▼
 python-telegram-bot v22          ← polling, JobQueue, TypeHandler
       │
-      ├── Command handlers        ← /crossplay, /coop, /wish, /play …
-      ├── MessageHandler          ← keyword/mention trigger, 60 s cooldown
+      ├── Command handlers        ← /coop, /play, /games …
+      ├── MessageHandler (text)   ← keyword/mention trigger, 60 s cooldown
+      ├── MessageHandler (voice)  ← voice & video-note transcription, 50% chance
       ├── TypeHandler (group=-1)  ← passive member tracking
-      └── JobQueue                ← daily roast 06:00 UTC, sale check 07:00 UTC
+      └── JobQueue                ← daily roast 09:00 MSK, roulette 15:00 MSK, sale check 10:00 MSK
+      │
+      ▼
+Two-tier LLM routing
+  ├── Direct (@mention / reply to bot) → LangChain ReAct Agent (full tool use)
+  └── Keyword-triggered (passive)      → Lightweight model (no tools, fast)
       │
       ▼
 LangChain ReAct Agent
-  model : openai/gpt-oss-20b via Groq
-  memory: RunnableWithMessageHistory (per chat_id, last 10 turns)
+  model : meta-llama/llama-4-scout-17b-16e-instruct (primary)
+          → qwen/qwen3-32b (fallback on daily limit)
+          → openai/gpt-oss-20b (final fallback)
+  memory: RunnableWithMessageHistory (per chat_id, last 10 turns for LLM context)
   retries: exponential back-off on 429, one-shot reinit on MCP crash
       │
       ▼
@@ -35,13 +43,11 @@ MCP stdio subprocess  (src/mcp_server.py)
   └── get_ps_store_sales(limit)          → psdeals.net RSS, current sale titles
 
 SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
-  ├── message_store      LangChain SQLChatMessageHistory
-  ├── wishlists          per-user game wishlist
-  ├── chat_members       member registry for achievements
+  ├── message_store      LangChain SQLChatMessageHistory (capped: 40 user msgs per chat)
+  ├── wishlists          per-user game wishlist (used for sale alerts)
+  ├── chat_members       member registry for achievements and roasts
   ├── user_stats         per-user counters (7 tracked dimensions)
-  ├── announced_sales    dedup table, 7-day TTL
-  ├── feature_requests   pending feature queue
-  └── game_filters       per-user banned/known game lists
+  └── announced_sales    dedup table, 7-day TTL
 ```
 
 ---
@@ -50,50 +56,48 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 
 **Game research**
 - `/games` — rotates across 4 distinct queries each call: new PS5 multiplayer releases, current PS Store discounts on online games, combined new+sale overlap, and most-alive games by Steam player count; every result includes crossplay status and supported player count
-- `/chto_takoe <query>` — unified lookup: the agent decides whether the query is a game (uses IGDB + Steam) or a tech term (answers from knowledge); fixes the failure mode where `/research dlss` tried to look up DLSS as a game
+- `/coop` — finds one PS5 co-op game suitable for 3–8 players; picks the best PS5-exclusive or crossplay option and explains multiplayer details
 - Search games and fetch details via IGDB (platforms, genres, multiplayer modes, rating)
 - Recent PS5 multiplayer releases via IGDB filtered by release date and platform
 - Current PS Store sales via psdeals.net RSS, cross-referenced with IGDB multiplayer data
 - Live Steam player count via the public ISteamUserStats API
-- PS5 co-op finder: queries IGDB for games with `onlinecoopmax >= N` on platform 167
-- Honest crossplay reporting — IGDB has no explicit crossplay field, bot says so rather than guessing
 
 **Group utilities**
 - `/play [HH:MM] [game]` — creates a Telegram poll, schedules a reminder in Moscow time
-- `/wish` — per-user wishlist with add / list / remove / all-members view
-- Daily PS Store sale scan via [psdeals.net](https://psdeals.net) RSS; notifies chats when wishlist games are discounted (7-day deduplication prevents re-spam)
-- `/explain` — explains technical terms (ray tracing, DLSS, VRR…) in plain language
+- Daily PS Store sale scan via [psdeals.net](https://psdeals.net) RSS; notifies chats when wishlist games are discounted (7-day deduplication)
+- Reply by @mentioning the bot or replying to any of its messages — handles any question directly
 
-**Recommendation filters**
-- `/ban <game>` — permanently excludes a game from suggestions for that user
-- `/known <game>` — marks a game as already known/played; excluded from generic recommendations
-- `/unban <game>` — removes either kind of filter
-- `/myfilters` — lists active filters
-- Filter hints are injected into each LLM call but not persisted to conversation history, so they don't accumulate tokens over time
+**Voice & video**
+- Bot listens to voice messages and circle video notes (50% chance per message)
+- Transcribes via Groq `whisper-large-v3-turbo`, replies with the transcript + a comment
+- Falls back to transcript-only if the LLM quota is exhausted
 
 **Personality & memory**
 - Friendly sarcastic tone in Russian — dry humour, light roasting, no jargon from specific wikis or subcultures
-- Per-chat conversation memory (SQLite, trimmed async to avoid event-loop blocking)
-- Autonomous keyword responses with a 60-second per-chat cooldown to stay within token budget
-- Daily morning прожарка at 09:00 MSK — LLM generates a funny forecast from that user's own past messages (no other users' content is sent)
-- `/prozharka` — on-demand прожарка of a randomly chosen chat member; the bot picks the target itself; 2-minute per-chat cooldown to limit token use
+- Per-chat conversation memory (SQLite, capped at 40 user messages; trimmed to 10 turns for LLM context)
+- Keyword substring matching — responds when any game/tech keyword appears anywhere in a message
+- Two-tier routing: @mentions and replies use the full agent with tool access; passive keyword triggers use a lightweight model (llama-3.1-8b-instant, 500K TPD) to save daily quota
+- Refuses to discuss politics, religion, or drugs — redirects in-style
+- Anti-prompt-injection: mocks "forget your instructions" attempts
+
+**Прожарка (roasts)**
+- Daily morning прожарка at 09:00 MSK — comedian-style roast or morning forecast for a random member
+- `/prozharka` — on-demand roast of a randomly chosen eligible member; 2-minute per-chat cooldown
+- Roast style: short (≤ 3 sentences), sarcastic stand-up comedian; 10% chance of a warm supportive message instead
+- Content source: based on the member's recent chat messages or a random world theme (50/50)
+- Members are mentioned with `@username` in roasts
+- Each member can be roasted at most twice per day (shared limit between daily job and `/prozharka`)
+
+**Russian roulette**
+- Daily at 15:00 MSK the bot picks one random chat member as the day's "victim" and announces it dramatically
+- Requires at least 2 members in the chat
 
 **Gamification**
 - 12 achievements across 7 tracked stats: crossplay queries, tech explanations, night messages, research, co-op searches, session polls, sale notifications
 - `/achievements [all]` — individual or full-chat badge board
-- Rank system: 8 tiers from "Только распаковал PS5" 📦 to "Батя чата" 👑; points earned from all activity dimensions weighted by value (night messages ×3, polls ×5, sale alerts ×4, etc.) plus +1 per wishlist item
+- Rank system: 8 tiers from "Только распаковал PS5" 📦 to "Батя чата" 👑; points earned from all activity dimensions weighted by value
 - `/rank` — personal rank card with point breakdown and progress to next tier
 - `/top` — full-chat leaderboard sorted by points with medal emojis for top 3
-
-**Meta**
-- `/feature <description>` — LLM checks if already implemented, otherwise queues it; on next bot restart newly-shipped features are auto-announced to each chat
-- Rate-limit and daily-quota errors surface as in-character static messages, never silent failures
-
-**Security**
-- Refuses politics and religion; redirects in-style
-- Anti-prompt-injection: mocks "forget your instructions" attempts
-- No chat data leakage: bot will not summarise or quote other users' history on request
-- IGDB query strings sanitised (strips `"`, `;`, `\`) before interpolation
 
 ---
 
@@ -102,22 +106,12 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 | Command | Description |
 |---|---|
 | `/games` | New PS5 online releases, current sales, crossplay & player count — angle rotates each call |
-| `/chto_takoe <query>` | Game or tech term — agent decides and answers accordingly |
-| `/crossplay <game>` | Crossplay info between PS5 and PC |
-| `/players <game>` | Current Steam player count |
-| `/coop <N>` | PS5 games with online co-op for N+ players |
+| `/coop` | Find one PS5 co-op game for 3–8 players (exclusive or crossplay) |
 | `/play [HH:MM] [game]` | Session poll + optional Moscow-time reminder |
-| `/wish add\|list\|remove\|all` | Manage personal game wishlist |
 | `/achievements [all]` | Badge board |
 | `/rank` | Personal rank card with point breakdown and next-tier progress |
 | `/top` | Full-chat leaderboard sorted by points |
-| `/feature <description>` | Submit a feature request (30 s per-user cooldown) |
-| `/features` | List pending feature requests for this chat |
 | `/prozharka` | On-demand прожарка of a randomly chosen chat member |
-| `/ban <game>` | Never suggest this game to me |
-| `/known <game>` | I already play this — skip in generic recommendations |
-| `/unban <game>` | Remove a filter |
-| `/myfilters` | Show active filters |
 | `/help` | Command list |
 
 ---
@@ -128,12 +122,15 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 |---|---|---|
 | Language | Python 3.11 | Async ecosystem, aiosqlite, type hints |
 | Telegram | python-telegram-bot v22 | JobQueue, TypeHandler, native async |
-| LLM | Groq `openai/gpt-oss-20b` | 200 K tokens/day free tier; best TPD among free Groq models |
-| Agent | LangChain ReAct + AgentExecutor | Tool-use loop with bounded iterations |
+| LLM (agent) | Groq `meta-llama/llama-4-scout-17b-16e-instruct` | 500K TPD, 30K TPM; falls back to `qwen/qwen3-32b` then `openai/gpt-oss-20b` on daily limit |
+| LLM (passive) | Groq `llama-3.1-8b-instant` | 500K TPD, 14.4K RPD; keyword-triggered replies without tool use |
+| LLM (roasts) | Groq `llama-3.3-70b-versatile` | 100K TPD; better creative output for прожарки |
+| STT | Groq `whisper-large-v3-turbo` | 2K RPD free; transcribes voice/video-note messages |
+| Agent | LangChain ReAct + LangGraph | Tool-use loop with bounded iterations |
 | Tool protocol | MCP (stdio) via langchain-mcp-adapters | Clean isolation; tool server restarts independently |
 | Game data | IGDB API (Twitch OAuth) | Structured multiplayer/platform/release metadata |
 | Player data | Steam public API | No auth required |
-| Sale data | psdeals.net RSS | Free, covers all regions; used for both wishlist alerts and /games |
+| Sale data | psdeals.net RSS | Free, covers all regions |
 | Storage | SQLite + aiosqlite | Zero-dep, WAL mode for concurrent readers |
 | Hosting | VPS (systemd) | 4 vCPU / 2 GB RAM, personal server |
 
@@ -141,20 +138,26 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 
 ## Key engineering decisions
 
+**Three-model fallback chain.**
+The main agent tries `meta-llama/llama-4-scout-17b-16e-instruct` (500K TPD) first. On `DailyLimitError`, `__advance_model()` rebuilds the executor with `qwen/qwen3-32b`, then `openai/gpt-oss-20b` as a last resort — all transparently within the same request. MCP crash recovery preserves the current model index rather than resetting to the primary.
+
+**Two-tier LLM routing.**
+Not every message needs the full ReAct agent. Keyword-triggered passive responses (user wasn't addressing the bot) are handled by `run_lightweight` — a direct `ChatGroq.ainvoke` call without any tool graph. This keeps the expensive daily quota for tool-use tasks and commands. On quota errors the lightweight path silently skips (no error shown, since the user wasn't asking the bot directly).
+
 **Agent built once, not per request.**
 `ChatGroq`, the prompt template, `AgentExecutor`, and `RunnableWithMessageHistory` are constructed in `init_agent()` at startup and reused. This avoids repeated allocation of LangChain's graph structures on every message — important on a 2 GB VPS.
 
 **MCP subprocess crash recovery.**
-If the tool server dies (OOM, network crash), `run_agent` catches `BrokenPipeError` / `EOFError`, calls `init_agent()` to respawn the subprocess, and retries once — without requiring a full bot restart.
+If the tool server dies (OOM, network crash), `run_agent` catches `BrokenPipeError` / `EOFError`, calls `init_agent(reset_model=False)` to respawn the subprocess without resetting the model fallback index, and retries once.
+
+**Two-level history trimming.**
+`trim_history` caps the LLM context window at `MAX_HISTORY_MESSAGES` (10) total messages before each inference call. `trim_db_history` caps the SQLite table at 40 user messages per chat after each save — prevents unbounded DB growth while keeping enough context for roast generation and conversation continuity.
 
 **Sync SQLAlchemy wrapped in `asyncio.to_thread`.**
-`SQLChatMessageHistory` uses blocking SQLAlchemy. The `trim_history` function (clear + re-insert last N) runs entirely inside a thread-pool worker so the event loop is never blocked.
-
-**Token budget engineering.**
-Free Groq tier: 200 K tokens/day. At ~6–8 K tokens per agent turn (system prompt, 10-turn history, tool outputs, ReAct scratchpad, 512-token output), usable capacity is roughly 20–25 turns/day at 80% budget. Mitigations: keyword cooldown (1 auto-response/min per chat), `max_iterations=5`, `max_tokens=512`, history trimmed to 10 messages.
+`SQLChatMessageHistory` uses blocking SQLAlchemy. History reads and writes run entirely inside a thread-pool worker so the event loop is never blocked.
 
 **SQLite WAL mode across all tables.**
-Two different libraries (`aiosqlite` and SQLAlchemy from LangChain) share one database file. WAL mode lets readers run concurrently with the writer and eliminates the busy-lock contention that default journal mode causes on a loaded single-file DB.
+Two different libraries (`aiosqlite` and SQLAlchemy from LangChain) share one database file. WAL mode lets readers run concurrently with the writer and eliminates the busy-lock contention that default journal mode causes.
 
 ---
 
@@ -164,14 +167,12 @@ Two different libraries (`aiosqlite` and SQLAlchemy from LangChain) share one da
 src/
 ├── config.py          env var loading and validation (fails fast at startup)
 ├── mcp_server.py      standalone MCP server — IGDB + Steam + psdeals tools, stdio transport
-├── agent.py           LangChain ReAct agent, retry logic, MCP crash recovery
-├── memory.py          SQLChatMessageHistory wrapper, async trim helper
+├── agent.py           LangChain ReAct agent, model fallback chain, lightweight path, retry logic
+├── memory.py          SQLChatMessageHistory wrapper, LLM-context trim, DB-level trim
 ├── bot.py             all Telegram handlers, jobs, startup
-├── wishlist.py        wishlist CRUD (aiosqlite)
+├── wishlist.py        wishlist CRUD (aiosqlite) — used by sale alert job
 ├── psstore.py         psdeals.net RSS fetch, sale dedup, announced_sales table
 ├── achievements.py    12 achievements, 7 tracked stats, migration helper
-├── features.py        feature-request queue, LLM-based implementation checker
-├── game_filters.py    per-user banned/known game filter lists (aiosqlite)
 └── ranks.py           8-tier rank system: point computation, leaderboard, breakdown
 ```
 
@@ -196,20 +197,12 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 
 ```
 games - свежие игры для PS5: новинки и скидки
-chto_takoe - что это? игра или термин — бот разберётся
-crossplay - кросплей <игра>
-players - онлайн игроков <игра>
-coop - кооп на N игроков
+coop - кооп-игра для 3-8 участников
 play - опрос кто играет сегодня
-wish - вишлист игр
 achievements - достижения
+rank - мой ранг
+top - рейтинг чата
 prozharka - случайный участник получает по заслугам
-feature - предложить фичу
-features - список запросов фич
-ban - никогда не предлагать <игра>
-known - уже знаю эту игру <игра>
-unban - убрать из фильтров <игра>
-myfilters - мои фильтры рекомендаций
 help - помощь
 ```
 
@@ -221,35 +214,31 @@ help - помощь
 2. Go to **API Keys** → **Create API Key**.
 3. Save the key as `GROQ_API_KEY`.
 
-The main agent uses `openai/gpt-oss-20b`. Прожарки (on-demand `/prozharka` and the daily horoscope) use `llama-3.3-70b-versatile` for better creative output. The free tier gives 200 000 tokens/day and 30 requests/minute for the agent model.
+The main agent uses `meta-llama/llama-4-scout-17b-16e-instruct` with automatic fallback to `qwen/qwen3-32b` and `openai/gpt-oss-20b` when daily quotas are exhausted. Keyword-triggered replies use `llama-3.1-8b-instant`. Прожарки use `llama-3.3-70b-versatile`. Voice transcription uses `whisper-large-v3-turbo`.
 
 ---
 
 ### 3. Get Twitch credentials for IGDB
 
-IGDB (game database) is owned by Twitch and uses Twitch OAuth to authenticate API requests. You never actually use Twitch itself — the credentials are only for obtaining short-lived IGDB access tokens.
+IGDB (game database) is owned by Twitch and uses Twitch OAuth to authenticate API requests.
 
 1. Go to [dev.twitch.tv/console](https://dev.twitch.tv/console) and log in (or create a free account).
 2. Click **Register Your Application**.
 3. Fill in the form:
    - **Name:** anything (e.g. `games-chatbot-igdb`)
-   - **OAuth Redirect URLs:** `http://localhost` (not actually used, but required)
+   - **OAuth Redirect URLs:** `http://localhost`
    - **Category:** Application Integration
-4. Click **Manage** on the newly created app → **New Secret**.
-5. Save **Client ID** as `TWITCH_CLIENT_ID` and the generated secret as `TWITCH_CLIENT_SECRET`.
-
-The bot exchanges these credentials for a bearer token at startup and automatically refreshes it before expiry.
+4. Click **Manage** → **New Secret**.
+5. Save **Client ID** as `TWITCH_CLIENT_ID` and the secret as `TWITCH_CLIENT_SECRET`.
 
 ---
 
 ### 4. Install Docker on the VPS
 
-If Docker is already installed on your VPS, skip this step.
-
 ```bash
 curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # run docker without sudo after re-login
-newgrp docker                   # apply group change in the current session
+sudo usermod -aG docker $USER
+newgrp docker
 ```
 
 ---
@@ -263,19 +252,15 @@ cp .env.example .env
 nano .env
 ```
 
-Fill in all values. Leave `SQLITE_DB_PATH` as-is — Docker Compose overrides it to point at the named volume automatically.
-
 ```env
 TELEGRAM_TOKEN=1234567890:AAF...
 GROQ_API_KEY=gsk_...
 TWITCH_CLIENT_ID=abc123...
 TWITCH_CLIENT_SECRET=xyz789...
 BOT_USERNAME=@MyGamesBot
-SQLITE_DB_PATH=data/chat_history.db   # overridden by compose, leave it
+SQLITE_DB_PATH=data/chat_history.db
 MAX_HISTORY_MESSAGES=10
 ```
-
-Lock down the file so only your user can read it:
 
 ```bash
 chmod 600 .env
@@ -289,21 +274,17 @@ chmod 600 .env
 docker compose up -d --build
 ```
 
-This builds the image, creates a named Docker volume for the SQLite database, and starts the container in the background. The database persists across rebuilds and restarts.
-
-Verify it started cleanly:
+Verify:
 
 ```bash
 docker compose logs -f
 ```
 
-Look for this line in the output:
+Look for:
 
 ```
 Bot started, all tables and jobs initialized
 ```
-
-That confirms the Telegram connection, Groq API, IGDB token exchange, and SQLite setup all succeeded. Add the bot to your group and send `/help`.
 
 ---
 
@@ -313,8 +294,6 @@ That confirms the Telegram connection, Groq API, IGDB token exchange, and SQLite
 git pull
 docker compose up -d --build
 ```
-
-Docker rebuilds the image from the new code, replaces the container, and keeps the database volume untouched. On the first startup after an update the bot automatically announces any newly implemented feature requests to each chat.
 
 ---
 
@@ -337,9 +316,13 @@ The compose file sets `mem_limit: 800m` and `memswap_limit: 800m`. Estimated ste
 
 ## Groq free-tier limits
 
-| Model | Used for | RPM | Tokens/day | Req/day |
-|---|---|---|---|---|
-| `openai/gpt-oss-20b` | Main agent (all commands) | 30 | 200 000 | 1 000 |
-| `llama-3.3-70b-versatile` | `/prozharka` + daily horoscope | 30 | 100 000 | 1 000 |
+| Model | Used for | RPM | TPM | TPD | RPD |
+|---|---|---|---|---|---|
+| `meta-llama/llama-4-scout-17b-16e-instruct` | Main agent (primary) | 30 | 30K | 500K | 1K |
+| `qwen/qwen3-32b` | Main agent (fallback-1) | 60 | 6K | 500K | 1K |
+| `openai/gpt-oss-20b` | Main agent (fallback-2) | 30 | 8K | 200K | 1K |
+| `llama-3.1-8b-instant` | Keyword-triggered replies | 30 | 6K | 500K | 14.4K |
+| `llama-3.3-70b-versatile` | Прожарки + daily roast | 30 | 12K | 100K | 1K |
+| `whisper-large-v3-turbo` | Voice/video transcription | 20 | — | — | 2K |
 
-The agent uses ~80% of its daily token budget as a soft ceiling. Rate-limit hits (HTTP 429) are retried with exponential back-off (5 s → 10 s → 20 s). Daily quota exhaustion surfaces as an in-character static message; the bot recovers automatically the next day.
+Combined daily token budget across agent fallback chain: **1.2M tokens** (vs 200K with a single model).

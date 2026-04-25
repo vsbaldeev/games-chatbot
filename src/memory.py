@@ -1,6 +1,7 @@
 import asyncio
 
 from langchain_community.chat_message_histories import SQLChatMessageHistory
+from langchain_core.messages import HumanMessage
 
 from src import config
 
@@ -24,6 +25,22 @@ async def trim_history(history: SQLChatMessageHistory, max_messages: int) -> Non
         messages_to_keep = messages[-max_messages:]
         history.clear()
         for msg in messages_to_keep:
+            history.add_message(msg)
+
+    await asyncio.to_thread(trim_sync)
+
+
+async def trim_db_history(history: SQLChatMessageHistory, max_user_messages: int = 40) -> None:
+    """Cap SQLite to the last max_user_messages Human messages plus their AI responses."""
+    def trim_sync() -> None:
+        messages = history.messages
+        user_indices = [i for i, msg in enumerate(messages) if isinstance(msg, HumanMessage)]
+        if len(user_indices) <= max_user_messages:
+            return
+        cutoff = user_indices[-max_user_messages]
+        to_keep = messages[cutoff:]
+        history.clear()
+        for msg in to_keep:
             history.add_message(msg)
 
     await asyncio.to_thread(trim_sync)
