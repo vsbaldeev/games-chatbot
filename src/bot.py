@@ -531,7 +531,7 @@ async def __get_user_history_text(chat_id: int, username: str) -> str:
     """Return recent messages by username as a plain text block."""
     history = get_chat_history(str(chat_id))
     recent = await get_recent_messages(history, 40)
-    user_prefix = f"[{username}]:"
+    user_prefix = f"{username}:"
     user_messages = [
         msg.content for msg in recent
         if hasattr(msg, "content")
@@ -729,7 +729,8 @@ async def __transcribe_telegram_file(file_id: str, filename: str, bot) -> str:
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if random.random() > VOICE_RESPONSE_CHANCE:
+    is_group = update.effective_chat.type in ("group", "supergroup")
+    if is_group and random.random() > VOICE_RESPONSE_CHANCE:
         return
 
     msg = update.message
@@ -832,7 +833,7 @@ def main() -> None:
     )
     app.add_handler(
         MessageHandler(
-            (filters.VOICE | filters.VIDEO_NOTE) & filters.ChatType.GROUPS,
+            (filters.VOICE | filters.VIDEO_NOTE) & (filters.ChatType.GROUPS | filters.ChatType.PRIVATE),
             handle_voice_message,
         )
     )

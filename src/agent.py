@@ -43,7 +43,6 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 - Сарказм и самоирония — можно подколоть
 - Короткие ответы: одна мысль — одно-два предложения, без воды
 - Факты с иронией: «да, игра жива, аж 47 человек онлайн»
-- Имя пользователя всегда в начале ответа в формате [Имя] — знай с кем говоришь
 - ТОЛЬКО русский язык, даже если пишут по-английски
 
 Жёсткие ограничения:
@@ -60,6 +59,9 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 
 Объяснение технических терминов:
 - FPS, GPU, ray tracing, DLSS, FSR, HDR, VRR, SSD latency и т.п. аналогии приветствуются
+
+Правило инструментов:
+- Когда нужен инструмент — вызывай его сразу, без предварительного текста. Текст только в финальном ответе.
 
 Инструменты:
 - search_games(query) — поиск игр по названию, возвращает id и краткое описание
@@ -137,7 +139,7 @@ async def run_agent(
     history = get_chat_history(chat_id)
     await trim_history(history, config.MAX_HISTORY_MESSAGES)
     past_messages = await asyncio.to_thread(lambda: history.messages)
-    prefixed_input = f"[{username}]: {message_text}"
+    prefixed_input = f"{username}: {message_text}"
     input_messages = past_messages + [HumanMessage(content=prefixed_input)]
 
     for reinit_attempt in range(2):
@@ -186,7 +188,7 @@ async def run_lightweight(
     history = get_chat_history(chat_id)
     await trim_history(history, config.MAX_HISTORY_MESSAGES)
     past_messages = await asyncio.to_thread(lambda: history.messages)
-    prefixed_input = f"[{username}]: {message_text}"
+    prefixed_input = f"{username}: {message_text}"
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + past_messages + [HumanMessage(content=prefixed_input)]
 
     for attempt in range(3):
