@@ -575,6 +575,7 @@ async def __generate_prozharka_text(chat_id: int, target_username: str) -> str:
         SystemMessage(content=(
             "Ты стендап-комик в группе друзей-геймеров. "
             "Пишешь короткие роасты — строго до 3 предложений. "
+            "Можно использовать мат и крепкие выражения. "
             "Только русский язык."
         )),
         HumanMessage(content=(
@@ -635,6 +636,7 @@ async def __daily_roast(context: ContextTypes.DEFAULT_TYPE) -> None:
                 SystemMessage(content=(
                     "Ты стендап-комик в группе друзей-геймеров. "
                     "Пишешь короткие утренние роасты — строго до 3 предложений. "
+                    "Можно использовать мат и крепкие выражения. "
                     "Только русский язык."
                 )),
                 HumanMessage(content=(
