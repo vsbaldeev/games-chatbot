@@ -14,7 +14,7 @@ Telegram Group
       ▼
 python-telegram-bot v22          ← polling, JobQueue, TypeHandler
       │
-      ├── Command handlers        ← /coop, /play, /games …
+      ├── Command handlers        ← /multiplayer, /singleplayer, /coop …
       ├── MessageHandler (text)   ← keyword/mention trigger, 60 s cooldown
       ├── MessageHandler (voice)  ← voice & video-note transcription, 50% chance
       ├── TypeHandler (group=-1)  ← passive member tracking
@@ -38,17 +38,19 @@ MCP stdio subprocess  (src/mcp_server.py)
   ├── search_games(query)                → IGDB Apicalypse API
   ├── get_game_details(game_id)          → IGDB (multiplayer_modes, platforms)
   ├── get_steam_player_count(name)       → Steam Store + ISteamUserStats
-  ├── find_coop_games(player_count, offset) → IGDB, PS5 platform ID 167; offset paginates results
-  ├── find_new_ps5_online_games(days)    → IGDB, recent PS5 multiplayer releases
-  ├── get_ps_store_sales(limit)          → psdeals.net RSS, current sale titles
-  └── get_ps_store_price_tr(game_name)   → Turkish PS Store link + TRY price via psdeals.net
+  ├── find_coop_games(player_count, offset)  → IGDB, PS5 platform ID 167; offset paginates results
+  ├── find_new_ps5_online_games(days)        → IGDB, recent PS5 multiplayer releases
+  ├── find_singleplayer_ps_games(offset)     → IGDB, PS5 single-player games rated ≥ 75
+  ├── get_ps_store_sales(limit)              → psdeals.net RSS, current sale titles
+  └── get_ps_store_price_tr(game_name)       → Turkish PS Store link + TRY price via psdeals.net
 
 SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
   ├── message_store      LangChain SQLChatMessageHistory (capped: 40 user msgs per chat)
   ├── wishlists          per-user game wishlist (used for sale alerts)
   ├── chat_members       member registry for achievements and roasts
   ├── user_stats         per-user counters (7 tracked dimensions)
-  └── announced_sales    dedup table, 7-day TTL
+  ├── announced_sales    dedup table, 7-day TTL
+  └── suggested_games    per-chat game suggestion history (prevents repeats in /multiplayer and /singleplayer)
 ```
 
 ---
@@ -56,7 +58,8 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 ## Features
 
 **Game research**
-- `/games` — rotates across 4 distinct queries each call: new PS5 multiplayer releases, current PS Store discounts, combined new+sale overlap, and most-alive games by Steam player count; every result includes crossplay status, player count, TRY price, and a direct Turkish PS Store link
+- `/multiplayer` — picks one PS5 co-op or online multiplayer game from IGDB, checks crossplay with PC, fetches TRY price and a direct Turkish PS Store link; deduplicates per chat so the same game is never suggested twice
+- `/singleplayer` — picks one highly-rated PS5 single-player game (IGDB rating ≥ 75, no multiplayer modes), fetches TRY price and Turkish PS Store link; deduplicates per chat
 - `/coop` — finds one PS5 co-op game for 3–8 players using a random IGDB offset so suggestions vary each call; includes crossplay info, TRY price, and Turkish PS Store link
 - Search games and fetch details via IGDB (platforms, genres, multiplayer modes, rating)
 - Recent PS5 multiplayer releases via IGDB filtered by release date and platform
@@ -108,7 +111,8 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 
 | Command | Description |
 |---|---|
-| `/games` | New PS5 online releases, current sales, crossplay & player count — angle rotates each call |
+| `/multiplayer` | One PS5/PC co-op or online game — crossplay status, TRY price, PS Store link; no repeats per chat |
+| `/singleplayer` | One PS5 single-player game (IGDB rating ≥ 75) — TRY price, PS Store link; no repeats per chat |
 | `/coop` | Find one PS5 co-op game for 3–8 players (exclusive or crossplay) |
 | `/achievements [all]` | Badge board |
 | `/rank` | Personal rank card with point breakdown and next-tier progress |
@@ -172,6 +176,7 @@ src/
 ├── agent.py           LangChain ReAct agent, model fallback chain, lightweight path, retry logic
 ├── memory.py          SQLChatMessageHistory wrapper, LLM-context trim, DB-level trim
 ├── bot.py             all Telegram handlers, jobs, startup
+├── game_tracker.py    per-chat game suggestion dedup (suggested_games table)
 ├── wishlist.py        wishlist CRUD (aiosqlite) — used by sale alert job
 ├── psstore.py         psdeals.net RSS fetch, sale dedup, announced_sales table
 ├── achievements.py    12 achievements, 7 tracked stats, migration helper
@@ -198,7 +203,8 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 **Register commands** so Telegram shows autocomplete in the chat. Send `/setcommands` to BotFather, select your bot, then paste:
 
 ```
-games - свежие игры для PS5: новинки и скидки
+multiplayer - одна мультиплеерная игра PS5/PC с ценой в TRY
+singleplayer - одна одиночная игра PS5 с ценой в TRY
 coop - кооп-игра для 3-8 участников
 achievements - достижения
 rank - мой ранг

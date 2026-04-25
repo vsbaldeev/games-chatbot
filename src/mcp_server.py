@@ -314,6 +314,41 @@ async def find_coop_games(player_count: int, offset: int = 0) -> str:
 
 
 @mcp.tool()
+async def find_singleplayer_ps_games(offset: int = 0) -> str:
+    """
+    Find highly-rated single-player games available on PS5 or PC.
+    Returns up to 8 games sorted by rating descending.
+    Use offset (0, 8, 16 …) to page through results and get variety.
+    Only returns games with no multiplayer modes (proxy for single-player).
+    PS5 platform ID: 167. PC (Windows) platform ID: 6.
+    """
+    try:
+        safe_offset = max(0, min(int(offset), 64))
+        now = int(time.time())
+        results = await __igdb_request(
+            "games",
+            (
+                f"fields name,summary,rating,genres.name,platforms.name,first_release_date; "
+                f"where platforms = (167) & multiplayer_modes = null "
+                f"& rating >= 75 & first_release_date < {now}; "
+                f"sort rating desc; limit 8; offset {safe_offset};"
+            ),
+        )
+        return json.dumps(results, ensure_ascii=False, indent=2)
+    except httpx.HTTPStatusError as error:
+        msg = f"IGDB API error (HTTP {error.response.status_code}) — Twitch credentials may be invalid"
+        logger.error(f"find_singleplayer_ps_games failed: {msg}")
+        return json.dumps({"error": msg})
+    except httpx.ConnectError as error:
+        msg = f"Cannot reach IGDB/Twitch — check network connectivity: {error}"
+        logger.error(f"find_singleplayer_ps_games failed: {msg}")
+        return json.dumps({"error": msg})
+    except Exception as error:
+        logger.error(f"find_singleplayer_ps_games failed: {error}")
+        return json.dumps({"error": str(error)})
+
+
+@mcp.tool()
 async def get_ps_store_price_tr(game_name: str) -> str:
     """
     Get the Turkish PlayStation Store link for a game and try to fetch its current price

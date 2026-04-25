@@ -26,7 +26,7 @@ from telegram.ext import (
     filters,
 )
 
-from src import achievements, config, psstore, ranks, wishlist
+from src import achievements, config, game_tracker, psstore, ranks, wishlist
 from src.agent import LIGHTWEIGHT_MODEL, SYSTEM_PROMPT, DailyLimitError, RateLimitError, init_agent, run_agent, run_lightweight
 from src.memory import get_chat_history, get_recent_messages
 
@@ -39,50 +39,17 @@ logger = logging.getLogger(__name__)
 GAME_KEYWORDS = re.compile(
     r"(игр[аыуеёюеи]?|поигра|сыграем|зайдёшь|зайдешь|онлайн|кооп|кросплей|crossplay|"
     r"ps5|playstation|стим|steam|мультиплеер|multiplayer|лобби|lobby|рейтинг|rank|"
-    r"апдейт|update|патч|patch|длс|dlc|сервер|server|лаги|lag|тайтл|релиз|release|"
+    r"апдейт|update|патч|patch|длс|dlc|длс|сервер|server|лаги|lag|тайтл|релиз|release|"
     r"геймплей|gameplay|открытый мир|open world|шутер|shooter|рпг|rpg|мморпг|mmorpg|"
     r"fps|фпс|frame rate|ray tracing|рейтрейсинг|gpu|cpu|vram|nvme|latency|пинг|"
     r"разрешение|resolution|4k|1080p|1440p|dlss|fsr|upscaling|апскейлинг|герц|hz|"
+    r"joystick|джойстик|gamepad|геймпад|adaptive|triggers|триггер|"
     r"dualsense|haptic|адаптивные триггеры|adaptive triggers)",
     re.IGNORECASE | re.UNICODE,
 )
 
 TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
-GAMES_PROMPTS = [
-    (
-        "Вызови инструменты в таком порядке, без текста между ними: "
-        "1) find_new_ps5_online_games(21) "
-        "2) get_game_details для 2-3 самых интересных игр из результата "
-        "3) get_steam_player_count для тех же игр "
-        "4) get_ps_store_price_tr для тех же игр. "
-        "Затем напиши финальный ответ: для каждой — кросплей с PC, онлайн-игроки, цена в TRY, ссылка на турецкий PS Store."
-    ),
-    (
-        "Вызови инструменты в таком порядке, без текста между ними: "
-        "1) get_ps_store_sales(15) "
-        "2) search_games для 2-3 сетевых PS5-игр из списка скидок "
-        "3) get_game_details для найденных игр "
-        "4) get_ps_store_price_tr для тех же игр. "
-        "Затем напиши финальный ответ: кросплей с PC, онлайн-игроки, стоит ли брать, цена в TRY, ссылка на турецкий PS Store."
-    ),
-    (
-        "Вызови инструменты в таком порядке, без текста между ними: "
-        "1) find_new_ps5_online_games(30) "
-        "2) get_ps_store_sales(15) "
-        "3) get_game_details для 1-2 игр из каждого списка (или пересечения если есть) "
-        "4) get_ps_store_price_tr для тех же игр. "
-        "Затем напиши финальный ответ: есть ли свежие игры со скидкой, кросплей с PC, цена в TRY, ссылка на турецкий PS Store."
-    ),
-    (
-        "Вызови инструменты в таком порядке, без текста между ними: "
-        "1) find_new_ps5_online_games(60) "
-        "2) get_steam_player_count для топ-3 по рейтингу из результата "
-        "3) get_game_details для тех же игр "
-        "4) get_ps_store_price_tr для тех же игр. "
-        "Затем напиши финальный ответ: живость онлайна, кросплей с PC, цена в TRY, ссылка на турецкий PS Store."
-    ),
-]
 
 PLAY_EVENING_SUGGESTIONS = [
     "Сегодня кто в деле? Пишите.",
@@ -297,7 +264,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Команды:\n"
-        "/games — свежие игры для PS5: новинки, скидки, кросплей\n"
+        "/multiplayer — одна мультиплеерная игра PS5/PC с ценой в TRY\n"
+        "/singleplayer — одна одиночная игра PS5/PC с ценой в TRY\n"
         "/coop — PS5 кооп-игра для 3-8 участников\n"
         "/achievements [all] — достижения (свои или всех)\n"
         "/rank — твой ранг и сколько очков заработал\n"
@@ -307,9 +275,89 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def cmd_games(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def __send_game_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    game_type: str,
+    prompt: str,
+) -> None:
     username = __get_username(update)
-    await __send_agent_reply(update, context, username, random.choice(GAMES_PROMPTS))
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    await update.message.chat.send_action("typing")
+    try:
+        response = await run_agent(str(chat_id), username, prompt)
+
+        game_name = None
+        for line in response.splitlines():
+            stripped = line.strip().lstrip("🎮").strip()
+            if line.strip().startswith("🎮") and stripped:
+                game_name = stripped
+                break
+
+        await update.message.reply_text(response)
+
+        if game_name:
+            await game_tracker.mark_suggested(chat_id, game_name, game_type)
+
+        await achievements.increment_interaction(user_id, chat_id, username)
+        await __notify_unlocks(context, chat_id, user_id, username)
+    except DailyLimitError:
+        await update.message.reply_text(
+            "📵 Суточный лимит токенов Groq исчерпан. Бот ушёл спать до завтра. "
+            "Статья на Луркоморье: «Бесплатный тариф — он такой»."
+        )
+    except RateLimitError:
+        await update.message.reply_text(
+            "⏳ Groq не завезли лимитов. Слишком много запросов. Попробуй через минуту."
+        )
+    except Exception as error:
+        logger.error(f"Game command ({game_type}) error for chat {chat_id}: {error}")
+        await update.message.reply_text("Что-то сломалось. Попробуй позже.")
+
+
+async def cmd_multiplayer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    excluded = await game_tracker.get_suggested(chat_id, "multiplayer")
+    excluded_str = ", ".join(excluded) if excluded else "нет"
+    offset = random.choice([0, 8, 16, 24])
+
+    prompt = (
+        "Вызови инструменты последовательно, без текста между ними: "
+        f"1) find_coop_games(2, offset={offset}) — выбери одну игру для PS5, которой НЕТ в этом списке: [{excluded_str}] "
+        "2) get_game_details для выбранной игры — нужно для определения кросплея с PC по наличию PC в платформах "
+        "3) get_ps_store_price_tr для выбранной игры. "
+        "Напиши ТОЛЬКО финальный ответ в таком виде (без звёздочек, без подчёркиваний, без markdown):\n"
+        "🎮 Название игры\n"
+        "Жанр: ...\n"
+        "Игроков онлайн: до N\n"
+        "Кросплей с PC: Да / Нет / нет данных\n"
+        "Цена в TRY: ... или нет данных\n"
+        "Краткое описание на русском (1-2 предложения).\n"
+        "🛒 https://store.playstation.com/tr-tr/..."
+    )
+    await __send_game_command(update, context, "multiplayer", prompt)
+
+
+async def cmd_singleplayer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    excluded = await game_tracker.get_suggested(chat_id, "singleplayer")
+    excluded_str = ", ".join(excluded) if excluded else "нет"
+    offset = random.choice([0, 8, 16, 24])
+
+    prompt = (
+        "Вызови инструменты последовательно, без текста между ними: "
+        f"1) find_singleplayer_ps_games(offset={offset}) — выбери одну игру для PS5, которой НЕТ в этом списке: [{excluded_str}] "
+        "2) get_ps_store_price_tr для выбранной игры. "
+        "Напиши ТОЛЬКО финальный ответ в таком виде (без звёздочек, без подчёркиваний, без markdown):\n"
+        "🎮 Название игры\n"
+        "Жанр: ...\n"
+        "Цена в TRY: ... или нет данных\n"
+        "Краткое описание на русском (1-2 предложения).\n"
+        "🛒 https://store.playstation.com/tr-tr/..."
+    )
+    await __send_game_command(update, context, "singleplayer", prompt)
 
 
 async def cmd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -763,6 +811,7 @@ async def __on_startup(application: Application) -> None:
     await init_agent()
     await wishlist.init_tables()
     await achievements.init_tables()
+    await game_tracker.init_tables()
     await psstore.init_sale_tracking()
 
     # PS Store sale check daily at 10:00 Moscow time (07:00 UTC)
@@ -800,7 +849,8 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("games", cmd_games))
+    app.add_handler(CommandHandler("multiplayer", cmd_multiplayer))
+    app.add_handler(CommandHandler("singleplayer", cmd_singleplayer))
     app.add_handler(CommandHandler("coop", cmd_coop))
     app.add_handler(CommandHandler("achievements", cmd_achievements))
     app.add_handler(CommandHandler("rank", cmd_rank))
