@@ -13,11 +13,9 @@ import sys
 from urllib.parse import quote
 import time
 from contextlib import asynccontextmanager
-from typing import Annotated, Optional
+from typing import Optional, Union
 
-from pydantic import BeforeValidator
-
-CoercedInt = Annotated[int, BeforeValidator(int)]
+CoercedInt = Union[int, str]
 
 import httpx
 from mcp.server.fastmcp import FastMCP
