@@ -111,7 +111,7 @@ AUTONOMOUS_COOLDOWN_SECONDS = 60
 ROAST_COOLDOWN_SECONDS = 120
 ROAST_MODEL = "llama-3.3-70b-versatile"
 WHISPER_MODEL = "whisper-large-v3-turbo"
-VOICE_RESPONSE_CHANCE = 0.5
+VOICE_RESPONSE_CHANCE = 0.25
 MAX_ROASTS_PER_USER_PER_DAY = 2
 
 # Track per-user roast count per day per chat: {chat_id: {date_str: {username: count}}}
@@ -730,7 +730,9 @@ async def __transcribe_telegram_file(file_id: str, filename: str, bot) -> str:
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_group = update.effective_chat.type in ("group", "supergroup")
-    if is_group and random.random() > VOICE_RESPONSE_CHANCE:
+    caption = (msg.caption or "").lower()
+    bot_mentioned = config.BOT_USERNAME.lower() in caption
+    if is_group and not bot_mentioned and random.random() > VOICE_RESPONSE_CHANCE:
         return
 
     msg = update.message
