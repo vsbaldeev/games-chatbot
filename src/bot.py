@@ -763,20 +763,15 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         bot_response = await run_lightweight(chat_id, username, transcript)
         formatted = __to_telegram_md(bot_response)
-        reply_text = f"🎙️ «{transcript}»\n\n{formatted}"
         try:
-            await msg.reply_text(reply_text, parse_mode="Markdown")
+            await msg.reply_text(formatted, parse_mode="Markdown")
         except BadRequest:
-            await msg.reply_text(reply_text)
+            await msg.reply_text(bot_response)
         await achievements.increment_interaction(update.effective_user.id, numeric_chat_id, username)
     except (DailyLimitError, RateLimitError):
-        await msg.reply_text(f"🎙️ «{transcript}»")
+        logger.warning(f"Voice reply skipped (quota) for chat {chat_id}")
     except Exception as error:
         logger.error(f"Voice reply error in chat {chat_id}: {error}")
-        try:
-            await msg.reply_text(f"🎙️ «{transcript}»")
-        except Exception:
-            pass
 
 
 # --- Startup / entry point ---
