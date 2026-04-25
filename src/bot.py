@@ -27,7 +27,7 @@ from telegram.ext import (
 )
 
 from src import achievements, config, psstore, ranks, wishlist
-from src.agent import DailyLimitError, RateLimitError, init_agent, run_agent, run_lightweight
+from src.agent import LIGHTWEIGHT_MODEL, SYSTEM_PROMPT, DailyLimitError, RateLimitError, init_agent, run_agent, run_lightweight
 from src.memory import get_chat_history, get_recent_messages
 
 logging.basicConfig(
@@ -761,15 +761,22 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     try:
-        bot_response = await run_lightweight(chat_id, username, transcript)
-        formatted = __to_telegram_md(bot_response)
+        llm = ChatGroq(
+            model=LIGHTWEIGHT_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.8,
+            max_tokens=256,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=transcript),
+        ])
+        formatted = __to_telegram_md(response.content)
         try:
             await msg.reply_text(formatted, parse_mode="Markdown")
         except BadRequest:
-            await msg.reply_text(bot_response)
+            await msg.reply_text(response.content)
         await achievements.increment_interaction(update.effective_user.id, numeric_chat_id, username)
-    except (DailyLimitError, RateLimitError):
-        logger.warning(f"Voice reply skipped (quota) for chat {chat_id}")
     except Exception as error:
         logger.error(f"Voice reply error in chat {chat_id}: {error}")
 
