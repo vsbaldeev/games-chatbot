@@ -13,7 +13,11 @@ import sys
 from urllib.parse import quote
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Annotated, Optional
+
+from pydantic import BeforeValidator
+
+CoercedInt = Annotated[int, BeforeValidator(int)]
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -132,7 +136,7 @@ async def search_games(query: str) -> str:
 
 
 @mcp.tool()
-async def get_game_details(game_id: int) -> str:
+async def get_game_details(game_id: CoercedInt) -> str:
     """
     Get detailed info about a game by its IGDB ID.
     Includes platforms, genres, and multiplayer_modes.
@@ -209,7 +213,7 @@ async def get_steam_player_count(game_name: str) -> str:
 
 
 @mcp.tool()
-async def find_new_ps5_online_games(days: int = 21) -> str:
+async def find_new_ps5_online_games(days: CoercedInt = 21) -> str:
     """
     Find PS5 games with online multiplayer released in the last N days.
     Returns up to 8 games sorted by release date descending, with multiplayer details.
@@ -244,7 +248,7 @@ async def find_new_ps5_online_games(days: int = 21) -> str:
 
 
 @mcp.tool()
-async def get_ps_store_sales(limit: int = 12) -> str:
+async def get_ps_store_sales(limit: CoercedInt = 12) -> str:
     """
     Fetch current PS Store sale titles from the psdeals.net RSS feed.
     Returns a JSON list of discounted game title strings (up to `limit` entries).
@@ -281,7 +285,7 @@ async def get_ps_store_sales(limit: int = 12) -> str:
 
 
 @mcp.tool()
-async def find_coop_games(player_count: int, offset: int = 0) -> str:
+async def find_coop_games(player_count: CoercedInt, offset: CoercedInt = 0) -> str:
     """
     Find PS5 games that support online co-op for at least the given number of players.
     Returns up to 8 games sorted by rating, with multiplayer details.
@@ -314,7 +318,7 @@ async def find_coop_games(player_count: int, offset: int = 0) -> str:
 
 
 @mcp.tool()
-async def find_singleplayer_ps_games(offset: int = 0) -> str:
+async def find_singleplayer_ps_games(offset: CoercedInt = 0) -> str:
     """
     Find highly-rated single-player games available on PS5 or PC.
     Returns up to 8 games sorted by rating descending.
