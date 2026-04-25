@@ -826,6 +826,10 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = update.message
     if not msg or not msg.photo:
         return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    if msg.forward_origin is not None:
+        return
 
     is_group = update.effective_chat.type in ("group", "supergroup")
     caption = (msg.caption or "").lower()
