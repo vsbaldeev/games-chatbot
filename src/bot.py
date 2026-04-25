@@ -123,6 +123,39 @@ def __to_telegram_md(text: str) -> str:
     return "\n".join(lines)
 
 
+# Matches lines that are intermediate tool-output artefacts: markdown headers,
+# numbered list items, and indented sub-items (e.g. "   - Цена: ...")
+_INTERMEDIATE_LINE_RE = re.compile(r"^(#{1,3} |\d+\. | {2,}- )")
+
+
+def __extract_game_card(response: str) -> str:
+    """Strip intermediate tool-result summaries, returning only the final game card."""
+    lines = response.splitlines()
+
+    # Find the last PS Store link line — it always closes the card.
+    store_idx = next(
+        (idx for idx in range(len(lines) - 1, -1, -1)
+         if "🛒" in lines[idx] or "store.playstation.com" in lines[idx]),
+        None,
+    )
+    if store_idx is None:
+        return response
+
+    # Walk backward from the store link until we hit an intermediate-output line.
+    start_idx = store_idx
+    for idx in range(store_idx - 1, -1, -1):
+        if _INTERMEDIATE_LINE_RE.match(lines[idx]):
+            break
+        start_idx = idx
+
+    # Drop any leading blank lines from the extracted block.
+    result = lines[start_idx : store_idx + 1]
+    while result and not result[0].strip():
+        result = result[1:]
+
+    return "\n".join(result).strip()
+
+
 def fallback_username(user_id: int) -> str:
     return f"user_{user_id}"
 
@@ -288,15 +321,11 @@ async def __send_game_command(
     await update.message.chat.send_action("typing")
     try:
         response = await run_agent(str(chat_id), username, prompt)
+        card = __extract_game_card(response)
 
-        game_name = None
-        for line in response.splitlines():
-            stripped = line.strip().lstrip("🎮").strip()
-            if line.strip().startswith("🎮") and stripped:
-                game_name = stripped
-                break
+        game_name = card.splitlines()[0].strip().lstrip("🎮").strip() if card else None
 
-        await update.message.reply_text(response)
+        await update.message.reply_text(card)
 
         if game_name:
             await game_tracker.mark_suggested(chat_id, game_name, game_type)
@@ -324,11 +353,12 @@ async def cmd_multiplayer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     offset = random.choice([0, 8, 16, 24])
 
     prompt = (
-        "Вызови инструменты последовательно, без текста между ними: "
+        "Вызови инструменты последовательно, без единого слова между ними: "
         f"1) find_coop_games(2, offset={offset}) — выбери одну игру для PS5, которой НЕТ в этом списке: [{excluded_str}] "
         "2) get_game_details для выбранной игры — нужно для определения кросплея с PC по наличию PC в платформах "
         "3) get_ps_store_price_tr для выбранной игры. "
-        "Напиши ТОЛЬКО финальный ответ в таком виде (без звёздочек, без подчёркиваний, без markdown):\n"
+        "После всех инструментов выведи ТОЛЬКО этот блок — никаких заголовков, никаких промежуточных итогов, "
+        "никаких нумерованных списков, только plain text:\n"
         "🎮 Название игры\n"
         "Жанр: ...\n"
         "Игроков онлайн: до N\n"
@@ -347,10 +377,11 @@ async def cmd_singleplayer(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     offset = random.choice([0, 8, 16, 24])
 
     prompt = (
-        "Вызови инструменты последовательно, без текста между ними: "
+        "Вызови инструменты последовательно, без единого слова между ними: "
         f"1) find_singleplayer_ps_games(offset={offset}) — выбери одну игру для PS5, которой НЕТ в этом списке: [{excluded_str}] "
         "2) get_ps_store_price_tr для выбранной игры. "
-        "Напиши ТОЛЬКО финальный ответ в таком виде (без звёздочек, без подчёркиваний, без markdown):\n"
+        "После всех инструментов выведи ТОЛЬКО этот блок — никаких заголовков, никаких промежуточных итогов, "
+        "никаких нумерованных списков, только plain text:\n"
         "🎮 Название игры\n"
         "Жанр: ...\n"
         "Цена в TRY: ... или нет данных\n"
