@@ -615,7 +615,8 @@ async def __daily_play_suggestion(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Пишешь только по-русски. Короткие, живые фразы."
             )),
             HumanMessage(content=(
-                "Напиши одно короткое вечернее сообщение-призыв поиграть сегодня. "
+                "Напиши одно короткое вечернее сообщение-призыв поиграть сегодня онлайн вместе. "
+                "Обязательно упомяни, что речь об онлайн-игре или совместной сессии. "
                 "Стиль: непринуждённый, слегка саркастичный, как будто зовёшь друзей. "
                 "Без эмодзи в начале, без кавычек. Одно-два предложения максимум."
             )),
@@ -623,7 +624,7 @@ async def __daily_play_suggestion(context: ContextTypes.DEFAULT_TYPE) -> None:
         suggestion = response.content.strip()
     except Exception as error:
         logger.warning(f"Daily play suggestion LLM call failed: {error}")
-        suggestion = "Кто сегодня в деле? Пишите."
+        suggestion = "Кто сегодня в онлайн? Пишите."
     for chat_id in chat_ids:
         try:
             await context.bot.send_message(chat_id=chat_id, text=suggestion)
