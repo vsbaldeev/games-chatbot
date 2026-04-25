@@ -3,6 +3,7 @@ Entry point for the Telegram bot.
 Run with: python -m src.bot
 """
 
+import base64
 import datetime
 import io
 import logging
@@ -66,7 +67,9 @@ AUTONOMOUS_COOLDOWN_SECONDS = 60
 ROAST_COOLDOWN_SECONDS = 120
 ROAST_MODEL = "llama-3.3-70b-versatile"
 WHISPER_MODEL = "whisper-large-v3-turbo"
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 VOICE_RESPONSE_CHANCE = 0.25
+PHOTO_RESPONSE_CHANCE = 0.25
 MAX_ROASTS_PER_USER_PER_DAY = 2
 
 # Track per-user roast count per day per chat: {chat_id: {date_str: {username: count}}}
@@ -817,6 +820,58 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Voice reply error in chat {chat_id}: {error}")
 
 
+# --- Photo handler ---
+
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.photo:
+        return
+
+    is_group = update.effective_chat.type in ("group", "supergroup")
+    caption = (msg.caption or "").lower()
+    bot_mentioned = config.BOT_USERNAME.lower() in caption
+    if is_group and not bot_mentioned and random.random() > PHOTO_RESPONSE_CHANCE:
+        return
+
+    # Telegram provides multiple sizes; the last entry is the largest.
+    photo = msg.photo[-1]
+    username = __get_username(update)
+    chat_id = str(update.effective_chat.id)
+    numeric_chat_id = update.effective_chat.id
+
+    await msg.chat.send_action("typing")
+    try:
+        tg_file = await context.bot.get_file(photo.file_id)
+        buffer = io.BytesIO()
+        await tg_file.download_to_memory(buffer)
+        b64_image = base64.b64encode(buffer.getvalue()).decode()
+
+        user_text = msg.caption or "Прокомментируй это изображение."
+
+        llm = ChatGroq(
+            model=VISION_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.8,
+            max_tokens=300,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=[
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
+                {"type": "text", "text": f"{username}: {user_text}"},
+            ]),
+        ])
+        formatted = __to_telegram_md(response.content)
+        try:
+            await msg.reply_text(formatted, parse_mode="Markdown")
+        except BadRequest:
+            await msg.reply_text(response.content)
+        await achievements.increment_interaction(update.effective_user.id, numeric_chat_id, username)
+        await __notify_unlocks(context, numeric_chat_id, update.effective_user.id, username)
+    except Exception as error:
+        logger.error(f"Photo reply error in chat {chat_id}: {error}")
+
+
 # --- Startup / entry point ---
 
 async def __on_startup(application: Application) -> None:
@@ -878,6 +933,12 @@ def main() -> None:
         MessageHandler(
             (filters.VOICE | filters.VIDEO_NOTE) & (filters.ChatType.GROUPS | filters.ChatType.PRIVATE),
             handle_voice_message,
+        )
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.PHOTO & (filters.ChatType.GROUPS | filters.ChatType.PRIVATE),
+            handle_photo_message,
         )
     )
 
