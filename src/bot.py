@@ -6,9 +6,11 @@ Run with: python -m src.bot
 import base64
 import datetime
 import io
+import json
 import logging
 import random
 import re
+from pathlib import Path
 
 from groq import AsyncGroq
 from telegram.error import BadRequest
@@ -39,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 GAME_KEYWORDS = re.compile(
     r"(игр[аыуеёюеи]?|поигра|сыграем|зайдёшь|зайдешь|онлайн|кооп|кросплей|crossplay|"
-    r"ps5|playstation|стим|steam|мультиплеер|multiplayer|лобби|lobby|рейтинг|rank|"
+    r"ps5|playstation|стим|пс|steam|мультиплеер|multiplayer|лобби|lobby|рейтинг|rank|"
     r"апдейт|update|патч|patch|длс|dlc|длс|сервер|server|лаги|lag|тайтл|релиз|release|"
     r"геймплей|gameplay|открытый мир|open world|шутер|shooter|рпг|rpg|мморпг|mmorpg|"
     r"fps|фпс|frame rate|ray tracing|рейтрейсинг|gpu|cpu|vram|nvme|latency|пинг|"
@@ -64,15 +66,8 @@ BOT_REFERENCE_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
-
-PLAY_EVENING_SUGGESTIONS = [
-    "Сегодня кто в деле? Пишите.",
-    "Вечерняя сессия. Кто будет — отзовитесь.",
-    "Собираемся? Кто живой?",
-    "Напоминаю про вечер: Кто играет?",
-    "Традиционный сбор. Пишите кто будет.",
-    "Залетаем? Отзовитесь.",
-]
+_DAL_WORDS_PATH = Path(__file__).parent / "dal_words.json"
+_DAL_WORDS: list[str] = json.loads(_DAL_WORDS_PATH.read_text(encoding="utf-8"))
 
 MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
@@ -559,14 +554,81 @@ async def cmd_prozharka(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # --- Job callbacks ---
 
+async def __weekly_dal_word(context: ContextTypes.DEFAULT_TYPE) -> None:
+    if datetime.datetime.now(MOSCOW_TZ).weekday() != 6:  # 6 = Sunday
+        return
+    chat_ids = await achievements.get_all_chat_ids()
+    if not chat_ids:
+        return
+
+    word = random.choice(_DAL_WORDS)
+    try:
+        llm = ChatGroq(
+            model=LIGHTWEIGHT_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.85,
+            max_tokens=160,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content=(
+                "Ты саркастичный бот-геймер в групповом чате друзей. "
+                "Пишешь только по-русски. Короткий живой стиль."
+            )),
+            HumanMessage(content=(
+                f"Слово из словаря Даля: «{word}».\n\n"
+                "Напиши два абзаца без заголовков:\n"
+                "1. Краткое определение этого слова (1 предложение) в духе словаря Даля.\n"
+                "2. Саркастичный пример использования в контексте видеоигр (1 предложение).\n"
+                "Никаких заголовков, никаких нумераций, просто два предложения через пустую строку."
+            )),
+        ])
+        body = response.content.strip()
+    except Exception as error:
+        logger.warning(f"Dal word LLM call failed: {error}")
+        body = ""
+
+    text = f"📖 Слово недели:\n\n*{word}*"
+    if body:
+        text += f"\n\n{body}"
+
+    for chat_id in chat_ids:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+        except Exception as send_error:
+            logger.warning(f"Dal word send failed for chat {chat_id}: {send_error}")
+
+
 async def __daily_play_suggestion(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_ids = await achievements.get_all_chat_ids()
-    suggestion = random.choice(PLAY_EVENING_SUGGESTIONS)
+    if not chat_ids:
+        return
+    try:
+        llm = ChatGroq(
+            model=LIGHTWEIGHT_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.9,
+            max_tokens=80,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content=(
+                "Ты саркастичный бот-геймер в групповом чате друзей. "
+                "Пишешь только по-русски. Короткие, живые фразы."
+            )),
+            HumanMessage(content=(
+                "Напиши одно короткое вечернее сообщение-призыв поиграть сегодня. "
+                "Стиль: непринуждённый, слегка саркастичный, как будто зовёшь друзей. "
+                "Без эмодзи в начале, без кавычек. Одно-два предложения максимум."
+            )),
+        ])
+        suggestion = response.content.strip()
+    except Exception as error:
+        logger.warning(f"Daily play suggestion LLM call failed: {error}")
+        suggestion = "Кто сегодня в деле? Пишите."
     for chat_id in chat_ids:
         try:
             await context.bot.send_message(chat_id=chat_id, text=suggestion)
-        except Exception as error:
-            logger.warning(f"Daily play suggestion failed for chat {chat_id}: {error}")
+        except Exception as send_error:
+            logger.warning(f"Daily play suggestion failed for chat {chat_id}: {send_error}")
 
 
 async def __check_ps_store_sales(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -948,6 +1010,11 @@ async def __on_startup(application: Application) -> None:
     application.job_queue.run_daily(
         __daily_play_suggestion,
         time=datetime.time(hour=18, minute=0, tzinfo=datetime.timezone.utc),
+    )
+    # Weekly Dal word on Sundays at 12:00 Moscow time (09:00 UTC)
+    application.job_queue.run_daily(
+        __weekly_dal_word,
+        time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc),
     )
     logger.info("Bot started, all tables and jobs initialized")
 
