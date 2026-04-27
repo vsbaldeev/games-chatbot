@@ -122,27 +122,8 @@ async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_
         await achievements.register_member(chat_id, user.id, username)
 
 
-__WELCOME_MESSAGE = """Привет. Я здесь.
-
-Чтобы всё работало правильно:
-
-• *Напишите что-нибудь в чат* — каждый участник регистрируется, когда впервые пишет сообщение, реагирует или отправляет медиа. Только зарегистрированные попадают в рулетку и дуэли.
-• *Отключите Privacy Mode* у бота (через BotFather → Bot Settings → Group Privacy → Turn off) — иначе я вижу только команды, но не обычные сообщения.
-
-Что умею:
-/duel — эмодзи-дуэль между двумя участниками
-/ruletka — русская рулетка
-/prozharka — прожарка случайного участника
-/multiplayer — одна кооп/онлайн игра PS5 с ценой
-/singleplayer — одна одиночная игра PS5 с ценой
-/achievements — твои достижения
-/top — топ чата
-
-Ещё отвечаю на вопросы про игры, если упомянуть меня через @."""
-
-
 async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Seed chat_members with current admins and send a welcome message when the bot is added to a group."""
+    """Seed chat_members with current admins when the bot is added to a group."""
     if not update.my_chat_member:
         return
     new_status = update.my_chat_member.new_chat_member.status
@@ -159,10 +140,6 @@ async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT
         logger.info(f"Seeded {len(admins)} admins for chat {chat_id} on bot join")
     except Exception as error:
         logger.warning(f"Failed to seed admins for chat {chat_id}: {error}")
-    try:
-        await context.bot.send_message(chat_id=chat_id, text=__WELCOME_MESSAGE, parse_mode="Markdown")
-    except Exception as error:
-        logger.warning(f"Failed to send welcome message to chat {chat_id}: {error}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

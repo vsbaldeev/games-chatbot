@@ -20,13 +20,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Команды:\n"
-        "/multiplayer — одна кооп/онлайн игра PS5/PC с ценой в TRY\n"
-        "/singleplayer — одна одиночная игра PS5/PC с ценой в TRY\n"
-        "/achievements — последние достижения\n"
-        "/top — рейтинг всего чата\n"
-        "/prozharka — случайный участник получает по заслугам\n\n"
-        "Или просто упомяни меня через @ и задай любой вопрос."
+        "Привет. Я здесь.\n\n"
+        "Чтобы всё работало правильно:\n\n"
+        "• *Напишите что-нибудь в чат* — каждый участник регистрируется, когда впервые пишет сообщение, реагирует или отправляет медиа. Только зарегистрированные попадают в рулетку и дуэли.\n"
+        "• *Отключите Privacy Mode* у бота (через BotFather → Bot Settings → Group Privacy → Turn off) — иначе я вижу только команды, но не обычные сообщения.\n\n"
+        "Что умею:\n"
+        "/duel — эмодзи-дуэль между двумя участниками\n"
+        "/ruletka — русская рулетка\n"
+        "/prozharka — прожарка случайного участника\n"
+        "/multiplayer — одна кооп/онлайн игра PS5 с ценой\n"
+        "/singleplayer — одна одиночная игра PS5 с ценой\n"
+        "/achievements — твои достижения\n"
+        "/top — топ чата\n\n"
+        "Ещё отвечаю на вопросы про игры, если упомянуть меня через @.",
+        parse_mode="Markdown",
     )
 
 
