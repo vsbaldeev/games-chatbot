@@ -1,4 +1,4 @@
-import sqlite3
+import time
 from dataclasses import dataclass
 
 import aiosqlite
@@ -6,22 +6,26 @@ import aiosqlite
 from src import config
 
 TRACKABLE_STATS = {
-    "crossplay_queries",
-    "explain_queries",
+    "laugh_reactions",
+    "heart_reactions",
+    "fire_reactions",
+    "thumbsup_reactions",
+    "emoji_messages",
+    "sticker_messages",
+    "forwarded_messages",
+    "link_messages",
+    "voice_messages",
+    "video_messages",
+    "video_note_messages",
+    "photo_messages",
     "night_messages",
-    "research_queries",
-    "coop_queries",
-    "play_polls_created",
-    "sale_notifications",
+    "roasted_count",
+    "roulette_win_count",
+    "duel_wins",
 }
 
-# New columns added after initial deploy — migrated safely in init_tables()
-MIGRATION_COLUMNS = [
-    "research_queries    INTEGER NOT NULL DEFAULT 0",
-    "coop_queries        INTEGER NOT NULL DEFAULT 0",
-    "play_polls_created  INTEGER NOT NULL DEFAULT 0",
-    "sale_notifications  INTEGER NOT NULL DEFAULT 0",
-]
+# Columns added after initial deploy — migrated safely in init_tables()
+MAX_TRACKABLE_STATS = {"voice_max_duration", "long_message_max"}
 
 
 @dataclass(frozen=True)
@@ -33,69 +37,445 @@ class Achievement:
 
 
 ALL_ACHIEVEMENTS = [
+    # --roulette win---
     Achievement(
-        "crossplay_paranoid", "🔍",
-        "ПК-шник в душе",
-        "Спрашивал про кросплей 3+ раз. Хочет играть с другом на PC, который купил только GTA на PS4.",
+        "roulette_win_1", "🔫", "Пуля — дура",
+        "Выжил 1 раз. Осечка или везение? В любом случае, сегодня ты не стал контентом для некролога."
     ),
     Achievement(
-        "explain_noob", "📚",
-        "Гугл сломан",
-        "Просил объяснить термин 3+ раз. «Ray tracing — это когда красиво?» — Да, именно.",
+        "roulette_win_5", "🎲", "Любимчик рандома",
+        "5 выживаний подряд. Ты либо подкупил бота, либо твоя удача расходуется быстрее, чем твои мозги. Осторожнее на переходах."
     ),
     Achievement(
-        "night_owl", "🦉",
-        "Ещё одна игра и сплю",
-        "Писал боту ночью. Застрял в Elden Ring и не мог выйти — классика.",
+        "roulette_win_10", "🍀", "Опухоль удачи",
+        "10 раз мимо. Это уже не везение, это статистическая аномалия. Ты официально самый везучий балласт в этом чате."
     ),
     Achievement(
-        "chronic_night_owl", "🌑",
-        "Завтра точно лягу раньше",
-        "5+ ночных сообщений. В Dark Souls так не гриндили. Или гриндили.",
+        "roulette_win_20", "🛡️", "Заговоренный",
+        "20 раз нажать на курок и остаться в живых? Похоже, даже смерть брезгует забирать тебя из этого чата."
     ),
     Achievement(
-        "night_creature", "🦇",
-        "Режим дня — это не про меня",
-        "10+ ночей у бота. GTA Online в 4 утра — это не проблема, это образ жизни.",
+        "roulette_win_50", "😇", "Бессмертный (почти)",
+        "50 побед. Поздравляем, ты сломал систему. Ты настолько часто обманывал пулю, что она начала считать тебя своим."
+    ),
+    # --- duel wins ---
+    Achievement(
+        "duel_win_1", "🤠", "Первая кровь",
+        "1 победа. Ты нажал на кнопку быстрее, чем твой мозг осознал, что происходит. Поздравляем, ты теперь официальный агрессор чата."
     ),
     Achievement(
-        "hoarder", "📦",
-        "Куплю — пройду потом",
-        "5+ игр в вишлисте. Как Steam-библиотека, только с кривым курсом лиры.",
+        "duel_win_10", "🔫", "Быстрый палец",
+        "10 побед. Твоя реакция пугает. Ты либо профессиональный киберспортсмен на пенсии, либо просто не выпускаешь телефон из рук даже в душе."
     ),
     Achievement(
-        "mega_hoarder", "🏗️",
-        "Вишлист — это завещание",
-        "10+ игр. Cyberpunk 2077 ждёт. RDR2 ждёт. Все ждут.",
+        "duel_win_25", "🏜️", "Гроза дикого чата",
+        "25 побед. Местные обитатели начинают прятаться в офлайн, когда видят твой ник. Ты — ковбой, которому явно нечем заняться на работе."
     ),
     Achievement(
-        "veteran", "🏅",
-        "Зависимость подтверждена",
-        "20+ обращений. Знает бота лучше, чем патчноты своей любимой игры.",
+        "duel_win_50", "🐎", "Самый быстрый на диване",
+        "50 побед. Твоя скорость нажатия на пиксельный пистолет легендарна. Жаль, что этот навык не помогает в реальной жизни, но в этом болоте ты — король."
     ),
     Achievement(
-        "legend", "💀",
-        "Клинический случай",
-        "50+ обращений. На этом уровне в игре уже должен быть именной скин.",
+        "duel_win_100", "🏆", "Кибер-кликун",
+        "100 побед. Ты официально стёр отпечаток пальца об экран. Поздравляем, ты — абсолютный чемпион по бессмысленному насилию над эмодзи. Твои враги мертвы (цифрово), а твоё ЧСВ — в космосе."
+    ),
+    #--- roast ---
+    Achievement(
+        "roasted_1", "🍳", "Первая прожарка",
+        "Вас поджарили 1 раз. Добро пожаловать на кухню! Это было больно, но зато теперь от вас аппетитно пахнет кринжем."
     ),
     Achievement(
-        "analyst", "🧠",
-        "Диванный аналитик",
-        "5+ игровых исследований. Методично. Как чекать углы в CS2.",
+        "roasted_10", "🔥", "Подгоревший",
+        "10 прожарок. Вы становитесь постоянным клиентом у бота. Кожа уже загрубела, но чувство собственного достоинства начинает дымиться."
     ),
     Achievement(
-        "coop_evangelist", "👥",
-        "Кооп или смерть",
-        "3+ кооп-запроса. Потому что Destiny 2 в соло — это просто боль.",
+        "roasted_25", "🍗", "Золотистая корочка",
+        "25 прожарок. Вы официально — любимое блюдо этого чата. Бот знает ваши слабые места лучше, чем ваши родители, и не стесняется об этом напоминать."
     ),
     Achievement(
-        "sale_hunter", "💸",
-        "Скидка — смысл существования",
-        "Игра из вишлиста ушла на распродажу. Купит. Пройдёт туториал. Удалит.",
+        "roasted_50", "🌋", "Огнеупорный терпила",
+        "50 прожарок. Вас жарят так часто, что вы перестали чувствовать боль. Вы либо святой, либо у вас напрочь отсутствует самолюбие. Скорее всего, второе."
+    ),
+    Achievement(
+        "roasted_100", "👹", "Уголёк",
+        "100 прожарок. От вас остались только пепел и вечные подколки. Вы достигли легендарного уровня: бот использует ваши косяки как учебное пособие по юмору. Покойся с миром, репутация."
+    ),
+    # --- silence ---
+    Achievement(
+        "silence_3d", "🎭", "Зритель в первом ряду",
+        "3 дня тишины. Ты всё ещё здесь, просто ждёшь, когда начнётся настоящий цирк? Умно. Мы — клоуны, ты — единственный нормальный (но это не точно)."
+    ),
+    Achievement(
+        "silence_7d", "🕵️", "Режим КГБ",
+        "7 дней молчания. Ты читаешь всё, не пишешь ничего. Поздравляем, ты официально стал тем самым жутким типом, который всё знает, но подозрительно молчит."
+    ),
+    Achievement(
+        "silence_14d", "🕯️", "Поминки по активности",
+        "2 недели без признаков жизни. Мы уже почти заказали венок с надписью «Он был хорошим флудером». Если ты жив — моргни хотя бы стикером."
+    ),
+    Achievement(
+        "silence_30d", "🦴", "Цифровое ископаемое",
+        "30 дней тишины. Твой профиль зарос паутиной, а сообщения стали археологическим артефактом. Ты — легенда, которая ушла за сигаретами и познала смысл бытия вне этого болота."
+    ),
+    # --- Laugh reactions ---
+    Achievement(
+        "laugh_1", "😂", "Смешной челик",
+        "1 реакция. Вы сказали что-то, что заставило людей выдохнуть воздух носом чуть быстрее обычного."
+    ),
+    Achievement(
+        "laugh_10", "🎭", "Тамада зашел в чат",
+        "10 реакций. Ваш юмор официально признан годным. Но не обольщайтесь, это был аванс."
+    ),
+    Achievement(
+        "laugh_25", "🔋", "Азаза-мен",
+        "25 реакций. Кажется, вы нашли слабое место в их чувстве юмора. Продолжайте в том же духе, мастер постиронии."
+    ),
+    Achievement(
+        "laugh_50", "🎤", "Петросян-2000",
+        "50 реакций. Вы достигли уровня, когда ваши шутки наконец-то перестали быть кринжем (но это не точно)."
+    ),
+    Achievement(
+        "laugh_100", "🤡", "Клоун-шоу",
+        "100 реакций. Поздравляем, вы — ходячий мем. Шутейки — это не просто хобби, это ваш lifestyle и, возможно, диагноз."
+    ),
+
+    # --- Heart reactions ---
+    Achievement(
+        "heart_1", "🤍", "Первая искра",
+        "1 сердечко. Кто-то улыбнулся вашему сообщению. Начало большой любви положено!"
+    ),
+    Achievement(
+        "heart_10", "☺️", "Лучик тепла",
+        "10 сердечек. Вы делаете этот чат чуточку уютнее. Продолжайте светить!"
+    ),
+    Achievement(
+        "heart_25", "✨", "Любимчик публики",
+        "25 сердечек. Ваши слова попадают прямо в сердечко. Вас здесь искренне ценят."
+    ),
+    Achievement(
+        "heart_50", "🫂", "Душа компании",
+        "50 сердечек. Вы тот самый человек, которому хочется отправить обнимашки через экран."
+    ),
+    Achievement(
+        "heart_100", "👑", "Хранитель уюта",
+        "100 сердечек. Вы официально самый милый человек в радиусе этого сервера. Настоящее сокровище!"
+    ),
+
+    # --- Fire reactions ---
+    Achievement(
+        "fire_1", "🌡️", "Слабый наброс",
+        "1 огонь. Контент едва теплый. Но кто-то один всё же решил, что это база."
+    ),
+    Achievement(
+        "fire_10", "🔥", "Разогрев аудитории",
+        "10 огней за всё время. Вы наконец-то нащупали кнопку «сделать круто». Чат в предвкушении, не разочаруйте их своим следующим мемом."
+    ),
+    Achievement(
+        "fire_25", "💥", "Поставщик годноты",
+        "25 огней. Вы так старательно генерируете хайп, что это начинает пугать. Ваше ЧСВ медленно догоняет количество реакций."
+    ),
+    Achievement(
+        "fire_50", "🌋", "Контент-мейкер на зарплате",
+        "50 огней. Вы выдаете базу так часто, что люди ставят огоньки уже из жалости или по привычке. Осторожно, не сгорите на этой неоплачиваемой работе."
+    ),
+    Achievement(
+        "fire_100", "☄️", "Легенда хайпа",
+        "100 огней. Ваша история сообщений — это чистое золото (по вашему мнению). Вы сожгли сервер своей крутостью, и теперь мы все живем на пепелище вашего гения."
+    ),
+
+    # --- Thumbs up reactions ---
+    Achievement(
+        "like_1", "🤏", "Сойдёт",
+        "1 лайк. Начало положено. Именно так — сойдёт. Кто-то случайно промахнулся мимо скролла и попал по кнопке."
+    ),
+    Achievement(
+        "like_10", "👌", "Одобрено Роспотребнадзором",
+        "10 лайков за всё время. Претензий к вашему контенту нет. Соответствует ГОСТу и санитарным нормам чата."
+    ),
+    Achievement(
+        "like_25", "👍", "Хвалят, но без фанатизма",
+        "25 лайков. Вы стабильно выдаете нормальные вещи. Не шедевры, конечно, но и не кринж."
+    ),
+    Achievement(
+        "like_50", "🏆", "Голосование прошло успешно",
+        "50 лайков. Явка была, бюджет освоен. Вы официально стали полезным членом общества."
+    ),
+    Achievement(
+        "like_100", "🗳️", "Народный избранник",
+        "100 лайков. Никто не просил, а вы всё равно вышли в лидеры."
+    ),
+
+    # --- Emoji usage ---
+    Achievement(
+        "emoji_1", "🙂", "Текст с картинками",
+        "1 сообщение с эмодзи. Вы открыли для себя мир цветных пиктограмм. Буквы теперь кажутся слишком скучными, да?"
+    ),
+    Achievement(
+        "emoji_10", "😅", "Вместо знаков препинания",
+        "10 сообщений. Зачем учить пунктуацию, когда можно воткнуть смайлик? Грамотность вышла из чата, оставив вместо себя колобка."
+    ),
+    Achievement(
+        "emoji_25", "🎨", "Визуальный недобор",
+        "25 сообщений. Ваш словарный запас стремительно сокращается до набора стандартных иконок. Кириллица официально в отпуске."
+    ),
+    Achievement(
+        "emoji_50", "🌈", "Пишет кружочками",
+        "50 сообщений. Вы общаетесь как четырехлетка с наклейками. Смысла всё меньше, зато в глазах рябит всё сильнее."
+    ),
+    Achievement(
+        "emoji_100", "🤯", "Эволюция — всё",
+        "100 сообщений. Поздравляем, вы вернулись к истокам — наскальной живописи. Буквы теперь только для бедных, вам достаточно жёлтых рож."
+    ),
+
+    # --- Stickers ---
+    Achievement(
+        "sticker_1", "😎", "Нашёл пак — не удержался",
+        "1 стикер. Первый шаг к деградации речи сделан. Вы обнаружили, что чужая картинка выражает ваши мысли лучше, чем вы сами."
+    ),
+    Achievement(
+        "sticker_10", "🗃️", "Стикер вместо ответа",
+        "10 стикеров за всё время. Зачем подбирать слова, когда можно кинуть кота или мемного мужика? Лень — двигатель вашего общения."
+    ),
+    Achievement(
+        "sticker_25", "📚", "Коллекционер цифрового мусора",
+        "25 стикеров. Ваша коллекция растёт, в отличие от смысловой нагрузки сообщений. Но признаем: мусор хотя бы красивый."
+    ),
+    Achievement(
+        "sticker_50", "🏪", "Речи нет — стикеры есть",
+        "50 стикеров. Вы превратились в немую витрину с картинками. Если у вас отобрать паки, в чате наступит неловкая тишина."
+    ),
+    Achievement(
+        "sticker_100", "🎭", "Безмолвный, но выразительный",
+        "100 стикеров. Текст окончательно сдался и вышел из чата. Вы достигли уровня цифрового мима: много кривляний и ни одного живого слова."
+    ),
+
+    # --- Forwarded messages ---
+    Achievement(
+        "forward_1", "📨", "Чужое лучше своего",
+        "1 репост. Своё придумать не получилось, пришлось воровать чужое. Начало карьеры копипастера положено."
+    ),
+    Achievement(
+        "forward_10", "📬", "Мыслей нет — репост есть",
+        "10 репостов. Система работает безотказно: зачем напрягать мозг, когда кнопка «переслать» всегда под рукой?"
+    ),
+    Achievement(
+        "forward_25", "📡", "Не читал, но репостнул",
+        "25 репостов. Классика жанра. Вы стали информационным шумом, транслирующим всё подряд без разбора."
+    ),
+    Achievement(
+        "forward_50", "🔁", "Живёт чужим умом",
+        "50 репостов. Экономно! Вы настолько редко пишете от себя, что чат начинает забывать, как звучит ваш настоящий голос."
+    ),
+    Achievement(
+        "forward_100", "🤖", "Канал без подписки",
+        "100 репостов. Телеграм уже не понимает, человек вы или бот-ретранслятор. Поздравляем, вы официально превратились в проходной двор для чужого контента."
+    ),
+
+    # --- Links ---
+    Achievement(
+        "link_1", "🔗", "Первый пошел",
+        "1 ссылка. Осторожно, двери интернета открываются. Следующая станция — бесконечный скроллинг чужих сайтов."
+    ),
+    Achievement(
+        "link_10", "🌐", "Браузер на минималках",
+        "10 ссылок. Ты решил, что мы недостаточно деградируем, и решил добавить нам нагрузки? Твой энтузиазм пугает."
+    ),
+    Achievement(
+        "link_25", "📡", "Инфо-дилер",
+        "25 ссылок. Подкидываешь нам ссылочки, как семечки. Смотри, не превратись в ходячий рекламный баннер, который хочется заблокировать."
+    ),
+    Achievement(
+        "link_50", "🔎", "Адепт синего текста",
+        "50 ссылок. Твои сообщения светятся синим чаще, чем экран смерти Windows. Ты вообще помнишь, как писать обычные слова?"
+    ),
+    Achievement(
+        "link_100", "🕸️", "Закладочный маньяк",
+        "100 ссылок. Поздравляем, ты превратил чат в свою личную помойку из вкладок. Мы здесь как в лабиринте — заходим по одной ссылке, а выходим через неделю."
+    ),
+
+    # --- Voice messages ---
+    Achievement(
+        "voice_1", "🎙️", "Связки вместо пальцев",
+        "1 голосовое. Ты решил, что твои вздохи в микрофон важнее нашего спокойствия. Первый кирпич в стену непонимания заложен."
+    ),
+    Achievement(
+        "voice_10", "🎤", "Радио 'Одиночество'",
+        "10 голосовых. Ты вещаешь так, будто у тебя тут сольный концерт. Спойлер: мы всё ещё ждём текстовую версию."
+    ),
+    Achievement(
+        "voice_25", "📻", "Говорит — значит существует",
+        "25 голосовых. Декарт бы одобрил, но мы — нет. Ты превратил чат в своё личное подкаст-шоу, на которое никто не подписывался."
+    ),
+    Achievement(
+        "voice_50", "🔊", "Аудио-террорист",
+        "50 голосовых. Поздравляем, ты официально заставил весь чат купить наушники. Твой голос теперь преследует нас в кошмарах."
+    ),
+    Achievement(
+        "voice_100", "📢", "Король подкастов в пустоту",
+        "100 голосовых. Ты окончательно забыл, как выглядят буквы. Чат превратился в твой личный аудио-блог, который все слушают на 2х (или не слушают вообще)."
+    ),
+    # --- Long Voice messages ---
+    Achievement(
+        "voice_dur_1m", "⏳", "Минутка славы",
+        "1 минута+. Ты официально перешел в режим радиовещания. Половина чата уже поставила тебя на 2х, вторая — просто смирилась."
+    ),
+    Achievement(
+        "voice_dur_2m", "🦆", "Словесный поток",
+        "2 минуты+. Твоё сообщение длиннее, чем средняя песня по радио. Жаль, что под твой бубнёж нельзя танцевать."
+    ),
+    Achievement(
+        "voice_dur_3m", "📻", "Подкастер-самоучка",
+        "3 минуты+. Это уже не ответ, это сольный концерт. Мы узнали о твоей жизни всё, включая шум ветра и твоё тяжелое дыхание."
+    ),
+    Achievement(
+        "voice_dur_5m", "🎙️", "Интервью с самим собой",
+        "5 минут+. Поздравляем, ты официально признан главным садистом чата. За это время можно было сварить кофе, но мы слушали твои «эээ» и «ну как бы»."
+    ),
+    Achievement(
+        "voice_dur_10m", "🧙‍♂️", "Летописец пустоты",
+        "10 минут+. Это не голосовое, это аудиокнига. Мы вызвали архивную службу, чтобы они запротоколировали твой бесконечный поток сознания. Иди поспи, оратор."
+    ),
+
+    # --- Video messages ---
+    Achievement(
+        "video_1", "📽️", "Сам себе National Geographic",
+        "1 видео. Ты решил, что картинка и звук стоят тысячи слов. Начало твоей карьеры документалиста положено."
+    ),
+    Achievement(
+        "video_10", "💾", "Пожиратель мегабайтов",
+        "10 видео. Ты в курсе, что в Telegram есть сжатие? Наши тарифные планы и память телефонов передают тебе пламенный привет."
+    ),
+    Achievement(
+        "video_25", "🎥", "Оператор 'Трясущиеся руки'",
+        "25 видео. Твой фирменный стиль — артхаусная тряска и расфокус. Ты официально признан мастером морской болезни этого чата."
+    ),
+    Achievement(
+        "video_50", "🎬", "Спилберг на минималках",
+        "50 видео. Ты присылаешь файлы так часто, будто у нас тут фестиваль короткометражек. Жаль, что вход бесплатный, а выход — через 'очистить кэш'."
+    ),
+    Achievement(
+        "video_100", "🎞️", "Главный по архиву",
+        "100 видео. Ты превратил чат в свою личную файлопомойку. Поздравляем, ты официально признан 'человеком-флешкой', чей контент мы всё равно смотрим без звука."
+    ),
+
+    # --- Video notes (кружочки) ---
+    Achievement(
+        "circle_1", "⭕", "Вид из иллюминатора",
+        "1 кружочек. Ты заглянул к нам через это маленькое окошко. Мы помахали в ответ, но надеемся, что это разовое мероприятие."
+    ),
+    Achievement(
+        "circle_10", "🔵", "Круглый отличник",
+        "10 кружочков. Твоё лицо в круге стало появляться чаще, чем хорошие новости. Хватит превращать чат в парад говорящих голов."
+    ),
+    Achievement(
+        "circle_25", "🌀", "В плену геометрии",
+        "25 кружочков. Ты окончательно перестал попадать по клавишам и перешел на видеосвязь в одну сторону. Это не диалог, это моноспектакль."
+    ),
+    Achievement(
+        "circle_50", "💿", "Блогер из-под одеяла",
+        "50 кружочков. Мы узнали, как ты выглядишь сразу после пробуждения, во время еды и перед сном. Слишком много подробностей, честно."
+    ),
+    Achievement(
+        "circle_100", "🎯", "Властелин колец",
+        "100 кружочков. Поздравляем, ты — официальный оператор этого иллюминатора. Твой палец прирос к кнопке записи, а наше терпение — к кнопке беззвучного режима."
+    ),
+
+    # --- Photos ---
+    Achievement(
+        "photo_1", "🖼️", "Первая улика",
+        "1 фото. Ты приоткрыл завесу своей галереи. Мы увидели достаточно, но ты ведь на этом не остановишься, верно?"
+    ),
+    Achievement(
+        "photo_10", "✂️", "Враг кроп-инструмента",
+        "10 фото. Твои скриншоты с полоской зарядки и уведомлениями — это отдельный вид искусства. Отрезать лишнее? Нет, это для слабаков."
+    ),
+    Achievement(
+        "photo_25", "🤡", "Мемный дилер",
+        "25 фото. Ты подкидываешь нам картинки, над которыми смеешься только ты и твоя кошка. Поздравляем, ты официально стал локальным клоуном (в хорошем смысле)."
+    ),
+    Achievement(
+        "photo_50", "📱", "Телефон на грани",
+        "50 фото. Твой смартфон уже умоляет о пощаде, а чат — об очистке кэша. Ты превратил наше общение в бесконечную ленту сомнительных приколов."
+    ),
+    Achievement(
+        "photo_100", "🏺", "Архивариус баянов",
+        "100 фото. Ты собрал здесь всю историю интернета, включая те фотки, которые лучше было оставить в корзине. Твой вклад в визуальное загрязнение чата — бесценен."
+    ),
+
+    # --- Night messages ---
+    Achievement(
+        "night_1", "🕯️", "Ночной дозор",
+        "1 ночное сообщение. Кто-то должен хранить тишину, пока чат спит. Сегодня это ты. Надеемся, это была важная мысль, а не опечатка."
+    ),
+    Achievement(
+        "night_10", "🌑", "Голос в пустоте",
+        "10 ночных. Ты вещаешь в эфир, когда даже эхо ложится спать. Твои сообщения — как послания в бутылке, которые мы найдем только утром."
+    ),
+    Achievement(
+        "night_25", "🛸", "Контактный центр 'Полночь'",
+        "25 ночных. Поздравляем, ты стал официальным связным с потусторонним миром. В это время суток в сети остаются только самые отчаянные (и ты)."
+    ),
+    Achievement(
+        "night_50", "🌘", "Тёмный рыцарь чата",
+        "50 ночных. Герой, которого никто не просил, но который не может перестать печатать. Твоя суперсила — синее свечение экрана, выжигающее сетчатку в полной темноте."
+    ),
+    Achievement(
+        "night_100", "🦇", "Легенда сумерек",
+        "100 ночных. Твой режим окончательно пал смертью храбрых. Ты официально стал мифическим существом, которое существует только в мерцании уведомлений после двух часов ночи."
+    ),
+
+    # --- Long messages ---
+    Achievement(
+        "essay_140", "🎓", "Лекция началась",
+        "140+ символов. Ты только что открыл рот и забыл его закрыть. Приготовьте тетрадки, сейчас нам будут объяснять жизнь."
+    ),
+    Achievement(
+        "essay_250", "👨‍🏫", "Душный профессор",
+        "250+ символов. Форточка в чате официально закрыта. Уровень кислорода падает пропорционально количеству твоих букв."
+    ),
+    Achievement(
+        "essay_500", "🏛️", "Трибуна ООН",
+        "500+ символов. Ты так увлекся, что перешел на официальный тон. Осторожно, еще сто символов, и мы начнем вводить санкции против твоей клавиатуры."
+    ),
+    Achievement(
+        "essay_1000", "📜", "Манифест графомана",
+        "1000+ символов. Это сообщение длиннее, чем чьи-то отношения. Поздравляем, ты официально признан главным дилером текстовых простыней."
+    ),
+    Achievement(
+        "essay_2000", "📚", "Том первый, глава первая",
+        "2000+ символов. Мы вызвали архивную службу, чтобы они запротоколировали это безумие. Прочитать это невозможно, но как памятник твоему свободному времени — сойдёт."
     ),
 ]
 
 ACHIEVEMENT_MAP = {achievement.key: achievement for achievement in ALL_ACHIEVEMENTS}
+
+_ACHIEVEMENT_RULES: list[tuple[str, list[int], list[str]]] = [
+    ("roasted_count",      [1, 10, 25, 50, 100],        ["roasted_1",        "roasted_10",        "roasted_25",        "roasted_50",        "roasted_100"]),
+    ("roulette_win_count", [1, 5, 10, 20, 50],          ["roulette_win_1",   "roulette_win_5",    "roulette_win_10",   "roulette_win_20",   "roulette_win_50"]),
+    ("duel_wins",          [1, 10, 25, 50, 100],         ["duel_win_1",       "duel_win_10",       "duel_win_25",       "duel_win_50",       "duel_win_100"]),
+    ("laugh_reactions",    [1, 10, 25, 50, 100],        ["laugh_1",     "laugh_10",     "laugh_25",     "laugh_50",     "laugh_100"]),
+    ("heart_reactions",    [1, 10, 25, 50, 100],        ["heart_1",     "heart_10",     "heart_25",     "heart_50",     "heart_100"]),
+    ("fire_reactions",     [1, 10, 25, 50, 100],        ["fire_1",      "fire_10",      "fire_25",      "fire_50",      "fire_100"]),
+    ("thumbsup_reactions", [1, 10, 25, 50, 100],        ["like_1",      "like_10",      "like_25",      "like_50",      "like_100"]),
+    ("emoji_messages",     [1, 10, 25, 50, 100],        ["emoji_1",     "emoji_10",     "emoji_25",     "emoji_50",     "emoji_100"]),
+    ("sticker_messages",   [1, 10, 25, 50, 100],        ["sticker_1",   "sticker_10",   "sticker_25",   "sticker_50",   "sticker_100"]),
+    ("forwarded_messages", [1, 10, 25, 50, 100],        ["forward_1",   "forward_10",   "forward_25",   "forward_50",   "forward_100"]),
+    ("link_messages",      [1, 10, 25, 50, 100],        ["link_1",      "link_10",      "link_25",      "link_50",      "link_100"]),
+    ("voice_messages",     [1, 10, 25, 50, 100],        ["voice_1",     "voice_10",     "voice_25",     "voice_50",     "voice_100"]),
+    ("voice_max_duration", [60, 120, 180, 300, 600],    ["voice_dur_1m","voice_dur_2m", "voice_dur_3m", "voice_dur_5m", "voice_dur_10m"]),
+    ("video_messages",     [1, 10, 25, 50, 100],        ["video_1",     "video_10",     "video_25",     "video_50",     "video_100"]),
+    ("video_note_messages",[1, 10, 25, 50, 100],        ["circle_1",    "circle_10",    "circle_25",    "circle_50",    "circle_100"]),
+    ("photo_messages",     [1, 10, 25, 50, 100],        ["photo_1",     "photo_10",     "photo_25",     "photo_50",     "photo_100"]),
+    ("night_messages",     [1, 10, 25, 50, 100],        ["night_1",     "night_10",     "night_25",     "night_50",     "night_100"]),
+    ("long_message_max",   [140, 250, 500, 1000, 2000], ["essay_140",   "essay_250",    "essay_500",    "essay_1000",   "essay_2000"]),
+]
+
+_SILENCE_THRESHOLDS: list[tuple[int, str]] = [
+    (3,  "silence_3d"),
+    (7,  "silence_7d"),
+    (14, "silence_14d"),
+    (30, "silence_30d"),
+]
 
 
 async def init_tables() -> None:
@@ -116,20 +496,29 @@ async def init_tables() -> None:
                 user_id              INTEGER NOT NULL,
                 chat_id              INTEGER NOT NULL,
                 username             TEXT,
-                crossplay_queries    INTEGER NOT NULL DEFAULT 0,
-                explain_queries      INTEGER NOT NULL DEFAULT 0,
+                laugh_reactions      INTEGER NOT NULL DEFAULT 0,
+                heart_reactions      INTEGER NOT NULL DEFAULT 0,
+                fire_reactions       INTEGER NOT NULL DEFAULT 0,
+                thumbsup_reactions   INTEGER NOT NULL DEFAULT 0,
+                emoji_messages       INTEGER NOT NULL DEFAULT 0,
+                sticker_messages     INTEGER NOT NULL DEFAULT 0,
+                forwarded_messages   INTEGER NOT NULL DEFAULT 0,
+                link_messages        INTEGER NOT NULL DEFAULT 0,
+                voice_messages       INTEGER NOT NULL DEFAULT 0,
+                video_messages       INTEGER NOT NULL DEFAULT 0,
+                video_note_messages  INTEGER NOT NULL DEFAULT 0,
+                photo_messages       INTEGER NOT NULL DEFAULT 0,
                 night_messages       INTEGER NOT NULL DEFAULT 0,
-                total_interactions   INTEGER NOT NULL DEFAULT 0,
+                roasted_count        INTEGER NOT NULL DEFAULT 0,
+                roulette_win_count   INTEGER NOT NULL DEFAULT 0,
+                duel_wins            INTEGER NOT NULL DEFAULT 0,
+                long_messages        INTEGER NOT NULL DEFAULT 0,
+                voice_max_duration   INTEGER NOT NULL DEFAULT 0,
+                long_message_max     INTEGER NOT NULL DEFAULT 0,
+                last_seen            INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (user_id, chat_id)
             )
         """)
-        # Migrate: add new columns to existing tables without losing data
-        for column_def in MIGRATION_COLUMNS:
-            try:
-                await db.execute(f"ALTER TABLE user_stats ADD COLUMN {column_def}")
-            except sqlite3.OperationalError as err:
-                if "duplicate column" not in str(err).lower():
-                    raise
         await db.execute("""
             CREATE TABLE IF NOT EXISTS announced_achievements (
                 user_id INTEGER NOT NULL,
@@ -138,6 +527,17 @@ async def init_tables() -> None:
                 PRIMARY KEY (user_id, chat_id, key)
             )
         """)
+        for migration in [
+            "ALTER TABLE user_stats ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE user_stats ADD COLUMN roasted_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE user_stats ADD COLUMN roulette_win_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE user_stats ADD COLUMN duel_wins INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                await db.execute(migration)
+            except aiosqlite.OperationalError as error:
+                if "duplicate column" not in str(error):
+                    raise
         await db.commit()
 
 
@@ -172,28 +572,32 @@ async def increment_stat(user_id: int, chat_id: int, username: str, stat: str) -
         raise ValueError(f"Unknown stat '{stat}'. Allowed: {TRACKABLE_STATS}")
     async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
         await db.execute(
-            f"""INSERT INTO user_stats (user_id, chat_id, username, {stat}, total_interactions)
-                VALUES (?, ?, ?, 1, 1)
+            f"""INSERT INTO user_stats (user_id, chat_id, username, {stat}, last_seen)
+                VALUES (?, ?, ?, 1, strftime('%s','now'))
                 ON CONFLICT(user_id, chat_id) DO UPDATE SET
-                    {stat}               = {stat} + 1,
-                    total_interactions   = total_interactions + 1,
-                    username             = excluded.username""",
+                    {stat}    = {stat} + 1,
+                    username  = excluded.username,
+                    last_seen = strftime('%s','now')""",
             (user_id, chat_id, username),
         )
         await db.commit()
 
 
-async def increment_interaction(user_id: int, chat_id: int, username: str) -> None:
+async def update_max_stat(user_id: int, chat_id: int, username: str, stat: str, value: int) -> None:
+    if stat not in MAX_TRACKABLE_STATS:
+        raise ValueError(f"Unknown max stat '{stat}'. Allowed: {MAX_TRACKABLE_STATS}")
     async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
         await db.execute(
-            """INSERT INTO user_stats (user_id, chat_id, username, total_interactions)
-               VALUES (?, ?, ?, 1)
-               ON CONFLICT(user_id, chat_id) DO UPDATE SET
-                   total_interactions = total_interactions + 1,
-                   username           = excluded.username""",
-            (user_id, chat_id, username),
+            f"""INSERT INTO user_stats (user_id, chat_id, username, {stat}, last_seen)
+                VALUES (?, ?, ?, ?, strftime('%s','now'))
+                ON CONFLICT(user_id, chat_id) DO UPDATE SET
+                    {stat}    = MAX({stat}, excluded.{stat}),
+                    username  = excluded.username,
+                    last_seen = strftime('%s','now')""",
+            (user_id, chat_id, username, value),
         )
         await db.commit()
+
 
 
 async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
@@ -203,8 +607,12 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
 async def __get_stats(user_id: int, chat_id: int) -> dict[str, int]:
     async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
         cursor = await db.execute(
-            """SELECT crossplay_queries, explain_queries, night_messages, total_interactions,
-                      research_queries, coop_queries, play_polls_created, sale_notifications
+            """SELECT laugh_reactions, heart_reactions, fire_reactions, thumbsup_reactions,
+                      emoji_messages, sticker_messages, forwarded_messages,
+                      link_messages, voice_messages, video_messages, video_note_messages,
+                      photo_messages, night_messages, long_messages,
+                      voice_max_duration, long_message_max,
+                      roasted_count, roulette_win_count, duel_wins
                FROM user_stats WHERE user_id = ? AND chat_id = ?""",
             (user_id, chat_id),
         )
@@ -212,53 +620,35 @@ async def __get_stats(user_id: int, chat_id: int) -> dict[str, int]:
     if not row:
         return {}
     return {
-        "crossplay_queries":   row[0],
-        "explain_queries":     row[1],
-        "night_messages":      row[2],
-        "total_interactions":  row[3],
-        "research_queries":    row[4],
-        "coop_queries":        row[5],
-        "play_polls_created":  row[6],
-        "sale_notifications":  row[7],
+        "laugh_reactions":     row[0],
+        "heart_reactions":     row[1],
+        "fire_reactions":      row[2],
+        "thumbsup_reactions":  row[3],
+        "emoji_messages":      row[4],
+        "sticker_messages":    row[5],
+        "forwarded_messages":  row[6],
+        "link_messages":       row[7],
+        "voice_messages":      row[8],
+        "video_messages":      row[9],
+        "video_note_messages": row[10],
+        "photo_messages":      row[11],
+        "night_messages":      row[12],
+        "long_messages":       row[13],
+        "voice_max_duration":  row[14],
+        "long_message_max":    row[15],
+        "roasted_count":       row[16],
+        "roulette_win_count":  row[17],
+        "duel_wins":           row[18],
     }
 
 
-async def __get_wishlist_count(user_id: int) -> int:
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM wishlists WHERE user_id = ?",
-            (user_id,),
-        )
-        row = await cursor.fetchone()
-    return row[0] if row else 0
-
-
-def __compute(stats: dict[str, int], wishlist_count: int) -> list[Achievement]:
+def __compute(stats: dict[str, int]) -> list[Achievement]:
     earned = []
-    if stats.get("crossplay_queries", 0) >= 3:
-        earned.append(ACHIEVEMENT_MAP["crossplay_paranoid"])
-    if stats.get("explain_queries", 0) >= 3:
-        earned.append(ACHIEVEMENT_MAP["explain_noob"])
-    if stats.get("night_messages", 0) >= 1:
-        earned.append(ACHIEVEMENT_MAP["night_owl"])
-    if stats.get("night_messages", 0) >= 5:
-        earned.append(ACHIEVEMENT_MAP["chronic_night_owl"])
-    if stats.get("night_messages", 0) >= 10:
-        earned.append(ACHIEVEMENT_MAP["night_creature"])
-    if wishlist_count >= 5:
-        earned.append(ACHIEVEMENT_MAP["hoarder"])
-    if wishlist_count >= 10:
-        earned.append(ACHIEVEMENT_MAP["mega_hoarder"])
-    if stats.get("total_interactions", 0) >= 20:
-        earned.append(ACHIEVEMENT_MAP["veteran"])
-    if stats.get("total_interactions", 0) >= 50:
-        earned.append(ACHIEVEMENT_MAP["legend"])
-    if stats.get("research_queries", 0) >= 5:
-        earned.append(ACHIEVEMENT_MAP["analyst"])
-    if stats.get("coop_queries", 0) >= 3:
-        earned.append(ACHIEVEMENT_MAP["coop_evangelist"])
-    if stats.get("sale_notifications", 0) >= 1:
-        earned.append(ACHIEVEMENT_MAP["sale_hunter"])
+    for stat_name, thresholds, keys in _ACHIEVEMENT_RULES:
+        stat_value = stats.get(stat_name, 0)
+        for threshold, key in zip(thresholds, keys):
+            if stat_value >= threshold:
+                earned.append(ACHIEVEMENT_MAP[key])
     return earned
 
 
@@ -272,49 +662,69 @@ async def __get_announced_keys(user_id: int, chat_id: int) -> set[str]:
     return {row[0] for row in rows}
 
 
-async def __mark_announced(user_id: int, chat_id: int, keys: list[str]) -> None:
+async def __mark_and_get_new(user_id: int, chat_id: int, keys: list[str]) -> list[str]:
+    """Insert keys into announced_achievements and return only the ones actually inserted.
+
+    Uses INSERT OR IGNORE ... RETURNING so the read and write are a single atomic operation,
+    eliminating the race where two concurrent callers both see a key as unannounced and
+    both fire a notification for it.
+    """
+    if not keys:
+        return []
+    placeholders = ", ".join("(?, ?, ?)" for _ in keys)
+    params = [value for key in keys for value in (user_id, chat_id, key)]
     async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        await db.executemany(
-            "INSERT OR IGNORE INTO announced_achievements (user_id, chat_id, key) VALUES (?, ?, ?)",
-            [(user_id, chat_id, key) for key in keys],
+        cursor = await db.execute(
+            f"INSERT OR IGNORE INTO announced_achievements (user_id, chat_id, key) "
+            f"VALUES {placeholders} RETURNING key",
+            params,
         )
+        rows = await cursor.fetchall()
         await db.commit()
+    return [row[0] for row in rows]
 
 
 async def check_new_achievements(user_id: int, chat_id: int, username: str) -> list[Achievement]:
     """Return achievements earned since last call and mark them announced."""
     stats = await __get_stats(user_id, chat_id)
-    wishlist_count = await __get_wishlist_count(user_id)
-    earned = __compute(stats, wishlist_count)
-    announced = await __get_announced_keys(user_id, chat_id)
-    new_ones = [ach for ach in earned if ach.key not in announced]
-    if new_ones:
-        await __mark_announced(user_id, chat_id, [ach.key for ach in new_ones])
-    return new_ones
+    earned = __compute(stats)
+    new_keys = await __mark_and_get_new(user_id, chat_id, [ach.key for ach in earned])
+    return [ACHIEVEMENT_MAP[key] for key in new_keys]
 
 
-async def check_new_ranks(user_id: int, chat_id: int, points: int, ranks_data: list) -> list:
-    """Return rank tiers newly reached since last call and mark them announced.
+async def check_silence_achievements(user_id: int, chat_id: int, username: str) -> list[Achievement]:
+    """Return the next unawarded silence achievement (at most one per call) and mark it announced.
 
-    ranks_data is duck-typed (each item has .min_points, .title, .emoji).
-    The starting rank (min_points == 0) is never announced.
+    Throttled to one per sweep to avoid flooding the chat when a long-inactive user is first seen.
+    Called by the daily sweep job only — not on every message, since activity resets last_seen.
     """
-    announced = await __get_announced_keys(user_id, chat_id)
-    new_ones = [
-        rank for rank in ranks_data
-        if rank.min_points > 0
-        and points >= rank.min_points
-        and f"rank:{rank.min_points}" not in announced
-    ]
-    if new_ones:
-        await __mark_announced(user_id, chat_id, [f"rank:{r.min_points}" for r in new_ones])
-    return new_ones
+    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT last_seen FROM user_stats WHERE user_id = ? AND chat_id = ?",
+            (user_id, chat_id),
+        )
+        row = await cursor.fetchone()
+    if not row or row[0] == 0:
+        return []
+    elapsed_days = (time.time() - row[0]) / 86400
+    # _SILENCE_THRESHOLDS is ordered ascending; try each in order, stop at the first new insert.
+    for days, key in _SILENCE_THRESHOLDS:
+        if elapsed_days < days:
+            break
+        new_keys = await __mark_and_get_new(user_id, chat_id, [key])
+        if new_keys:
+            return [ACHIEVEMENT_MAP[key]]
+    return []
+
 
 
 async def get_user_achievements(user_id: int, chat_id: int) -> list[Achievement]:
     stats = await __get_stats(user_id, chat_id)
-    wishlist_count = await __get_wishlist_count(user_id)
-    return __compute(stats, wishlist_count)
+    stat_earned = __compute(stats)
+    announced_keys = await __get_announced_keys(user_id, chat_id)
+    silence_keys = {key for _, key in _SILENCE_THRESHOLDS}
+    silence_earned = [ACHIEVEMENT_MAP[key] for key in silence_keys if key in announced_keys]
+    return stat_earned + silence_earned
 
 
 async def get_chat_achievements_summary(chat_id: int) -> dict[str, list[Achievement]]:

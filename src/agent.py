@@ -65,6 +65,7 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 - Вызывай все нужные инструменты подряд, один за другим.
 - ЗАПРЕЩЕНО выводить какой-либо текст между вызовами инструментов — ни комментарии, ни промежуточные результаты.
 - Текст пиши ТОЛЬКО один раз — в самом финальном ответе, когда все инструменты уже вызваны.
+- НИКОГДА не упоминай названия инструментов (search_games, get_game_details, get_steam_player_count и т.д.) в ответе — пользователь не должен знать, как ты получил данные.
 
 Форматирование — строго Telegram Markdown:
 - Жирный: *текст* (одна звёздочка, никаких **)
@@ -77,6 +78,7 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 
 async def __rebuild_executor() -> None:
     global __agent_executor
+    assert __agent_tools is not None, "init_agent() must be called before __rebuild_executor()"
     model = AGENT_MODEL_FALLBACKS[__current_model_index]
     llm = ChatGroq(
         model=model,
@@ -93,6 +95,12 @@ async def init_agent(reset_model: bool = True) -> None:
 
     if reset_model:
         __current_model_index = 0
+
+    if __mcp_client is not None:
+        try:
+            await __mcp_client.__aexit__(None, None, None)
+        except Exception as err:
+            logger.warning(f"Failed to close previous MCP client: {err}")
 
     __mcp_client = MultiServerMCPClient(
         {
@@ -123,6 +131,15 @@ async def __advance_model() -> bool:
     return True
 
 
+async def reset_model_index() -> None:
+    """Reset the agent to its primary model. Call once daily after Groq quotas refresh."""
+    global __current_model_index
+    if __current_model_index != 0:
+        logger.info(f"Resetting agent model from index {__current_model_index} to primary")
+        __current_model_index = 0
+        await __rebuild_executor()
+
+
 async def run_agent(
     chat_id: str,
     username: str,
@@ -147,12 +164,13 @@ async def run_agent(
                     )
                     ai_message = result["messages"][-1]
 
-                    def save_to_history() -> None:
-                        history.add_user_message(prefixed_input)
-                        history.add_message(ai_message)
+                    if ai_message.content and ai_message.content.strip():
+                        def save_to_history() -> None:
+                            history.add_user_message(prefixed_input)
+                            history.add_message(ai_message)
 
-                    await asyncio.to_thread(save_to_history)
-                    await trim_db_history(history)
+                        await asyncio.to_thread(save_to_history)
+                        await trim_db_history(history)
                     return ai_message.content
                 except DailyLimitError:
                     if not await __advance_model():
@@ -212,8 +230,6 @@ async def run_lightweight(
             else:
                 raise
 
-    raise RateLimitError("run_lightweight: unreachable")
-
 
 async def __invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> dict:
     for attempt in range(max_retries):
@@ -234,4 +250,3 @@ async def __invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -
                     raise RateLimitError("Groq rate limit retries exhausted")
             else:
                 raise
-    raise RateLimitError("Groq rate limit retries exhausted")

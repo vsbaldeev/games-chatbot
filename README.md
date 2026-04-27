@@ -18,12 +18,11 @@ python-telegram-bot v22          ← polling, JobQueue, TypeHandler
       ├── MessageHandler (text)   ← keyword/mention trigger, 60 s cooldown
       ├── MessageHandler (voice)  ← voice & video-note transcription, 50% chance
       ├── TypeHandler (group=-1)  ← passive member tracking
-      └── JobQueue                ← daily roast 09:00 MSK, roulette 15:00 MSK, sale check 10:00 MSK
+      └── JobQueue                ← roulette 21:00 MSK, silence-achievement check 13:00 MSK, model reset 00:05 UTC
       │
       ▼
-Two-tier LLM routing
-  ├── Direct (@mention / reply to bot) → LangChain ReAct Agent (full tool use)
-  └── Keyword-triggered (passive)      → Lightweight model (no tools, fast)
+LLM routing
+  └── Direct (@mention / reply to bot) → LangChain ReAct Agent (full tool use)
       │
       ▼
 LangChain ReAct Agent
@@ -67,42 +66,39 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - Turkish PS Store prices fetched from psdeals.net; always returns a `store.playstation.com/tr-tr` search link as fallback
 
 **Group utilities**
-- Daily evening nudge at 21:00 MSK — bot sends a random "who's playing tonight?" message to all chats
-- Daily PS Store sale scan via [psdeals.net](https://psdeals.net) RSS; notifies chats when wishlist games are discounted (7-day deduplication)
 - Reply by @mentioning the bot or replying to any of its messages — handles any question directly
 
 **Voice & video**
-- Bot listens to voice messages and circle video notes (25% chance in groups; 100% when bot is @mentioned in the caption)
-- Transcribes via Groq `whisper-large-v3-turbo`, replies with a comment (no transcript echo)
-- Always responds in private chat
+- Bot listens to voice messages and circle video notes in groups (25% random chance); skips forwarded messages and messages from bots
+- Transcribes via Groq `whisper-large-v3`, replies with a comment (no transcript echo)
 
 **Personality & memory**
 - Friendly sarcastic tone in Russian — dry humour, light roasting, no jargon from specific wikis or subcultures
 - Per-chat conversation memory (SQLite, capped at 40 user messages; trimmed to 10 turns for LLM context)
-- Keyword substring matching — responds when any game/tech keyword appears anywhere in a message
-- Two-tier routing: @mentions and replies use the full agent with tool access; passive keyword triggers use a lightweight model (llama-3.1-8b-instant, 500K TPD) to save daily quota
 - Refuses to discuss politics, religion, or drugs — redirects in-style
 - Anti-prompt-injection: mocks "forget your instructions" attempts
 
 **Прожарка (roasts)**
-- Daily morning прожарка at 09:00 MSK — comedian-style roast or morning forecast for a random member
-- `/prozharka` — on-demand roast of a randomly chosen eligible member; 2-minute per-chat cooldown
-- Roast style: short (≤ 3 sentences), sarcastic stand-up comedian; 10% chance of a warm supportive message instead
-- Content source: based on the member's recent chat messages or a random world theme (50/50)
+- `/prozharka` — on-demand roast of a randomly chosen chat member
+- Auto-roast on repeated insults: if a user replies to the bot with offensive words twice in a row, the bot generates a roast and credits `roasted_count`
+- Roast style: short (≤ 2 sentences), sarcastic stand-up comedian; 10% chance of a warm supportive message instead
+- Content source: based on the member's recent chat messages
 - Members are mentioned with `@username` in roasts
-- Each member can be roasted at most twice per day (shared limit between daily job and `/prozharka`)
 
 **Russian roulette**
-- Daily at 15:00 MSK the bot picks one random chat member and fires — 50% chance to hit, 50% chance to miss
-- Both outcomes have distinct dramatic announcements (8 hit variants, 7 miss variants)
-- Requires at least 2 members in the chat
+- Daily at 21:00 MSK the bot picks one random chat member and fires — 50% chance to hit, 50% chance to miss
+- 3-message reply chain: announce → victim selection → result (5 s pauses between messages)
+- `/ruletka` — on-demand roulette; requires at least 2 members in the chat
+- Miss gives the victim `roulette_win_count += 1` with achievements up to 50 survivals
 
 **Gamification**
-- 12 achievements across 7 tracked stats: crossplay queries, tech explanations, night messages, research, co-op searches, session polls, sale notifications
-- `/achievements [all]` — individual or full-chat badge board
-- Rank system: 8 tiers from "Только распаковал PS5" 📦 to "Батя чата" 👑; points earned from all activity dimensions weighted by value
-- `/rank` — personal rank card with point breakdown and progress to next tier
-- `/top` — full-chat leaderboard sorted by points with medal emojis for top 3
+- Achievements across 18+ tracked stats: reactions, voice/video/photo messages, stickers, links, night activity, roasts, roulette survivals, duel wins, message length
+- `/achievements` — last 3 earned achievements with total count
+- `/top` — top-3 chat leaderboard by achievement count with medal emojis
+
+**Emoji duel**
+- `/duel` — bot picks 2 random chat members (caller excluded when 3+ members); first to tap 🔫 wins; 5-minute timeout
+- Natural challenge: write «хочу дуэль с @vasya» to start a targeted duel without a command
 
 ---
 
@@ -112,10 +108,11 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 |---|---|
 | `/multiplayer` | One PS5/PC co-op or online game — crossplay status, TRY price, PS Store link; no repeats per chat |
 | `/singleplayer` | One PS5 single-player game (IGDB rating ≥ 75) — TRY price, PS Store link; no repeats per chat |
-| `/achievements [all]` | Badge board |
-| `/rank` | Personal rank card with point breakdown and next-tier progress |
-| `/top` | Full-chat leaderboard sorted by points |
+| `/achievements` | Last 3 earned achievements with total count |
+| `/top` | Top-3 chat leaderboard by achievement count |
 | `/prozharka` | On-demand прожарка of a randomly chosen chat member |
+| `/ruletka` | On-demand Russian roulette |
+| `/duel` | Start an emoji duel between 2 random chat members |
 | `/help` | Command list |
 
 ---
@@ -129,7 +126,7 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 | LLM (agent) | Groq `meta-llama/llama-4-scout-17b-16e-instruct` | 500K TPD, 30K TPM; falls back to `qwen/qwen3-32b` then `openai/gpt-oss-20b` on daily limit |
 | LLM (passive) | Groq `llama-3.1-8b-instant` | 500K TPD, 14.4K RPD; keyword-triggered replies without tool use |
 | LLM (roasts) | Groq `llama-3.3-70b-versatile` | 100K TPD; better creative output for прожарки |
-| STT | Groq `whisper-large-v3-turbo` | 2K RPD free; transcribes voice/video-note messages |
+| STT | Groq `whisper-large-v3` | 2K RPD free; transcribes voice/video-note messages |
 | Agent | LangChain ReAct + LangGraph | Tool-use loop with bounded iterations |
 | Tool protocol | MCP (stdio) via langchain-mcp-adapters | Clean isolation; tool server restarts independently |
 | Game data | IGDB API (Twitch OAuth) | Structured multiplayer/platform/release metadata |
@@ -144,9 +141,6 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 
 **Three-model fallback chain.**
 The main agent tries `meta-llama/llama-4-scout-17b-16e-instruct` (500K TPD) first. On `DailyLimitError`, `__advance_model()` rebuilds the executor with `qwen/qwen3-32b`, then `openai/gpt-oss-20b` as a last resort — all transparently within the same request. MCP crash recovery preserves the current model index rather than resetting to the primary.
-
-**Two-tier LLM routing.**
-Not every message needs the full ReAct agent. Keyword-triggered passive responses (user wasn't addressing the bot) are handled by `run_lightweight` — a direct `ChatGroq.ainvoke` call without any tool graph. This keeps the expensive daily quota for tool-use tasks and commands. On quota errors the lightweight path silently skips (no error shown, since the user wasn't asking the bot directly).
 
 **Agent built once, not per request.**
 `ChatGroq`, the prompt template, `AgentExecutor`, and `RunnableWithMessageHistory` are constructed in `init_agent()` at startup and reused. This avoids repeated allocation of LangChain's graph structures on every message — important on a 2 GB VPS.
@@ -218,7 +212,7 @@ help - помощь
 2. Go to **API Keys** → **Create API Key**.
 3. Save the key as `GROQ_API_KEY`.
 
-The main agent uses `meta-llama/llama-4-scout-17b-16e-instruct` with automatic fallback to `qwen/qwen3-32b` and `openai/gpt-oss-20b` when daily quotas are exhausted. Keyword-triggered replies use `llama-3.1-8b-instant`. Прожарки use `llama-3.3-70b-versatile`. Voice transcription uses `whisper-large-v3-turbo`.
+The main agent uses `meta-llama/llama-4-scout-17b-16e-instruct` with automatic fallback to `qwen/qwen3-32b` and `openai/gpt-oss-20b` when daily quotas are exhausted. Прожарки use `llama-3.3-70b-versatile`. Voice transcription uses `whisper-large-v3`.
 
 ---
 
@@ -325,8 +319,7 @@ The compose file sets `mem_limit: 800m` and `memswap_limit: 800m`. Estimated ste
 | `meta-llama/llama-4-scout-17b-16e-instruct` | Main agent (primary) | 30 | 30K | 500K | 1K |
 | `qwen/qwen3-32b` | Main agent (fallback-1) | 60 | 6K | 500K | 1K |
 | `openai/gpt-oss-20b` | Main agent (fallback-2) | 30 | 8K | 200K | 1K |
-| `llama-3.1-8b-instant` | Keyword-triggered replies | 30 | 6K | 500K | 14.4K |
-| `llama-3.3-70b-versatile` | Прожарки + daily roast | 30 | 12K | 100K | 1K |
-| `whisper-large-v3-turbo` | Voice/video transcription | 20 | — | — | 2K |
+| `llama-3.3-70b-versatile` | Прожарки | 30 | 12K | 100K | 1K |
+| `whisper-large-v3` | Voice/video transcription | 20 | — | — | 2K |
 
-Combined daily token budget across agent fallback chain: **1.2M tokens** (vs 200K with a single model).
+Combined daily token budget across agent fallback chain: **1.2M tokens** (vs 200K with a single model). The model index resets to the primary at 00:05 UTC daily.
