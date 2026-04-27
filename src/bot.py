@@ -11,6 +11,7 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -71,6 +72,7 @@ def main() -> None:
             handlers.handle_new_chat_members,
         )
     )
+    app.add_handler(ChatMemberHandler(handlers.handle_bot_added_to_chat, ChatMemberHandler.MY_CHAT_MEMBER))
 
     app.add_handler(CommandHandler("start", commands.cmd_start, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("help", commands.cmd_help, filters=filters.ChatType.GROUPS))

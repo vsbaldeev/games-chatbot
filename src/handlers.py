@@ -122,6 +122,26 @@ async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_
         await achievements.register_member(chat_id, user.id, username)
 
 
+async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Seed chat_members with current admins when the bot is added to a group."""
+    if not update.my_chat_member:
+        return
+    new_status = update.my_chat_member.new_chat_member.status
+    if new_status not in ("member", "administrator"):
+        return
+    chat_id = update.effective_chat.id
+    try:
+        admins = await context.bot.get_chat_administrators(chat_id)
+        for admin in admins:
+            if admin.user.is_bot:
+                continue
+            username = admin.user.username or admin.user.first_name or fallback_username(admin.user.id)
+            await achievements.register_member(chat_id, admin.user.id, username)
+        logger.info(f"Seeded {len(admins)} admins for chat {chat_id} on bot join")
+    except Exception as error:
+        logger.warning(f"Failed to seed admins for chat {chat_id}: {error}")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
