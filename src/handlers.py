@@ -49,8 +49,8 @@ __URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 # {chat_id: {user_id: count}} — tracks consecutive offensive replies toward the bot
 __offense_reply_counts: dict[int, dict[int, int]] = {}
 
-__LAUGH_EMOJIS = {"😂", "😁", "😆", "😀", "😃"}
-__HEART_EMOJIS = {"❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💕", "❤‍🔥"}
+__LAUGH_EMOJIS = {"😁", "🤣"}
+__HEART_EMOJIS = {"❤", "🥰", "😍", "💘", "❤️‍\U0001f525"}
 __FIRE_EMOJIS  = {"🔥"}
 __THUMB_EMOJIS = {"👍"}
 

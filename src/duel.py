@@ -57,6 +57,8 @@ DUEL_TIMEOUT_SECONDS = 300
 __pending_duels: dict[int, tuple[int, int, str, int, str]] = {}
 # message_id → job (for cancellation when duel resolves early)
 __duel_jobs: dict[int, Job] = {}
+# chat_ids with an active duel (at most one per chat)
+__active_duel_chats: set[int] = set()
 
 
 async def __send_duel(
@@ -67,7 +69,11 @@ async def __send_duel(
     p2_id: int,
     p2_username: str,
     reply_to_message_id: int | None = None,
-) -> None:
+) -> bool:
+    """Start a duel. Returns False if there is already an active duel in this chat."""
+    if chat_id in __active_duel_chats:
+        return False
+    __active_duel_chats.add(chat_id)
     announce = __fmt(random.choice(__DUEL_ANNOUNCE), p1=p1_username, p2=p2_username)
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔫", callback_data=DUEL_CALLBACK_DATA)]])
     msg = await context.bot.send_message(
@@ -79,6 +85,7 @@ async def __send_duel(
     __pending_duels[msg.message_id] = (chat_id, p1_id, p1_username, p2_id, p2_username)
     job = context.job_queue.run_once(__expire_duel, DUEL_TIMEOUT_SECONDS, data=msg.message_id)
     __duel_jobs[msg.message_id] = job
+    return True
 
 
 async def cmd_duel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -93,10 +100,12 @@ async def cmd_duel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     pool = eligible if len(eligible) >= 2 else members
     (p1_id, p1_username), (p2_id, p2_username) = random.sample(pool, 2)
 
-    await __send_duel(
+    started = await __send_duel(
         context, chat_id, p1_id, p1_username, p2_id, p2_username,
         reply_to_message_id=update.message.message_id,
     )
+    if not started:
+        await update.message.reply_text("В чате уже идёт дуэль. Дождитесь её завершения.")
 
 
 async def handle_duel_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -139,12 +148,14 @@ async def handle_duel_mention(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Нельзя вызвать на дуэль самого себя.")
         return True
 
-    await __send_duel(
+    started = await __send_duel(
         context, chat_id,
         challenger_id, challenger_username,
         target_id, target_uname,
         reply_to_message_id=update.message.message_id,
     )
+    if not started:
+        await update.message.reply_text("В чате уже идёт дуэль. Дождитесь её завершения.")
     return True
 
 
@@ -189,6 +200,7 @@ async def handle_duel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             __fmt(win_template, winner=winner_username, loser=loser_username)
         )
 
+    __active_duel_chats.discard(chat_id)
     await achievements.increment_stat(clicker_id, chat_id, winner_username, "duel_wins")
     await notify_unlocks(context, chat_id, clicker_id, winner_username)
 
@@ -201,6 +213,7 @@ async def __expire_duel(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     chat_id, p1_id, p1_username, p2_id, p2_username = duel
+    __active_duel_chats.discard(chat_id)
     text = __fmt(random.choice(__DUEL_EXPIRED), p1=p1_username, p2=p2_username)
     try:
         await context.bot.edit_message_reply_markup(
