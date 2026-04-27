@@ -14,7 +14,7 @@ __ROULETTE_ANNOUNCE = [
     "🎰 Внимание, чат. Сегодня — русская рулетка. Барабан заряжен. Кто-то сегодня не жилец.",
     "🔫 Время пришло. Еженедельная рулетка объявляется открытой. Один патрон, один участник.",
     "💀 Русская рулетка запущена. Удача — она такая: сегодня есть, завтра нет.",
-    "🎲 Еженедельный ритуал начинается. Барабан крутится. Кто-то из вас сегодня — жертва случая.",
+    "🎲 Ритуал начинается. Барабан крутится. Кто-то из вас сегодня — жертва случая.",
     "🔫 Господа геймеры. Рулетка. Один выстрел. Один из вас. Начинаем.",
 ]
 
@@ -113,6 +113,6 @@ async def cmd_ruletka(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     chat_id = update.effective_chat.id
     members = await achievements.get_chat_members(chat_id)
     if len(members) < 2:
-        await update.message.reply_text("Не с кем играть. Пусть сначала кто-нибудь напишет в чат.")
+        await update.message.reply_text("Не с кем играть. Нужно хотя бы 2 участника в чате.")
         return
     await __run_roulette_for_chat(context, chat_id, reply_to_message_id=update.message.message_id)

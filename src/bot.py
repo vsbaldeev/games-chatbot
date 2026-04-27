@@ -65,6 +65,12 @@ def main() -> None:
     )
 
     app.add_handler(TypeHandler(Update, handlers.track_member), group=-1)
+    app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS & filters.ChatType.GROUPS,
+            handlers.handle_new_chat_members,
+        )
+    )
 
     app.add_handler(CommandHandler("start", commands.cmd_start, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("help", commands.cmd_help, filters=filters.ChatType.GROUPS))

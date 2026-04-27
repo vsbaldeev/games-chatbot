@@ -111,6 +111,17 @@ async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await achievements.register_member(update.effective_chat.id, user.id, username)
 
 
+async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.new_chat_members:
+        return
+    chat_id = update.effective_chat.id
+    for user in update.message.new_chat_members:
+        if user.is_bot:
+            continue
+        username = user.username or user.first_name or fallback_username(user.id)
+        await achievements.register_member(chat_id, user.id, username)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
