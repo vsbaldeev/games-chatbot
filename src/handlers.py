@@ -209,7 +209,15 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     if update.effective_user and update.effective_user.is_bot:
         return
+
+    username = get_username(update)
+    numeric_chat_id = update.effective_chat.id
+    chat_id = str(numeric_chat_id)
+    user_id = update.effective_user.id
+
     if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, numeric_chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, numeric_chat_id, user_id, username)
         return
 
     if msg.voice:
@@ -220,11 +228,6 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         filename = "video_note.mp4"
     else:
         return
-
-    username = get_username(update)
-    chat_id = str(update.effective_chat.id)
-    numeric_chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
 
     if msg.voice:
         await achievements.increment_stat(user_id, numeric_chat_id, username, "voice_messages")
@@ -273,13 +276,16 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     if update.effective_user and update.effective_user.is_bot:
         return
-    if msg.forward_origin is not None:
-        return
 
     username = get_username(update)
     user_id = update.effective_user.id
     numeric_chat_id = update.effective_chat.id
     chat_id = str(numeric_chat_id)
+
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, numeric_chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, numeric_chat_id, user_id, username)
+        return
 
     await achievements.increment_stat(user_id, numeric_chat_id, username, "photo_messages")
     await notify_unlocks(context, numeric_chat_id, user_id, username)
@@ -363,6 +369,10 @@ async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_T
     username = get_username(update)
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        return
     await achievements.increment_stat(user_id, chat_id, username, "sticker_messages")
     await notify_unlocks(context, chat_id, user_id, username)
 
@@ -373,11 +383,13 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     if update.effective_user and update.effective_user.is_bot:
         return
-    if msg.forward_origin is not None:
-        return
     username = get_username(update)
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        return
     await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await notify_unlocks(context, chat_id, user_id, username)
 
