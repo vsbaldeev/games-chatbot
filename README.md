@@ -197,10 +197,11 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 ```
 multiplayer - одна кооп/онлайн игра PS5/PC с ценой в TRY
 singleplayer - одна одиночная игра PS5 с ценой в TRY
-achievements - достижения
-rank - мой ранг
-top - рейтинг чата
+achievements - последние достижения
+top - топ чата по достижениям
 prozharka - случайный участник получает по заслугам
+ruletka - русская рулетка
+duel - эмодзи-дуэль между двумя участниками
 help - помощь
 ```
 
