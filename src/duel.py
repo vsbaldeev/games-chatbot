@@ -5,7 +5,7 @@ import re
 import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 from telegram.ext import ContextTypes, Job
 
 from src import achievements, config
@@ -137,27 +137,38 @@ async def __countdown_and_activate(context: ContextTypes.DEFAULT_TYPE) -> None:
     message_id, chat_id, p1_id, p1_username, p2_id, p2_username = context.job.data
     header = __duel_header(p1_username, p2_username)
 
-    for seconds_left in range(DUEL_COUNTDOWN_SECONDS, 0, -1):
+    for seconds_left in range(DUEL_COUNTDOWN_SECONDS, 0, -2):
         try:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=f"{header}\n\n⏱ Дуэль начнётся через {seconds_left}...",
             )
+        except RetryAfter as err:
+            await asyncio.sleep(err.retry_after)
         except TelegramError:
             pass
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔫", callback_data=DUEL_FIRE_CALLBACK)]])
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=__build_duel_text(p1_username, p2_username, []),
-            reply_markup=keyboard,
-        )
-    except TelegramError as err:
-        logger.warning(f"Failed to activate duel {message_id}: {err}")
+    activated = False
+    for _ in range(5):
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=__build_duel_text(p1_username, p2_username, []),
+                reply_markup=keyboard,
+            )
+            activated = True
+            break
+        except RetryAfter as err:
+            await asyncio.sleep(err.retry_after)
+        except TelegramError as err:
+            logger.warning(f"Failed to activate duel {message_id}: {err}")
+            break
+
+    if not activated:
         __active_duel_chats.discard(chat_id)
         return
 
