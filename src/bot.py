@@ -83,7 +83,7 @@ def main() -> None:
     app.add_handler(CommandHandler("prozharka", prozharka.cmd_prozharka, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("ruletka", roulette.cmd_ruletka, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("duel", duel.cmd_duel, filters=filters.ChatType.GROUPS))
-    app.add_handler(CallbackQueryHandler(duel.handle_duel_callback, pattern=f"^{duel.DUEL_CALLBACK_DATA}$"))
+    app.add_handler(CallbackQueryHandler(duel.handle_duel_callback, pattern=duel.DUEL_CALLBACK_PATTERN))
 
     app.add_handler(
         MessageHandler(
