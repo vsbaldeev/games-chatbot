@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update
 from telegram.error import TelegramError
@@ -160,7 +161,7 @@ async def __countdown_and_activate(context: ContextTypes.DEFAULT_TYPE) -> None:
         __active_duel_chats.discard(chat_id)
         return
 
-    __active_duels[message_id] = (chat_id, p1_id, p1_username, p2_id, p2_username, [])
+    __active_duels[message_id] = (chat_id, p1_id, p1_username, p2_id, p2_username, [], time.monotonic())
     job = context.job_queue.run_once(__expire_duel, DUEL_FIRE_TIMEOUT, data=message_id)
     __duel_timeout_jobs[message_id] = job
 
@@ -320,7 +321,8 @@ async def __handle_fire(query, context):
         await query.answer("Дуэль уже завершена.", show_alert=True)
         return
 
-    chat_id, p1_id, p1_username, p2_id, p2_username, shot_log = claimed
+    chat_id, p1_id, p1_username, p2_id, p2_username, shot_log, button_shown_at = claimed
+    elapsed = time.monotonic() - button_shown_at
 
     if clicker_id not in (p1_id, p2_id):
         __active_duels[message_id] = claimed
@@ -332,12 +334,13 @@ async def __handle_fire(query, context):
     other_username = p2_username if clicker_id == p1_id else p1_username
 
     outcome = random.choices(["hit", "self", "miss"], weights=[80, 10, 10])[0]
+    elapsed_str = f"⚡ {elapsed:.2f} сек"
 
     if outcome == "miss":
-        miss_line = __fmt(random.choice(__DUEL_MISS), shooter=shooter_username)
+        miss_line = f"{__fmt(random.choice(__DUEL_MISS), shooter=shooter_username)} ({elapsed_str})"
         updated_log = shot_log + [miss_line]
         # Re-insert before any await so the duel stays claimable
-        __active_duels[message_id] = (chat_id, p1_id, p1_username, p2_id, p2_username, updated_log)
+        __active_duels[message_id] = (chat_id, p1_id, p1_username, p2_id, p2_username, updated_log, time.monotonic())
 
         await query.answer("💨 Промах! Теперь ход соперника!")
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔫", callback_data=DUEL_FIRE_CALLBACK)]])
@@ -350,7 +353,7 @@ async def __handle_fire(query, context):
             pass
 
     elif outcome == "self":
-        self_line = __fmt(random.choice(__DUEL_SELF), shooter=shooter_username, other=other_username)
+        self_line = f"{__fmt(random.choice(__DUEL_SELF), shooter=shooter_username, other=other_username)} ({elapsed_str})"
         updated_log = shot_log + [self_line]
 
         await query.answer("😵 Ты выстрелил себе! Дуэль проиграна!")
@@ -359,7 +362,7 @@ async def __handle_fire(query, context):
         await notify_unlocks(context, chat_id, other_id, other_username)
 
     else:  # hit
-        hit_line = __fmt(random.choice(__DUEL_HIT), shooter=shooter_username, target=other_username)
+        hit_line = f"{__fmt(random.choice(__DUEL_HIT), shooter=shooter_username, target=other_username)} ({elapsed_str})"
         updated_log = shot_log + [hit_line]
 
         await query.answer("💥 БАХ! Ты попал!")
