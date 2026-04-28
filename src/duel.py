@@ -344,7 +344,7 @@ async def __handle_fire(query, context):
     other_id = p2_id if clicker_id == p1_id else p1_id
     other_username = p2_username if clicker_id == p1_id else p1_username
 
-    outcome = random.choices(["hit", "self", "miss"], weights=[80, 10, 10])[0]
+    outcome = random.choices(["hit", "self", "miss"], weights=[60, 20, 20])[0]
     elapsed_str = f"⚡ {elapsed:.2f} сек"
 
     if outcome == "miss":
