@@ -550,7 +550,7 @@ async def __start_lobby(
     chat_id = update.effective_chat.id
 
     if chat_id in __active_chats:
-        await update.message.reply_text("В чате уже идёт D&D-приключение. Дождитесь его завершения.")
+        await update.message.reply_text("⚔️ В чате уже идёт D&D-приключение. Дождитесь его завершения.")
         return
 
     initiator = update.effective_user
