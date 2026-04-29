@@ -77,11 +77,12 @@ def is_reply_to_bot(update: Update, bot_id: int) -> bool:
     return reply.from_user.id == bot_id
 
 
-def is_reply_to_dnd_message(update: Update) -> bool:
+def is_reply_to_game_message(update: Update) -> bool:
     reply = update.message.reply_to_message
     if not reply:
         return False
-    return (reply.text or "").startswith("⚔️")
+    text = reply.text or ""
+    return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
 def is_night_message(update: Update) -> bool:

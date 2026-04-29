@@ -21,7 +21,7 @@ from src.helpers import (
     is_bot_mentioned,
     is_night_message,
     is_reply_to_bot,
-    is_reply_to_dnd_message,
+    is_reply_to_game_message,
     notify_unlocks,
     to_telegram_md,
     OFFENSE_RE,
@@ -173,7 +173,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_direct:
         return
 
-    if is_reply_to_dnd_message(update):
+    if is_reply_to_game_message(update):
         return
 
     if OFFENSE_RE.search(text) and is_reply_to_bot(update, bot_id):
