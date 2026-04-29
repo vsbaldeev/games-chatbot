@@ -236,7 +236,7 @@ async def __generate_round(
     system_prompt = (
         "Ты генератор сценариев для D&D-игры в Telegram-чате геймеров.\n"
         "Твой ответ должен быть строго в формате (без лишних слов):\n"
-        "СЦЕНАРИЙ: <одно-два предложения — смешной, абсурдный фэнтезийный сценарий>\n"
+        "СЦЕНАРИЙ: <одно короткое предложение — смешной абсурдный сценарий>\n"
         "Д1: <понятное действие 3-6 слов>\n"
         "Д2: <понятное действие 3-6 слов>\n"
         "Д3: <понятное действие 3-6 слов>\n\n"
@@ -297,7 +297,7 @@ async def __generate_round(
             )
 
     response = await asyncio.wait_for(
-        __llm(300).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return __parse_scenario(response.content)
@@ -316,7 +316,7 @@ async def __generate_coop_round(
         system_prompt = (
             "Ты генератор сценариев для D&D-кооп-игры в Telegram-чате геймеров.\n"
             "Твой ответ должен быть строго в формате (без лишних слов):\n"
-            "СЦЕНАРИЙ: <одно-два предложения — смешное описание встречи с боссом>\n"
+            "СЦЕНАРИЙ: <одно короткое предложение — встреча с боссом>\n"
             "БОСС: <смешное имя босса (3-6 слов)>\n"
             "Д1: <понятное кооперативное действие 3-6 слов>\n"
             "Д2: <понятное кооперативное действие 3-6 слов>\n"
@@ -329,7 +329,7 @@ async def __generate_coop_round(
             "Действия должны быть кооперативными атаками/стратегиями против этого конкретного босса."
         )
         response = await asyncio.wait_for(
-            __llm(300).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+            __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
             timeout=DND_LLM_TIMEOUT,
         )
         scenario, parsed_boss_name, actions = __parse_coop_scenario(response.content)
@@ -338,7 +338,7 @@ async def __generate_coop_round(
         system_prompt = (
             "Ты генератор сценариев для D&D-кооп-игры в Telegram-чате геймеров.\n"
             "Твой ответ должен быть строго в формате (без лишних слов):\n"
-            "СЦЕНАРИЙ: <одно-два предложения — продолжение битвы с боссом>\n"
+            "СЦЕНАРИЙ: <одно короткое предложение — продолжение битвы>\n"
             "Д1: <понятное кооперативное действие 3-6 слов>\n"
             "Д2: <понятное кооперативное действие 3-6 слов>\n"
             "Д3: <понятное кооперативное действие 3-6 слов>\n\n"
@@ -356,7 +356,7 @@ async def __generate_coop_round(
             "Действия — финальные кооперативные атаки/решающие манёвры."
         )
         response = await asyncio.wait_for(
-            __llm(300).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+            __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
             timeout=DND_LLM_TIMEOUT,
         )
         scenario, actions = __parse_scenario(response.content)
@@ -468,13 +468,13 @@ async def __generate_narrative(
         f"Текущая ситуация: {scenario}\n\n"
         "Игроки и их действия:\n"
         + "\n".join(player_lines)
-        + f"\n\nНапиши единый связный смешной нарратив (2-3 предложения). "
+        + f"\n\nНапиши смешной нарратив (1-2 предложения). "
         "Обязательно упомяни каждого игрока. "
         "Бросок 1 = катастрофически смешной провал. Бросок 20 = невероятный триумф. "
         f"{ending_instruction}"
     )
     response = await asyncio.wait_for(
-        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
@@ -536,10 +536,10 @@ async def __generate_coop_narrative(
         + f"\n\n{outcome_instruction}\n"
         "Обязательно упомяни каждого игрока. "
         "Бросок 1 = катастрофически смешной промах. Бросок 20 = невероятно мощный удар. "
-        "Нарратив — 2-3 предложения."
+        "Нарратив — 1-2 предложения."
     )
     response = await asyncio.wait_for(
-        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
