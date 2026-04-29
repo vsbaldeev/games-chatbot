@@ -644,14 +644,13 @@ async def __handle_join(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if len(lobby.players) < DND_MIN_PLAYERS:
         await query.answer()
-        try:
-            await query.edit_message_text(
-                __build_lobby_text(lobby, max_rounds, mode),
-                reply_markup=__build_lobby_keyboard(),
-                parse_mode="Markdown",
-            )
-        except TelegramError:
-            pass
+        await __edit_safe(
+            context.bot,
+            query.message.chat_id,
+            query.message.message_id,
+            __build_lobby_text(lobby, max_rounds, mode),
+            __build_lobby_keyboard(),
+        )
         return
 
     # Minimum reached — atomically claim the lobby before any await to prevent double-start.
