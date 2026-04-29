@@ -343,7 +343,6 @@ async def __generate_coop_round(
             "Только русский язык. Никакого другого текста."
         )
         history_text = "\n\n".join(
-        history_text = "\n\n".join(
             f"Раунд {idx + 1}: {entry['narrative']}"
             for idx, entry in enumerate(history)
         )
