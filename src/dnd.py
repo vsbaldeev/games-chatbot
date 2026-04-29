@@ -46,7 +46,7 @@ DND_LLM_TIMEOUT = 30
 DND_BOT_PLAYER_ID = 0           # sentinel user_id — no real Telegram user has ID 0
 DND_BOT_PLAYER_NAME = "ДнД-Бот"
 
-__ACTION_RE = re.compile(r"^Д([1-4]):\s*(.+)$")
+__ACTION_RE = re.compile(r"^Д([1-3]):\s*(.+)$")
 
 
 @dataclass
@@ -188,16 +188,10 @@ def __build_game_text(game: ActiveGame) -> str:
 
 
 def __build_game_keyboard(game: ActiveGame) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = []
-    row: list[InlineKeyboardButton] = []
-    for index, action in enumerate(game.actions):
-        row.append(InlineKeyboardButton(action, callback_data=f"{DND_ACTION_CALLBACK_PREFIX}{index}"))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    return InlineKeyboardMarkup(buttons)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(action, callback_data=f"{DND_ACTION_CALLBACK_PREFIX}{index}")]
+        for index, action in enumerate(game.actions)
+    ])
 
 
 async def __edit_safe(
@@ -242,10 +236,9 @@ async def __generate_round(
         "Ты генератор сценариев для D&D-игры в Telegram-чате геймеров.\n"
         "Твой ответ должен быть строго в формате (без лишних слов):\n"
         "СЦЕНАРИЙ: <одно-два предложения — смешной, абсурдный фэнтезийный сценарий>\n"
-        "Д1: <действие 2-3 слова>\n"
-        "Д2: <действие 2-3 слова>\n"
-        "Д3: <действие 2-3 слова>\n"
-        "Д4: <действие 2-3 слова>\n\n"
+        "Д1: <понятное действие 3-6 слов>\n"
+        "Д2: <понятное действие 3-6 слов>\n"
+        "Д3: <понятное действие 3-6 слов>\n\n"
         "Только русский язык. Никакого другого текста."
     )
 
@@ -323,10 +316,9 @@ async def __generate_coop_round(
             "Твой ответ должен быть строго в формате (без лишних слов):\n"
             "СЦЕНАРИЙ: <одно-два предложения — смешное описание встречи с боссом>\n"
             "БОСС: <смешное имя босса (3-6 слов)>\n"
-            "Д1: <кооперативное действие 2-3 слова>\n"
-            "Д2: <кооперативное действие 2-3 слова>\n"
-            "Д3: <кооперативное действие 2-3 слова>\n"
-            "Д4: <кооперативное действие 2-3 слова>\n\n"
+            "Д1: <понятное кооперативное действие 3-6 слов>\n"
+            "Д2: <понятное кооперативное действие 3-6 слов>\n"
+            "Д3: <понятное кооперативное действие 3-6 слов>\n\n"
             "Только русский язык. Никакого другого текста."
         )
         user_prompt = (
@@ -345,10 +337,9 @@ async def __generate_coop_round(
             "Ты генератор сценариев для D&D-кооп-игры в Telegram-чате геймеров.\n"
             "Твой ответ должен быть строго в формате (без лишних слов):\n"
             "СЦЕНАРИЙ: <одно-два предложения — продолжение битвы с боссом>\n"
-            "Д1: <кооперативное действие 2-3 слова>\n"
-            "Д2: <кооперативное действие 2-3 слова>\n"
-            "Д3: <кооперативное действие 2-3 слова>\n"
-            "Д4: <кооперативное действие 2-3 слова>\n\n"
+            "Д1: <понятное кооперативное действие 3-6 слов>\n"
+            "Д2: <понятное кооперативное действие 3-6 слов>\n"
+            "Д3: <понятное кооперативное действие 3-6 слов>\n\n"
             "Только русский язык. Никакого другого текста."
         )
         history_text = "\n\n".join(
@@ -381,12 +372,12 @@ def __parse_scenario(text: str) -> tuple[str, list[str]]:
         else:
             match = __ACTION_RE.match(stripped)
             if match:
-                parsed[int(match.group(1))] = match.group(2).strip()[:40]
+                parsed[int(match.group(1))] = match.group(2).strip()[:50]
 
     if not scenario:
         scenario = "Отряд оказался в таверне, где все посетители — говорящие грибы с мнением."
-    fallback_actions = ["Бежать", "Атаковать", "Переговоры", "Притвориться мёртвым"]
-    actions = [parsed.get(idx) or fallback_actions[idx - 1] for idx in range(1, 5)]
+    fallback_actions = ["Бежать со всех ног", "Атаковать в лоб", "Попробовать договориться"]
+    actions = [parsed.get(idx) or fallback_actions[idx - 1] for idx in range(1, 4)]
     return scenario, actions
 
 
@@ -403,14 +394,14 @@ def __parse_coop_scenario(text: str) -> tuple[str, str, list[str]]:
         else:
             match = __ACTION_RE.match(stripped)
             if match:
-                parsed[int(match.group(1))] = match.group(2).strip()[:40]
+                parsed[int(match.group(1))] = match.group(2).strip()[:50]
 
     if not scenario:
         scenario = "Перед отрядом возник монструозный противник, исполненный бюрократической мощи."
     if not boss_name:
         boss_name = "Великий Неизвестный Босс"
-    fallback_actions = ["Атаковать вместе", "Найти слабость", "Отвлечь босса", "Позвать подкрепление"]
-    actions = [parsed.get(idx) or fallback_actions[idx - 1] for idx in range(1, 5)]
+    fallback_actions = ["Атаковать все вместе", "Найти слабое место", "Отвлечь и ударить сзади"]
+    actions = [parsed.get(idx) or fallback_actions[idx - 1] for idx in range(1, 4)]
     return scenario, boss_name, actions
 
 
