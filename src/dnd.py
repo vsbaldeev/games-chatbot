@@ -141,18 +141,18 @@ def __build_lobby_text(lobby: LobbyState, max_rounds: int, mode: str) -> str:
     status = "готово к старту!" if count >= DND_MIN_PLAYERS else f"нужно ещё {remaining}"
 
     if mode == "pvp":
-        header = "⚔️ *D&D — Все против всех* (1 раунд)"
+        header = "⚔️ D&D — Все против всех (1 раунд)"
     elif mode == "coop":
-        header = "⚔️ *D&D — Кооп против Босса* (2 раунда)"
+        header = "⚔️ D&D — Кооп против Босса (2 раунда)"
     else:  # heist
-        header = "🎩 *D&D — Великое Ограбление* (3 раунда)"
+        header = "🎩 D&D — Великое Ограбление (3 раунда)"
 
     return (
         f"{header}\n\n"
         f"Набирается отряд!\n"
         f"Нужно минимум {DND_MIN_PLAYERS} игрока.\n\n"
         f"Отряд ({count}) — {status}:\n{player_lines}\n\n"
-        f"_Лобби закроется через 5 минут._"
+        f"Лобби закроется через 5 минут."
     )
 
 
@@ -582,7 +582,6 @@ async def __start_lobby(
     msg = await update.message.reply_text(
         __build_lobby_text(lobby, max_rounds, mode),
         reply_markup=__build_lobby_keyboard(),
-        parse_mode="Markdown",
     )
     lobby.message_id = msg.message_id
     __lobbies[chat_id] = (lobby, max_rounds, mode)
