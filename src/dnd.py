@@ -90,6 +90,7 @@ def __llm(max_tokens: int = 300) -> ChatGroq:
         api_key=config.GROQ_API_KEY,
         temperature=0.95,
         max_tokens=max_tokens,
+        model_kwargs={"include_reasoning": False},
     )
 
 
@@ -466,7 +467,7 @@ async def __generate_narrative(
         f"{ending_instruction}"
     )
     response = await asyncio.wait_for(
-        __llm(400).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(600).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
@@ -531,7 +532,7 @@ async def __generate_coop_narrative(
         "Нарратив — СТРОГО 2 коротких предложения, не длиннее."
     )
     response = await asyncio.wait_for(
-        __llm(400).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(600).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
