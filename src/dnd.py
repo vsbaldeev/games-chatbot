@@ -460,13 +460,13 @@ async def __generate_narrative(
         f"Текущая ситуация: {scenario}\n\n"
         "Игроки и их действия:\n"
         + "\n".join(player_lines)
-        + f"\n\nНапиши смешной нарратив (1-2 предложения). "
+        + f"\n\nНапиши смешной нарратив — СТРОГО 2 коротких предложения, не длиннее. "
         "Обязательно упомяни каждого игрока. "
         "Бросок 1 = катастрофически смешной провал. Бросок 20 = невероятный триумф. "
         f"{ending_instruction}"
     )
     response = await asyncio.wait_for(
-        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(400).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
@@ -528,10 +528,10 @@ async def __generate_coop_narrative(
         + f"\n\n{outcome_instruction}\n"
         "Обязательно упомяни каждого игрока. "
         "Бросок 1 = катастрофически смешной промах. Бросок 20 = невероятно мощный удар. "
-        "Нарратив — 1-2 предложения."
+        "Нарратив — СТРОГО 2 коротких предложения, не длиннее."
     )
     response = await asyncio.wait_for(
-        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(400).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
