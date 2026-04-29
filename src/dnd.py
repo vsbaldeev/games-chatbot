@@ -231,6 +231,7 @@ async def __generate_round(
     max_rounds: int,
     mode: str,
     history: list[dict],
+    players: list[tuple[int, str]] | None = None,
 ) -> tuple[str, list[str]]:
     system_prompt = (
         "Ты генератор сценариев для D&D-игры в Telegram-чате геймеров.\n"
@@ -244,12 +245,13 @@ async def __generate_round(
 
     if not history:
         if mode == "pvp":
+            names = ", ".join(f"@{name}" for _, name in (players or [])) or f"{player_count} игроков"
             user_prompt = (
-                f"Придумай смешной абсурдный фэнтезийный PvP-сценарий для {player_count} игроков, "
-                "где они соревнуются друг против друга — только один победит. "
-                "Примеры: драка за последний кусок пирога у дракона, гонка за магическим артефактом, "
-                "конкурс на звание придворного шута, спор кто громче напугает нежить. "
-                "Действия должны быть конкурентными и контекстно-специфичными для этого сценария."
+                f"Придумай смешной абсурдный фэнтезийный сценарий прямой драки между {names}. "
+                "Они дерутся друг с другом — один на один, все против всех, без NPC-противников. "
+                "Примеры: делят последний кусок пирога у дракона, выясняют кто лучший маг в таверне, "
+                "спор перерос в магическую дуэль, гонка за артефактом где мешать друг другу — главное. "
+                "Действия — боевые приёмы и трюки против соперников, конкретные для этой ситуации."
             )
         elif mode == "heist":
             user_prompt = (
@@ -431,9 +433,10 @@ async def __generate_narrative(
 
     if is_pvp:
         ending_instruction = (
-            "Это PvP-схватка — определи победителя по броскам и действиям. "
-            "Победитель должен быть назван явно и смешно прославлен. "
-            "Остальные должны быть смешно унижены."
+            "Это прямая драка игроков друг с другом. "
+            "Опиши конкретные столкновения между ними — кто кого ударил, подставил, обхитрил. "
+            "Победитель (самый высокий бросок) должен быть назван явно и смешно прославлен. "
+            "Проигравшие (низкие броски) — смешно унижены конкретными соперниками, не абстрактно."
         )
     elif is_heist and is_final:
         ending_instruction = (
@@ -748,7 +751,7 @@ async def __start_game_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             boss_max_hp = random.randint(len(players) * 15, len(players) * 20)
         else:
             scenario, actions = await __generate_round(
-                len(players), round_number=1, max_rounds=max_rounds, mode=mode, history=[],
+                len(players), round_number=1, max_rounds=max_rounds, mode=mode, history=[], players=players,
             )
     except Exception as error:
         logger.warning(f"DnD scenario generation failed for chat {chat_id}: {error}")
@@ -973,7 +976,7 @@ async def __next_round_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         else:
             scenario, actions = await __generate_round(
-                len(game.players), game.round_number, game.max_rounds, game.mode, game.history,
+                len(game.players), game.round_number, game.max_rounds, game.mode, game.history, game.players,
             )
     except Exception as error:
         logger.warning(f"DnD round {game.round_number} generation failed for chat {chat_id}: {error}")
