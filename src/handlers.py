@@ -3,6 +3,7 @@ import io
 import logging
 import random
 import re
+from collections import OrderedDict
 
 from groq import AsyncGroq
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -28,6 +29,10 @@ from src.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# (chat_id, message_id) → (user_id, username); capped to avoid unbounded growth
+__MSG_AUTHOR_CACHE: OrderedDict[tuple[int, int], tuple[int, str]] = OrderedDict()
+__MSG_AUTHOR_CACHE_MAX = 2000
 
 WHISPER_MODEL = "whisper-large-v3"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -110,6 +115,12 @@ async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     username = user.username or user.first_name or fallback_username(user.id)
     await achievements.register_member(update.effective_chat.id, user.id, username)
+
+    if update.message and not user.is_bot:
+        key = (update.effective_chat.id, update.message.message_id)
+        __MSG_AUTHOR_CACHE[key] = (user.id, username)
+        if len(__MSG_AUTHOR_CACHE) > __MSG_AUTHOR_CACHE_MAX:
+            __MSG_AUTHOR_CACHE.popitem(last=False)
 
 
 async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -411,12 +422,12 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not added_emojis:
         return
 
-    reactor = reaction.user
-    reactor_username = reactor.username or reactor.first_name or fallback_username(reactor.id)
     chat_id = reaction.chat.id
+    author = __MSG_AUTHOR_CACHE.get((chat_id, reaction.message_id))
+    if not author:
+        return
 
-    # The Telegram API only exposes the reactor in MessageReactionUpdated, not the original
-    # message author. We credit the reactor's stats as a proxy for engagement.
+    author_id, author_username = author
     stat_map = [
         (__LAUGH_EMOJIS, "laugh_reactions"),
         (__HEART_EMOJIS, "heart_reactions"),
@@ -425,5 +436,5 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]
     for emoji_set, stat_name in stat_map:
         if added_emojis & emoji_set:
-            await achievements.increment_stat(reactor.id, chat_id, reactor_username, stat_name)
-            await notify_unlocks(context, chat_id, reactor.id, reactor_username)
+            await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
+            await notify_unlocks(context, chat_id, author_id, author_username)
