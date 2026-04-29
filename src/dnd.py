@@ -30,7 +30,6 @@ from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 from src import achievements, config
-from src.helpers import to_telegram_md
 
 logger = logging.getLogger(__name__)
 
@@ -169,14 +168,14 @@ def __build_game_text(game: ActiveGame) -> str:
         for player_id, username in game.players
     )
     if game.mode == "coop":
-        hp_line = f"👹 *{game.boss_name}* — ❤️ {game.boss_hp}/{game.boss_max_hp} HP\n\n"
-        round_header = f"⚔️ *D&D Кооп — Раунд {game.round_number}/{game.max_rounds}*"
+        hp_line = f"👹 {game.boss_name} — ❤️ {game.boss_hp}/{game.boss_max_hp} HP\n\n"
+        round_header = f"⚔️ D&D Кооп — Раунд {game.round_number}/{game.max_rounds}"
     elif game.mode == "pvp":
         hp_line = ""
-        round_header = "⚔️ *D&D — Все против всех*"
+        round_header = "⚔️ D&D — Все против всех"
     else:  # heist
         hp_line = ""
-        round_header = f"🎩 *Великое Ограбление — {__heist_phase_name(game.round_number)}*"
+        round_header = f"🎩 Великое Ограбление — {__heist_phase_name(game.round_number)}"
 
     return (
         f"{round_header}\n\n"
@@ -205,18 +204,11 @@ async def __edit_safe(
     if keyboard is not None:
         kwargs["reply_markup"] = keyboard
     try:
-        await bot.edit_message_text(
-            text=to_telegram_md(text),
-            parse_mode="Markdown",
-            **kwargs,
-        )
+        await bot.edit_message_text(text=text, **kwargs)
     except BadRequest as error:
         if "not modified" in str(error).lower():
             return
-        try:
-            await bot.edit_message_text(text=text, **kwargs)
-        except TelegramError as inner:
-            logger.warning(f"DnD edit failed for chat {chat_id} msg {message_id}: {inner}")
+        logger.warning(f"DnD edit failed for chat {chat_id} msg {message_id}: {error}")
     except TelegramError as error:
         logger.warning(f"DnD edit failed for chat {chat_id} msg {message_id}: {error}")
 
@@ -672,8 +664,7 @@ async def __handle_join(query, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         await query.edit_message_text(
-            "⚔️ *D&D Приключение*\n\n🎲 Генерация сценария...",
-            parse_mode="Markdown",
+            "⚔️ D&D Приключение\n\n🎲 Генерация сценария...",
         )
     except TelegramError:
         pass
@@ -860,22 +851,22 @@ async def __resolve_coop_round(
     if is_final:
         if players_won:
             round_title = "Победа! 🏆"
-            boss_line = f"👹 *{game.boss_name}* повержен!"
+            boss_line = f"👹 {game.boss_name} повержен!"
         else:
             round_title = "Поражение 💀"
-            boss_line = f"👹 *{game.boss_name}* выжил... ({game.boss_hp} HP осталось)"
+            boss_line = f"👹 {game.boss_name} выжил... ({game.boss_hp} HP осталось)"
         damage_line = f"💥 Финальный урон: {total_damage} — итого {game.boss_max_hp - game.boss_hp}/{game.boss_max_hp}"
     else:
         round_title = f"Раунд {game.round_number}/{game.max_rounds} — Итог"
-        boss_line = f"👹 *{game.boss_name}* — ❤️ {game.boss_hp}/{game.boss_max_hp} HP осталось"
+        boss_line = f"👹 {game.boss_name} — ❤️ {game.boss_hp}/{game.boss_max_hp} HP осталось"
         damage_line = f"💥 Суммарный урон: {total_damage}"
 
     result_text = (
-        f"⚔️ *D&D Кооп — {round_title}*\n\n"
+        f"⚔️ D&D Кооп — {round_title}\n\n"
         f"{narrative}\n\n"
         f"{damage_line}\n"
         f"{boss_line}\n\n"
-        f"🎲 *Броски:*\n" + "\n".join(roll_lines)
+        f"🎲 Броски:\n" + "\n".join(roll_lines)
     )
 
     await __edit_safe(context.bot, chat_id, game.message_id, result_text)
@@ -896,15 +887,14 @@ async def __resolve_standard_round(
     is_final: bool,
 ) -> None:
     if game.mode == "heist":
-        loading_header = f"🎩 *Великое Ограбление — {__heist_phase_name(game.round_number)}*"
+        loading_header = f"🎩 Великое Ограбление — {__heist_phase_name(game.round_number)}"
     else:
-        loading_header = f"⚔️ *D&D — Раунд {game.round_number}/{game.max_rounds}*"
+        loading_header = f"⚔️ D&D — Раунд {game.round_number}/{game.max_rounds}"
     try:
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=game.message_id,
             text=f"{loading_header}\n\n🎲 Подводим итоги...",
-            parse_mode="Markdown",
         )
     except TelegramError:
         pass
@@ -924,15 +914,15 @@ async def __resolve_standard_round(
     if game.mode == "heist":
         heist_result_titles = {1: "Проникновение — Итог", 2: "Дело — Итог", 3: "Побег — Финал"}
         round_title = heist_result_titles.get(game.round_number, f"Фаза {game.round_number} — Итог")
-        prefix = "🎩 *Великое Ограбление*"
+        prefix = "🎩 Великое Ограбление"
     else:
         round_title = "Финал" if is_final else f"Раунд {game.round_number}/{game.max_rounds} — Итог"
-        prefix = "⚔️ *D&D*"
+        prefix = "⚔️ D&D"
 
     result_text = (
         f"{prefix} — {round_title}\n\n"
         f"{narrative}\n\n"
-        f"🎲 *Броски:*\n" + "\n".join(roll_lines)
+        f"🎲 Броски:\n" + "\n".join(roll_lines)
     )
 
     await __edit_safe(context.bot, chat_id, game.message_id, result_text)
@@ -949,17 +939,16 @@ async def __next_round_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id, game = context.job.data
 
     if game.mode == "coop":
-        loading_text = f"⚔️ *D&D Кооп — Раунд {game.round_number}/{game.max_rounds}*\n\n🎲 Генерация продолжения..."
+        loading_text = f"⚔️ D&D Кооп — Раунд {game.round_number}/{game.max_rounds}\n\n🎲 Генерация продолжения..."
     elif game.mode == "heist":
-        loading_text = f"🎩 *Великое Ограбление — {__heist_phase_name(game.round_number)}*\n\n🎲 Генерация следующей фазы..."
+        loading_text = f"🎩 Великое Ограбление — {__heist_phase_name(game.round_number)}\n\n🎲 Генерация следующей фазы..."
     else:
-        loading_text = f"⚔️ *D&D — Раунд {game.round_number}/{game.max_rounds}*\n\n🎲 Генерация продолжения..."
+        loading_text = f"⚔️ D&D — Раунд {game.round_number}/{game.max_rounds}\n\n🎲 Генерация продолжения..."
 
     try:
         msg = await context.bot.send_message(
             chat_id=chat_id,
             text=loading_text,
-            parse_mode="Markdown",
         )
         game.message_id = msg.message_id
     except TelegramError as error:
