@@ -38,7 +38,7 @@ DND_JOIN_CALLBACK = "dnd_join"
 DND_ACTION_CALLBACK_PREFIX = "dnd_a"
 DND_CALLBACK_PATTERN = r"^dnd_"
 
-DND_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+DND_MODEL = "llama-3.3-70b-versatile"
 DND_MIN_PLAYERS = 3
 DND_ACTION_TIMEOUT = 45
 DND_LOBBY_TIMEOUT = 300
@@ -332,8 +332,6 @@ async def __generate_coop_round(
         user_prompt = (
             f"Придумай смешной абсурдный сценарий для {player_count} игроков, "
             "которые вместе сражаются против одного огромного абсурдного босса-NPC. "
-            "Примеры боссов: Разумная Налоговая Инспекция, Бессмертный Оператор Колл-центра, "
-            "Великий Дракон Дедлайнов, Корпоративный Дух Понедельника, Вечный Менеджер по Продажам. "
             "Действия должны быть кооперативными атаками/стратегиями против этого конкретного босса."
         )
         response = await asyncio.wait_for(
