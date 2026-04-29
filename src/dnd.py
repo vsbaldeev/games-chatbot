@@ -300,7 +300,7 @@ async def __generate_round(
             )
 
     response = await asyncio.wait_for(
-        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(300).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return __parse_scenario(response.content)
@@ -319,7 +319,7 @@ async def __generate_coop_round(
         system_prompt = (
             "Ты генератор сценариев для D&D-кооп-игры в Telegram-чате геймеров.\n"
             "Твой ответ должен быть строго в формате (без лишних слов):\n"
-            "СЦЕНАРИЙ: <одно короткое предложение — встреча с боссом>\n"
+            "СЦЕНАРИЙ: <2-3 предложения — смешная встреча с боссом: кто он, что делает, чем опасен>\n"
             "БОСС: <смешное имя босса (3-6 слов)>\n"
             "Д1: <понятное кооперативное действие 3-6 слов>\n"
             "Д2: <понятное кооперативное действие 3-6 слов>\n"
@@ -332,7 +332,7 @@ async def __generate_coop_round(
             "Действия должны быть кооперативными атаками/стратегиями против этого конкретного босса."
         )
         response = await asyncio.wait_for(
-            __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+            __llm(300).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
             timeout=DND_LLM_TIMEOUT,
         )
         scenario, parsed_boss_name, actions = __parse_coop_scenario(response.content)
@@ -341,7 +341,7 @@ async def __generate_coop_round(
         system_prompt = (
             "Ты генератор сценариев для D&D-кооп-игры в Telegram-чате геймеров.\n"
             "Твой ответ должен быть строго в формате (без лишних слов):\n"
-            "СЦЕНАРИЙ: <одно короткое предложение — продолжение битвы>\n"
+            "СЦЕНАРИЙ: <2-3 предложения — продолжение битвы: что изменилось, как реагирует босс>\n"
             "Д1: <понятное кооперативное действие 3-6 слов>\n"
             "Д2: <понятное кооперативное действие 3-6 слов>\n"
             "Д3: <понятное кооперативное действие 3-6 слов>\n\n"
@@ -359,7 +359,7 @@ async def __generate_coop_round(
             "Действия — финальные кооперативные атаки/решающие манёвры."
         )
         response = await asyncio.wait_for(
-            __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+            __llm(300).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
             timeout=DND_LLM_TIMEOUT,
         )
         scenario, actions = __parse_scenario(response.content)
