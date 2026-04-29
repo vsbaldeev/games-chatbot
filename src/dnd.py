@@ -37,7 +37,7 @@ DND_JOIN_CALLBACK = "dnd_join"
 DND_ACTION_CALLBACK_PREFIX = "dnd_a"
 DND_CALLBACK_PATTERN = r"^dnd_"
 
-DND_MODEL = "openai/gpt-oss-120b"
+DND_MODEL = "llama-3.3-70b-versatile"
 DND_MIN_PLAYERS = 3
 DND_ACTION_TIMEOUT = 45
 DND_LOBBY_TIMEOUT = 300
@@ -90,7 +90,6 @@ def __llm(max_tokens: int = 300) -> ChatGroq:
         api_key=config.GROQ_API_KEY,
         temperature=0.95,
         max_tokens=max_tokens,
-        model_kwargs={"include_reasoning": False},
     )
 
 
