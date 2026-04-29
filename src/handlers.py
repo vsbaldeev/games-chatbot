@@ -9,7 +9,7 @@ from groq import AsyncGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from telegram import Update
-from telegram.error import BadRequest
+
 from telegram.ext import ContextTypes
 
 from src import achievements, config
@@ -24,7 +24,7 @@ from src.helpers import (
     is_reply_to_bot,
     is_reply_to_game_message,
     notify_unlocks,
-    to_telegram_md,
+    strip_markdown,
     OFFENSE_RE,
 )
 
@@ -69,11 +69,7 @@ async def __send_agent_reply(update: Update, context: ContextTypes.DEFAULT_TYPE,
     await update.message.chat.send_action("typing")
     try:
         response = await run_agent(chat_id, username, message_text)
-        formatted = to_telegram_md(response)
-        try:
-            await update.message.reply_text(formatted, parse_mode="Markdown")
-        except BadRequest:
-            await update.message.reply_text(response)
+        await update.message.reply_text(strip_markdown(response))
         await notify_unlocks(context, numeric_chat_id, user_id, username)
     except DailyLimitError:
         logger.warning(f"Daily token quota exhausted for chat {chat_id}")
@@ -195,16 +191,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.chat.send_action("typing")
             try:
                 prozharka_text = await generate_prozharka_text(chat_id, username)
-                formatted = to_telegram_md(prozharka_text)
-                try:
-                    await update.message.reply_text(
-                        f"🔥 Прожарка @{username}:\n\n{formatted}",
-                        parse_mode="Markdown",
-                    )
-                except BadRequest:
-                    await update.message.reply_text(
-                        f"🔥 Прожарка @{username}:\n\n{prozharka_text}"
-                    )
+                await update.message.reply_text(
+                    f"🔥 Прожарка @{username}:\n\n{strip_markdown(prozharka_text)}"
+                )
                 await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
                 await notify_unlocks(context, chat_id, user_id, username)
             except Exception as error:
@@ -275,11 +264,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             SystemMessage(content=__VOICE_SYSTEM_PROMPT),
             HumanMessage(content=f"{username}: {transcript}"),
         ])
-        formatted = to_telegram_md(response.content)
-        try:
-            await msg.reply_text(formatted, parse_mode="Markdown")
-        except BadRequest:
-            await msg.reply_text(response.content)
+        await msg.reply_text(strip_markdown(response.content))
         await notify_unlocks(context, numeric_chat_id, update.effective_user.id, username)
     except Exception as error:
         logger.error(f"Voice reply error in chat {chat_id}: {error}")
@@ -365,11 +350,7 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 {"type": "text", "text": f"{username}: {user_text}"},
             ]),
         ])
-        formatted = to_telegram_md(response.content)
-        try:
-            await msg.reply_text(formatted, parse_mode="Markdown")
-        except BadRequest:
-            await msg.reply_text(response.content)
+        await msg.reply_text(strip_markdown(response.content))
         await notify_unlocks(context, numeric_chat_id, update.effective_user.id, username)
     except Exception as error:
         logger.error(f"Photo reply error in chat {chat_id}: {error}")

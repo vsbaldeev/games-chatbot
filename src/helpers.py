@@ -40,6 +40,15 @@ def to_telegram_md(text: str) -> str:
     return "\n".join(lines)
 
 
+def strip_markdown(text: str) -> str:
+    """Remove *bold* and _italic_ markers left by LLMs that ignore plain-text instructions."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"_(.+?)_", r"\1", text, flags=re.DOTALL)
+    lines = [line for line in text.splitlines() if not __TABLE_SEPARATOR_RE.match(line)]
+    return "\n".join(lines)
+
+
 def extract_game_card(response: str) -> str:
     """Strip intermediate tool-result summaries, returning only the final game card."""
     lines = response.splitlines()
