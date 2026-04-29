@@ -191,7 +191,8 @@ def __build_game_keyboard(game: ActiveGame) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
     for index, action in enumerate(game.actions):
-        row.append(InlineKeyboardButton(action, callback_data=f"{DND_ACTION_CALLBACK_PREFIX}{index}"))
+        label = action if len(action) <= 20 else action[:19] + "…"
+        row.append(InlineKeyboardButton(label, callback_data=f"{DND_ACTION_CALLBACK_PREFIX}{index}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
