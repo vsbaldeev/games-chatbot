@@ -104,15 +104,20 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 
 ## Commands
 
+See [bot_commands.md](bot_commands.md) for the full reference — lobby flow, round mechanics, triggers, and output formats.
+
 | Command | Description |
 |---|---|
+| `/dnd_pvp` | D&D adventure, 1 round, PvP |
+| `/dnd_coop` | D&D co-op, 2 rounds vs. a boss NPC |
+| `/dnd3` | The Great Heist — 3 phases: infiltration → the job → escape |
 | `/multiplayer` | One PS5/PC co-op or online game — crossplay status, TRY price, PS Store link; no repeats per chat |
 | `/singleplayer` | One PS5 single-player game (IGDB rating ≥ 75) — TRY price, PS Store link; no repeats per chat |
+| `/duel` | Emoji duel between 2 random chat members |
+| `/ruletka` | On-demand Russian roulette |
+| `/prozharka` | On-demand прожарка of a randomly chosen chat member |
 | `/achievements` | Last 3 earned achievements with total count |
 | `/top` | Top-3 chat leaderboard by achievement count |
-| `/prozharka` | On-demand прожарка of a randomly chosen chat member |
-| `/ruletka` | On-demand Russian roulette |
-| `/duel` | Start an emoji duel between 2 random chat members |
 | `/help` | Command list |
 
 ---
@@ -195,13 +200,16 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 **Register commands** so Telegram shows autocomplete in the chat. Send `/setcommands` to BotFather, select your bot, then paste:
 
 ```
+dnd_pvp - D&D приключение, 1 раунд, все против всех
+dnd_coop - D&D кооп, 2 раунда против босса
+dnd3 - Великое Ограбление — 3 фазы
 multiplayer - одна кооп/онлайн игра PS5/PC с ценой в TRY
 singleplayer - одна одиночная игра PS5 с ценой в TRY
+duel - эмодзи-дуэль между двумя участниками
+ruletka - русская рулетка
+prozharka - случайный участник получает по заслугам
 achievements - последние достижения
 top - топ чата по достижениям
-prozharka - случайный участник получает по заслугам
-ruletka - русская рулетка
-duel - эмодзи-дуэль между двумя участниками
 help - помощь
 ```
 
