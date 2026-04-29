@@ -652,7 +652,7 @@ async def __handle_join(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     lobby.players.append((clicker_id, clicker_username))
 
     if len(lobby.players) < DND_MIN_PLAYERS:
-        await query.answer(f"Добро пожаловать в отряд, {clicker_username}!")
+        await query.answer()
         try:
             await query.edit_message_text(
                 __build_lobby_text(lobby, max_rounds, mode),
