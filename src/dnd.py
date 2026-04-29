@@ -289,7 +289,7 @@ async def __generate_round(
             )
 
     response = await asyncio.wait_for(
-        __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return __parse_scenario(response.content)
@@ -321,7 +321,7 @@ async def __generate_coop_round(
             "Действия должны быть кооперативными атаками/стратегиями против этого конкретного босса."
         )
         response = await asyncio.wait_for(
-            __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+            __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
             timeout=DND_LLM_TIMEOUT,
         )
         scenario, parsed_boss_name, actions = __parse_coop_scenario(response.content)
@@ -348,7 +348,7 @@ async def __generate_coop_round(
             "Действия — финальные кооперативные атаки/решающие манёвры."
         )
         response = await asyncio.wait_for(
-            __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+            __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
             timeout=DND_LLM_TIMEOUT,
         )
         scenario, actions = __parse_scenario(response.content)
@@ -466,7 +466,7 @@ async def __generate_narrative(
         f"{ending_instruction}"
     )
     response = await asyncio.wait_for(
-        __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
@@ -531,7 +531,7 @@ async def __generate_coop_narrative(
         "Нарратив — 1-2 предложения."
     )
     response = await asyncio.wait_for(
-        __llm(120).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        __llm(200).ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=DND_LLM_TIMEOUT,
     )
     return response.content.strip()
