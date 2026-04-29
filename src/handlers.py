@@ -173,7 +173,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_direct:
         return
 
-    if is_reply_to_dnd_message(update) and not is_bot_mentioned(update) and "?" not in text:
+    if is_reply_to_dnd_message(update):
         return
 
     if OFFENSE_RE.search(text) and is_reply_to_bot(update, bot_id):
