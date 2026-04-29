@@ -3,7 +3,7 @@ D&D-style party game. Three modes:
 
   /dnd_pvp   — 1 round, players compete against each other (PvP)
   /dnd_coop  — 2 rounds, all players vs. a boss NPC (coop)
-  /dnd3      — 3 rounds, stealth/trickery heist (The Great Heist)
+  /dnd_heist      — 3 rounds, stealth/trickery heist (The Great Heist)
 
 If the chat has fewer than DND_MIN_PLAYERS registered members, the bot joins
 as an NPC character to fill the roster so two real users can still play.
@@ -352,6 +352,7 @@ async def __generate_coop_round(
             "Только русский язык. Никакого другого текста."
         )
         history_text = "\n\n".join(
+        history_text = "\n\n".join(
             f"Раунд {idx + 1}: {entry['narrative']}"
             for idx, entry in enumerate(history)
         )
@@ -605,7 +606,7 @@ async def cmd_dnd_coop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await __start_lobby(update, context, max_rounds=2, mode="coop")
 
 
-async def cmd_dnd3(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_dnd_heist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await __start_lobby(update, context, max_rounds=3, mode="heist")
 
 

@@ -86,7 +86,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(duel.handle_duel_callback, pattern=duel.DUEL_CALLBACK_PATTERN))
     app.add_handler(CommandHandler("dnd_pvp", dnd.cmd_dnd_pvp, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("dnd_coop", dnd.cmd_dnd_coop, filters=filters.ChatType.GROUPS))
-    app.add_handler(CommandHandler("dnd3", dnd.cmd_dnd3, filters=filters.ChatType.GROUPS))
+    app.add_handler(CommandHandler("dnd_heist", dnd.cmd_dnd_heist, filters=filters.ChatType.GROUPS))
     app.add_handler(CallbackQueryHandler(dnd.handle_dnd_callback, pattern=dnd.DND_CALLBACK_PATTERN))
 
     app.add_handler(

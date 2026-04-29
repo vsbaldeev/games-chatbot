@@ -110,7 +110,7 @@ See [bot_commands.md](bot_commands.md) for the full reference — lobby flow, ro
 |---|---|
 | `/dnd_pvp` | D&D adventure, 1 round, PvP |
 | `/dnd_coop` | D&D co-op, 2 rounds vs. a boss NPC |
-| `/dnd3` | The Great Heist — 3 phases: infiltration → the job → escape |
+| `/dnd_heist` | The Great Heist — 3 phases: infiltration → the job → escape |
 | `/multiplayer` | One PS5/PC co-op or online game — crossplay status, TRY price, PS Store link; no repeats per chat |
 | `/singleplayer` | One PS5 single-player game (IGDB rating ≥ 75) — TRY price, PS Store link; no repeats per chat |
 | `/duel` | Emoji duel between 2 random chat members |
@@ -202,7 +202,7 @@ Four external accounts are required: Telegram, Groq, Twitch (for IGDB), and a VP
 ```
 dnd_pvp - D&D приключение, 1 раунд, все против всех
 dnd_coop - D&D кооп, 2 раунда против босса
-dnd3 - Великое Ограбление — 3 фазы
+dnd_heist - Великое Ограбление — 3 фазы
 multiplayer - одна кооп/онлайн игра PS5/PC с ценой в TRY
 singleplayer - одна одиночная игра PS5 с ценой в TRY
 duel - эмодзи-дуэль между двумя участниками
