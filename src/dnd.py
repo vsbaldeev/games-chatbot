@@ -38,7 +38,7 @@ DND_JOIN_CALLBACK = "dnd_join"
 DND_ACTION_CALLBACK_PREFIX = "dnd_a"
 DND_CALLBACK_PATTERN = r"^dnd_"
 
-DND_MODEL = "llama-3.3-70b-versatile"
+DND_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
 DND_MIN_PLAYERS = 3
 DND_ACTION_TIMEOUT = 45
 DND_LOBBY_TIMEOUT = 300
