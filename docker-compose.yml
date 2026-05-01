@@ -1,0 +1,25 @@
+services:
+  bot:
+    build: .
+    image: games-chatbot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override the default relative path so the DB lands on the named volume
+      SQLITE_DB_PATH: /data/chat_history.db
+      LOG_LEVEL: INFO
+      AIOSQLITE_LOG_LEVEL: WARNING
+      TELEGRAM_APP_LOG_LEVEL: WARNING
+      TELEGRAM_UPDATER_LOG_LEVEL: WARNING
+    volumes:
+      - db-data:/data
+    mem_limit: 800m
+    memswap_limit: 800m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  db-data:
