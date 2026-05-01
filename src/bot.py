@@ -75,8 +75,6 @@ def __register_command_handlers(app: Application) -> None:
     group_only = filters.ChatType.GROUPS
     app.add_handler(CommandHandler("start", commands.cmd_start, filters=group_only))
     app.add_handler(CommandHandler("help", commands.cmd_help, filters=group_only))
-    app.add_handler(CommandHandler("multiplayer", commands.cmd_multiplayer, filters=group_only))
-    app.add_handler(CommandHandler("singleplayer", commands.cmd_singleplayer, filters=group_only))
     app.add_handler(CommandHandler("achievements", commands.cmd_achievements, filters=group_only))
     app.add_handler(CommandHandler("top", commands.cmd_top, filters=group_only))
     app.add_handler(CommandHandler("roast", prozharka.cmd_roast, filters=group_only))
