@@ -14,8 +14,8 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from src import achievements, log
-from src.dnd.llm import ScenarioGenerator
-from src.dnd.state import (
+from src.commands.dnd.llm import ScenarioGenerator
+from src.commands.dnd.state import (
     LobbyState,
     ActiveGame,
     DND_JOIN_CALLBACK,
@@ -26,7 +26,7 @@ from src.dnd.state import (
     DND_BOT_PLAYER_ID,
     DND_BOT_PLAYER_NAME,
 )
-from src.dnd.views import (
+from src.commands.dnd.views import (
     build_lobby_text,
     build_lobby_keyboard,
     build_game_text,

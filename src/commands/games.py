@@ -1,6 +1,6 @@
 """Game command handlers — D&D and duel."""
 
-from src.dnd import (
+from src.commands.dnd import (
     cmd_dnd_pvp,
     cmd_dnd_coop,
     cmd_dnd_heist,
