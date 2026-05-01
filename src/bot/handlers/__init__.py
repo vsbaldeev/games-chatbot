@@ -1,6 +1,6 @@
 """Handler registries for the Telegram Application."""
 
-from src.handlers.registry import (
+from src.bot.handlers.registry import (
     HandlerRegistry,
     EventHandlerRegistry,
     CommandHandlerRegistry,
