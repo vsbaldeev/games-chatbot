@@ -1,11 +1,11 @@
-import logging
+from src import log
 
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 
 async def silence_sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:

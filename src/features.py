@@ -1,5 +1,5 @@
 import json
-import logging
+from src import log
 import re
 from dataclasses import dataclass
 
@@ -9,7 +9,7 @@ from langchain_groq import ChatGroq
 
 from src import config
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 DB_PATH = config.SQLITE_DB_PATH
 

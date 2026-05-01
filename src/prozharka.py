@@ -1,4 +1,4 @@
-import logging
+from src import log
 import random
 import re
 
@@ -12,7 +12,7 @@ from src import achievements, config
 from src.helpers import notify_unlocks, to_telegram_md
 from src.memory import get_chat_history, get_recent_messages
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 ROAST_MODEL = "llama-3.3-70b-versatile"
 

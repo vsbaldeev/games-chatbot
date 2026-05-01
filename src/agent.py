@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from src import log
 import os
 import sys
 from typing import Optional
@@ -12,7 +12,7 @@ from langgraph.prebuilt import create_react_agent
 from src import config
 from src.memory import get_chat_history, trim_db_history, trim_history
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 
 class RateLimitError(Exception):

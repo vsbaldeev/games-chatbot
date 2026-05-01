@@ -1,5 +1,5 @@
 import datetime
-import logging
+from src import log
 import re
 
 from telegram import Update
@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 OFFENSE_RE = re.compile(
     r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"

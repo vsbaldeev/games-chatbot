@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from src import log
 import random
 import re
 import time
@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes, Job
 from src import achievements, config
 from src.helpers import notify_unlocks
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 DUEL_ACCEPT_CALLBACK = "duel_accept"
 DUEL_REJECT_CALLBACK = "duel_reject"

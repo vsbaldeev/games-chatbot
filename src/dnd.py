@@ -17,7 +17,7 @@ Flow (all modes):
 """
 
 import asyncio
-import logging
+from src import log
 import random
 import re
 from dataclasses import dataclass, field
@@ -31,7 +31,7 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 DND_JOIN_CALLBACK = "dnd_join"
 DND_ACTION_CALLBACK_PREFIX = "dnd_a"

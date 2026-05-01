@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from src import log
 import random
 
 from telegram import Update
@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from src import achievements
 from src.helpers import notify_unlocks
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 __ROULETTE_ANNOUNCE = [
     "🎰 Внимание, чат. Сегодня — русская рулетка. Барабан заряжен. Кто-то сегодня не жилец.",

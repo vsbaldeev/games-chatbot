@@ -1,6 +1,6 @@
 import base64
 import io
-import logging
+from src import log
 import random
 import re
 
@@ -27,7 +27,7 @@ from src.helpers import (
     OFFENSE_RE,
 )
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 WHISPER_MODEL = "whisper-large-v3"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -386,11 +386,15 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     event = update.message_reaction_count
+    logger.debug("Received update: %s", event)
     if not event:
         return
 
     chat_id = event.chat.id
+    logger.debug(f"Chat id:{event.chat.id}")
+
     author = await achievements.get_message_author(chat_id, event.message_id)
+    logger.debug(f"Message author {author}")
     if not author:
         return
     author_id, author_username = author
@@ -399,6 +403,7 @@ async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TY
     for reaction in event.reactions:
         if reaction.type.type == "emoji":
             new_counts[reaction.type.emoji] = reaction.total_count
+    logger.debug(f"New counts: {new_counts}")
 
     deltas = await achievements.apply_reaction_counts(chat_id, event.message_id, new_counts)
     if not deltas:
@@ -417,5 +422,6 @@ async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TY
             await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
             credited_any = True
 
+    logger.debug(f"Credited any: {credited_any}")
     if credited_any:
         await notify_unlocks(context, chat_id, author_id, author_username)

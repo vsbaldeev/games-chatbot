@@ -1,4 +1,4 @@
-import logging
+from src import log
 import random
 
 from telegram import Update
@@ -9,7 +9,7 @@ from src import achievements, config, game_tracker
 from src.agent import DailyLimitError, RateLimitError, run_agent
 from src.helpers import get_username, extract_game_card, notify_unlocks
 
-logger = logging.getLogger(__name__)
+logger = log.get_logger(__name__)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

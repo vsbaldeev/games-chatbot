@@ -4,7 +4,6 @@ Run with: python -m src.bot
 """
 
 import datetime
-import logging
 
 from telegram import Update
 from telegram.ext import (
@@ -20,19 +19,12 @@ from telegram.ext import (
     filters,
 )
 
-from src import achievements, game_tracker
+from src import achievements, game_tracker, log
 from src.agent import init_agent, reset_model_index
 from src import commands, dnd, duel, handlers, jobs, prozharka, roulette
 
-def __configure_logging() -> None:
-    from src import config
-    level = logging.getLevelName(config.LOG_LEVEL.upper())
-    fmt = "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
-    logging.basicConfig(level=level, format=fmt)
-
-
-__configure_logging()
-logger = logging.getLogger(__name__)
+log.setup()
+logger = log.get_logger(__name__)
 
 
 async def __reset_model_job(context: ContextTypes.DEFAULT_TYPE) -> None:
