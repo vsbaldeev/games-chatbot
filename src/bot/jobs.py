@@ -19,16 +19,24 @@ class JobManagerInterface(ABC):
     def add_jobs(self, app: Application) -> None: ...
 
 
-class ScheduledJobManager(JobManagerInterface):
+class RouletteJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
         app.job_queue.run_daily(
             russian_roulette,
             time=datetime.time(hour=18, minute=0, tzinfo=datetime.timezone.utc),
         )
+
+
+class SilenceSweepJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
         app.job_queue.run_daily(
             silence_sweep_job,
             time=datetime.time(hour=10, minute=0, tzinfo=datetime.timezone.utc),
         )
+
+
+class ResetModelJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
         app.job_queue.run_daily(
             reset_model_job,
             time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc),
