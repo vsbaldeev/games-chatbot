@@ -10,6 +10,8 @@ def setup() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
     aiosqlite_level = logging.getLevelName(os.getenv("AIOSQLITE_LOG_LEVEL", "WARNING").upper())
     logging.getLogger("aiosqlite").setLevel(aiosqlite_level)
+    tg_app_level = logging.getLevelName(os.getenv("TELEGRAM_APP_LOG_LEVEL", "WARNING").upper())
+    logging.getLogger("telegram.ext.Application").setLevel(tg_app_level)
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -9,6 +9,7 @@ services:
       SQLITE_DB_PATH: /data/chat_history.db
       LOG_LEVEL: DEBUG
       AIOSQLITE_LOG_LEVEL: WARNING
+      TELEGRAM_APP_LOG_LEVEL: WARNING
     volumes:
       - db-data:/data
     mem_limit: 800m
