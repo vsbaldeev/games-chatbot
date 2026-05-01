@@ -8,7 +8,7 @@ import datetime
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
-from src import achievements, game_tracker, jobs, log
+from src import achievements, jobs, log
 from src.agent import agent
 from src.commands.fun import russian_roulette
 from src.store import db as database, unified_messages as msg_store, user_memories as memory_store
@@ -25,7 +25,6 @@ async def __on_startup(application: Application) -> None:
     await database.init()
     await agent.init()
     await achievements.init_tables()
-    await game_tracker.init_tables()
     await msg_store.init_table()
     await memory_store.init_table()
 
