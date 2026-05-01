@@ -15,7 +15,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
-    MessageReactionCountHandler,
+    MessageReactionHandler,
     TypeHandler,
     filters,
 )
@@ -119,7 +119,10 @@ def main() -> None:
             handlers.handle_video_message,
         )
     )
-    app.add_handler(MessageReactionCountHandler(handlers.handle_reaction_count))
+    app.add_handler(MessageReactionHandler(
+        handlers.handle_reaction_count,
+        message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_COUNT_UPDATED,
+    ))
 
     logger.info("Starting polling...")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
