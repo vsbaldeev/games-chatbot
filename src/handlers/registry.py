@@ -16,19 +16,19 @@ from telegram.ext import (
 
 from src import commands, prozharka, roulette
 from src.commands import games, statistics
-from src.handlers.members import (
+from src.events.members import (
     track_member,
     handle_new_chat_members,
     handle_bot_added_to_chat,
 )
-from src.handlers.messages import (
+from src.events.messages import (
     handle_message,
     handle_voice_message,
     handle_photo_message,
     handle_sticker_message,
     handle_video_message,
 )
-from src.handlers.reactions import handle_reaction
+from src.events.reactions import handle_reaction
 
 
 class HandlerRegistry(ABC):
