@@ -5,9 +5,6 @@ summarising what a user or chat has unlocked.
 
 import time
 
-import aiosqlite
-
-from src import config
 from src.achievements.definitions import (
     Achievement,
     ACHIEVEMENT_MAP,
@@ -20,6 +17,7 @@ from src.achievements.store import (
     get_announced_keys,
     mark_and_get_new,
 )
+from src.store import db as database
 
 
 def compute_earned(stats: dict[str, int]) -> list[Achievement]:
@@ -42,23 +40,17 @@ async def check_new_achievements(user_id: int, chat_id: int, username: str) -> l
 
 
 async def check_silence_achievements(user_id: int, chat_id: int, username: str) -> list[Achievement]:
-    """Return the next unawarded silence achievement (at most one per call) and mark it announced.
-
-    Throttled to one per sweep to avoid flooding the chat when a long-inactive user
-    is first seen. Called by the daily sweep job only — not on every message,
-    since activity resets last_seen.
-    """
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT last_seen FROM user_stats WHERE user_id = ? AND chat_id = ?",
-            (user_id, chat_id),
-        )
-        row = await cursor.fetchone()
+    """Return the next unawarded silence achievement (at most one per call) and mark it announced."""
+    db = await database.get()
+    cursor = await db.execute(
+        "SELECT last_seen FROM user_stats WHERE user_id = ? AND chat_id = ?",
+        (user_id, chat_id),
+    )
+    row = await cursor.fetchone()
     if not row or row[0] == 0:
         return []
 
     elapsed_days = (time.time() - row[0]) / 86400
-    # SILENCE_THRESHOLDS is ordered ascending; stop at the first newly inserted key.
     for days, key in SILENCE_THRESHOLDS:
         if elapsed_days < days:
             break

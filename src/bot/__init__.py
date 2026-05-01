@@ -11,7 +11,7 @@ from telegram.ext import Application, ApplicationBuilder, ContextTypes
 from src import achievements, game_tracker, jobs, log
 from src.agent import agent
 from src.commands.fun import russian_roulette
-from src.store import unified_messages as msg_store, user_memories as memory_store
+from src.store import db as database, unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
 logger = log.get_logger(__name__)
@@ -22,6 +22,7 @@ async def __reset_model_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def __on_startup(application: Application) -> None:
+    await database.init()
     await agent.init()
     await achievements.init_tables()
     await game_tracker.init_tables()

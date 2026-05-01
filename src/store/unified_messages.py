@@ -8,9 +8,7 @@ reply-chain resolution and conversation context assembly.
 
 import time
 
-import aiosqlite
-
-from src import config
+from src.store import db as database
 
 # Placeholder content stored immediately for media messages before the real
 # transcription/description is available.
@@ -24,27 +22,26 @@ CHAIN_DEPTH_LIMIT = 10
 
 async def init_table() -> None:
     """Create the unified_messages table and its index if they do not exist."""
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS unified_messages (
-                message_id      INTEGER NOT NULL,
-                chat_id         INTEGER NOT NULL,
-                user_id         INTEGER NOT NULL,
-                username        TEXT    NOT NULL,
-                content         TEXT    NOT NULL,
-                media_type      TEXT    NOT NULL DEFAULT 'text',
-                reply_to_msg_id INTEGER,
-                file_id         TEXT,
-                created_at      REAL    NOT NULL,
-                PRIMARY KEY (chat_id, message_id)
-            )
-        """)
-        await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_unified_messages_chat_time
-            ON unified_messages (chat_id, created_at DESC)
-        """)
-        await db.commit()
+    db = await database.get()
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS unified_messages (
+            message_id      INTEGER NOT NULL,
+            chat_id         INTEGER NOT NULL,
+            user_id         INTEGER NOT NULL,
+            username        TEXT    NOT NULL,
+            content         TEXT    NOT NULL,
+            media_type      TEXT    NOT NULL DEFAULT 'text',
+            reply_to_msg_id INTEGER,
+            file_id         TEXT,
+            created_at      REAL    NOT NULL,
+            PRIMARY KEY (chat_id, message_id)
+        )
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_unified_messages_chat_time
+        ON unified_messages (chat_id, created_at DESC)
+    """)
+    await db.commit()
 
 
 async def insert(
@@ -59,30 +56,30 @@ async def insert(
     file_id: str | None = None,
 ) -> None:
     """Insert a new message row.  Silently ignores duplicate (chat_id, message_id) pairs."""
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        await db.execute(
-            """
-            INSERT OR IGNORE INTO unified_messages
-                (message_id, chat_id, user_id, username, content,
-                 media_type, reply_to_msg_id, file_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                message_id, chat_id, user_id, username, content,
-                media_type, reply_to_msg_id, file_id, time.time(),
-            ),
-        )
-        await db.commit()
+    db = await database.get()
+    await db.execute(
+        """
+        INSERT OR IGNORE INTO unified_messages
+            (message_id, chat_id, user_id, username, content,
+             media_type, reply_to_msg_id, file_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            message_id, chat_id, user_id, username, content,
+            media_type, reply_to_msg_id, file_id, time.time(),
+        ),
+    )
+    await db.commit()
 
 
 async def update_content(*, chat_id: int, message_id: int, content: str) -> None:
     """Replace the content of an existing row (e.g. swap a placeholder for a transcript)."""
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        await db.execute(
-            "UPDATE unified_messages SET content = ? WHERE chat_id = ? AND message_id = ?",
-            (content, chat_id, message_id),
-        )
-        await db.commit()
+    db = await database.get()
+    await db.execute(
+        "UPDATE unified_messages SET content = ? WHERE chat_id = ? AND message_id = ?",
+        (content, chat_id, message_id),
+    )
+    await db.commit()
 
 
 async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
@@ -95,24 +92,23 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
     """
     chain: list[dict] = []
     current_id: int | None = message_id
+    db = await database.get()
 
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        for _ in range(CHAIN_DEPTH_LIMIT):
-            if current_id is None:
-                break
-            row = await db.execute_fetchone(
-                """
-                SELECT message_id, user_id, username, content, media_type, reply_to_msg_id
-                FROM unified_messages
-                WHERE chat_id = ? AND message_id = ?
-                """,
-                (chat_id, current_id),
-            )
-            if row is None:
-                break
-            chain.append(dict(row))
-            current_id = row["reply_to_msg_id"]
+    for _ in range(CHAIN_DEPTH_LIMIT):
+        if current_id is None:
+            break
+        row = await db.execute_fetchone(
+            """
+            SELECT message_id, user_id, username, content, media_type, reply_to_msg_id
+            FROM unified_messages
+            WHERE chat_id = ? AND message_id = ?
+            """,
+            (chat_id, current_id),
+        )
+        if row is None:
+            break
+        chain.append(dict(row))
+        current_id = row["reply_to_msg_id"]
 
     chain.reverse()
     return chain
@@ -120,16 +116,15 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
 
 async def get_recent(*, chat_id: int, limit: int = 20) -> list[dict]:
     """Return the most recent messages for a chat, newest-first."""
-    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        rows = await db.execute_fetchall(
-            """
-            SELECT message_id, user_id, username, content, media_type, created_at
-            FROM unified_messages
-            WHERE chat_id = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (chat_id, limit),
-        )
+    db = await database.get()
+    rows = await db.execute_fetchall(
+        """
+        SELECT message_id, user_id, username, content, media_type, created_at
+        FROM unified_messages
+        WHERE chat_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (chat_id, limit),
+    )
     return [dict(row) for row in rows]
