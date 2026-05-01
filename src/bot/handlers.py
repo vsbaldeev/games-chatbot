@@ -1,4 +1,4 @@
-"""Handler registries — each class adds a related group of handlers to a Telegram Application."""
+"""Handler managers — each class registers a group of handlers on the Telegram Application."""
 
 from abc import ABC, abstractmethod
 
@@ -31,12 +31,12 @@ from src.events.messages import (
 from src.events.reactions import handle_reaction
 
 
-class HandlerRegistry(ABC):
+class HandlerManagerInterface(ABC):
     @abstractmethod
     def register(self, app: Application) -> None: ...
 
 
-class EventHandlerRegistry(HandlerRegistry):
+class EventHandlerManager(HandlerManagerInterface):
     def register(self, app: Application) -> None:
         app.add_handler(TypeHandler(Update, track_member), group=-1)
         app.add_handler(MessageHandler(
@@ -52,7 +52,7 @@ class EventHandlerRegistry(HandlerRegistry):
         ))
 
 
-class CommandHandlerRegistry(HandlerRegistry):
+class CommandHandlerManager(HandlerManagerInterface):
     def register(self, app: Application) -> None:
         group_only = filters.ChatType.GROUPS
         app.add_handler(CommandHandler("start", commands.cmd_start, filters=group_only))
@@ -69,7 +69,7 @@ class CommandHandlerRegistry(HandlerRegistry):
         app.add_handler(CommandHandler("top", statistics.cmd_top, filters=group_only))
 
 
-class MessageHandlerRegistry(HandlerRegistry):
+class MessageHandlerManager(HandlerManagerInterface):
     def register(self, app: Application) -> None:
         group_only = filters.ChatType.GROUPS
         app.add_handler(MessageHandler(

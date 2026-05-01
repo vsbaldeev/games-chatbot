@@ -45,16 +45,16 @@ async def __on_startup(application: Application) -> None:
 
 def main() -> None:
     from src import config
-    from src.bot.handlers.registry import (
-        EventHandlerRegistry,
-        CommandHandlerRegistry,
-        MessageHandlerRegistry,
+    from src.bot.handlers import (
+        EventHandlerManager,
+        CommandHandlerManager,
+        MessageHandlerManager,
     )
 
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(__on_startup).build()
 
-    for registry in [EventHandlerRegistry(), CommandHandlerRegistry(), MessageHandlerRegistry()]:
-        registry.register(app)
+    for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
+        manager.register(app)
 
     logger.info("Starting polling...")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
