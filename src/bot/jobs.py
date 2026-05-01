@@ -1,14 +1,38 @@
-"""Scheduled jobs registered on bot startup."""
+"""Scheduled jobs and their registration manager."""
+
+import datetime
+from abc import ABC, abstractmethod
 
 from src import log
 from telegram.error import BadRequest
-from telegram.ext import ContextTypes
+from telegram.ext import Application, ContextTypes
 
 from src import achievements
 from src.agent import agent
 from src.commands.fun import russian_roulette
 
 logger = log.get_logger(__name__)
+
+
+class JobManagerInterface(ABC):
+    @abstractmethod
+    def add_jobs(self, app: Application) -> None: ...
+
+
+class ScheduledJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
+        app.job_queue.run_daily(
+            russian_roulette,
+            time=datetime.time(hour=18, minute=0, tzinfo=datetime.timezone.utc),
+        )
+        app.job_queue.run_daily(
+            silence_sweep_job,
+            time=datetime.time(hour=10, minute=0, tzinfo=datetime.timezone.utc),
+        )
+        app.job_queue.run_daily(
+            reset_model_job,
+            time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc),
+        )
 
 
 async def silence_sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:
