@@ -1,14 +1,4 @@
-"""
-Telegram update handlers — core logic.
-
-Achievement tracking lives here.  All AI response logic (routing, transcription,
-vision, context assembly, LLM invocation, memory writing) is delegated to the
-LangGraph pipeline via __run_pipeline().
-
-Special cases that bypass the pipeline:
-  - Offense auto-roast (OFFENSE_RE) remains here to avoid adding pipeline state.
-  - Photo reality pre-check (is it a real photograph?) runs before the pipeline.
-"""
+"""Message handlers — text, voice, photo, sticker, video."""
 
 import base64
 import io
@@ -23,7 +13,6 @@ from telegram.ext import ContextTypes
 from src import achievements, config
 from src.agent import agent, DailyLimitError, RateLimitError
 from src.helpers import (
-    fallback_username,
     get_username,
     is_night_message,
     is_reply_to_game_message,
@@ -91,7 +80,6 @@ async def __run_pipeline(
     media_type: str,
     file_id: str | None = None,
 ) -> None:
-    """Build BotState and run the LangGraph pipeline. Sends reply if one is produced."""
     msg = update.message
     chat = update.effective_chat
     initial_state = __build_pipeline_state(update, context, media_type, file_id)
@@ -122,50 +110,6 @@ async def __run_pipeline(
         )
 
 
-async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_user or not update.effective_chat:
-        return
-    user = update.effective_user
-    username = user.username or user.first_name or fallback_username(user.id)
-    await achievements.register_member(update.effective_chat.id, user.id, username)
-
-    if update.message and not user.is_bot:
-        await achievements.set_message_author(
-            update.effective_chat.id, update.message.message_id, user.id, username
-        )
-
-
-async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.new_chat_members:
-        return
-    chat_id = update.effective_chat.id
-    for user in update.message.new_chat_members:
-        if user.is_bot:
-            continue
-        username = user.username or user.first_name or fallback_username(user.id)
-        await achievements.register_member(chat_id, user.id, username)
-
-
-async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Seed chat_members with current admins when the bot is added to a group."""
-    if not update.my_chat_member:
-        return
-    new_status = update.my_chat_member.new_chat_member.status
-    if new_status not in ("member", "administrator"):
-        return
-    chat_id = update.effective_chat.id
-    try:
-        admins = await context.bot.get_chat_administrators(chat_id)
-        for admin in admins:
-            if admin.user.is_bot:
-                continue
-            username = admin.user.username or admin.user.first_name or fallback_username(admin.user.id)
-            await achievements.register_member(chat_id, admin.user.id, username)
-        logger.info("Seeded %d admins for chat %s on bot join", len(admins), chat_id)
-    except Exception as error:
-        logger.warning("Failed to seed admins for chat %s: %s", chat_id, error)
-
-
 async def __track_text_stats(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -184,6 +128,46 @@ async def __track_text_stats(
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
     await achievements.update_max_stat(user_id, chat_id, username, "long_message_max", len(text))
     await notify_unlocks(context, chat_id, user_id, username)
+
+
+async def __is_real_photo(file_id: str, bot) -> bool:
+    """Return True if the image appears to be a real photograph taken with a camera."""
+    try:
+        tg_file = await bot.get_file(file_id)
+        buffer = io.BytesIO()
+        await tg_file.download_to_memory(buffer)
+        raw_bytes = buffer.getvalue()
+
+        if raw_bytes[:4] == b'\x89PNG':
+            mime = "image/png"
+        elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
+            mime = "image/webp"
+        else:
+            mime = "image/jpeg"
+
+        b64_image = base64.b64encode(raw_bytes).decode()
+        image_url = f"data:{mime};base64,{b64_image}"
+
+        llm = ChatGroq(
+            model=VISION_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.1,
+            max_tokens=5,
+        )
+        check = await llm.ainvoke([
+            HumanMessage(content=[
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": (
+                    "Is this a real photograph taken by a person with a camera "
+                    "(photo of real life, people, places, objects, setups)? "
+                    "Answer only YES or NO."
+                )},
+            ]),
+        ])
+        return check.content.strip().upper().startswith("YES")
+    except Exception as error:
+        logger.warning("Photo reality check failed for file %s: %s", file_id, error)
+        return False
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -286,46 +270,6 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await __run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
 
 
-async def __is_real_photo(file_id: str, bot) -> bool:
-    """Return True if the image appears to be a real photograph taken with a camera."""
-    try:
-        tg_file = await bot.get_file(file_id)
-        buffer = io.BytesIO()
-        await tg_file.download_to_memory(buffer)
-        raw_bytes = buffer.getvalue()
-
-        if raw_bytes[:4] == b'\x89PNG':
-            mime = "image/png"
-        elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
-            mime = "image/webp"
-        else:
-            mime = "image/jpeg"
-
-        b64_image = base64.b64encode(raw_bytes).decode()
-        image_url = f"data:{mime};base64,{b64_image}"
-
-        llm = ChatGroq(
-            model=VISION_MODEL,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.1,
-            max_tokens=5,
-        )
-        check = await llm.ainvoke([
-            HumanMessage(content=[
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": (
-                    "Is this a real photograph taken by a person with a camera "
-                    "(photo of real life, people, places, objects, setups)? "
-                    "Answer only YES or NO."
-                )},
-            ]),
-        ])
-        return check.content.strip().upper().startswith("YES")
-    except Exception as error:
-        logger.warning("Photo reality check failed for file %s: %s", file_id, error)
-        return False
-
-
 async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     if not msg or not msg.sticker:
@@ -358,63 +302,3 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await notify_unlocks(context, chat_id, user_id, username)
-
-
-async def __credit_reaction_stats(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    author_id: int,
-    author_username: str,
-    added_emojis: set[str],
-) -> None:
-    laugh_emojis = {"😁", "🤣"}
-    heart_emojis = {"❤", "🥰", "😍", "💘", "❤️‍\U0001f525"}
-    fire_emojis = {"🔥"}
-    thumb_emojis = {"👍"}
-
-    stat_map = [
-        (laugh_emojis, "laugh_reactions"),
-        (heart_emojis, "heart_reactions"),
-        (fire_emojis, "fire_reactions"),
-        (thumb_emojis, "thumbsup_reactions"),
-    ]
-    credited_any = False
-    for emoji_set, stat_name in stat_map:
-        if added_emojis & emoji_set:
-            await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
-            credited_any = True
-
-    if credited_any:
-        await notify_unlocks(context, chat_id, author_id, author_username)
-
-
-async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    reaction = update.message_reaction
-    if not reaction:
-        return
-
-    old_emojis = {react_item.emoji for react_item in reaction.old_reaction if hasattr(react_item, "emoji")}
-    added_emojis = {
-        react_item.emoji for react_item in reaction.new_reaction
-        if hasattr(react_item, "emoji") and react_item.emoji not in old_emojis
-    }
-    if not added_emojis:
-        return
-
-    chat_id = reaction.chat.id
-    author = await achievements.get_message_author(chat_id, reaction.message_id)
-    if not author:
-        logger.warning(
-            "No author cached for message %s in chat %s — skipping reaction",
-            reaction.message_id, chat_id,
-        )
-        return
-    author_id, author_username = author
-    if reaction.user and reaction.user.id == author_id:
-        return
-    logger.info(
-        "Reaction %s on message %s in chat %s credited to %s",
-        added_emojis, reaction.message_id, chat_id, author_username,
-    )
-
-    await __credit_reaction_stats(context, chat_id, author_id, author_username, added_emojis)
