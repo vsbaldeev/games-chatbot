@@ -18,7 +18,6 @@ OFFENSE_RE = re.compile(
 
 MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
-__TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 __INTERMEDIATE_LINE_RE = re.compile(r"^(#{1,3} |\d+\. | {2,}- )")
 
 
@@ -26,12 +25,6 @@ def get_username(update: Update) -> str:
     user = update.effective_user
     return user.username or user.first_name or f"user_{user.id}"
 
-
-def to_telegram_md(text: str) -> str:
-    """Sanitise LLM output for Telegram Markdown v1."""
-    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text, flags=re.DOTALL)
-    lines = [line for line in text.splitlines() if not __TABLE_SEPARATOR_RE.match(line)]
-    return "\n".join(lines)
 
 
 
