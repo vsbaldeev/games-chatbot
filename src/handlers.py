@@ -394,9 +394,10 @@ async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TY
     logger.debug(f"Chat id:{event.chat.id}")
 
     author = await achievements.get_message_author(chat_id, event.message_id)
-    logger.debug(f"Message author {author}")
     if not author:
+        logger.warning("No author cached for message %s in chat %s — skipping reaction", event.message_id, chat_id)
         return
+    logger.debug("Reaction update for message %s: author=%s", event.message_id, author[1])
     author_id, author_username = author
 
     new_counts: dict[str, int] = {}
