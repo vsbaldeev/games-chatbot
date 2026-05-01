@@ -384,31 +384,26 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await notify_unlocks(context, chat_id, user_id, username)
 
 
-async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    event = update.message_reaction_count
-    logger.debug("Received update: %s", event)
-    if not event:
+async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    reaction = update.message_reaction
+    if not reaction:
         return
 
-    chat_id = event.chat.id
-    logger.debug(f"Chat id:{event.chat.id}")
+    old_emojis = {r.emoji for r in reaction.old_reaction if hasattr(r, "emoji")}
+    added_emojis = {
+        r.emoji for r in reaction.new_reaction
+        if hasattr(r, "emoji") and r.emoji not in old_emojis
+    }
+    if not added_emojis:
+        return
 
-    author = await achievements.get_message_author(chat_id, event.message_id)
+    chat_id = reaction.chat.id
+    author = await achievements.get_message_author(chat_id, reaction.message_id)
     if not author:
-        logger.warning("No author cached for message %s in chat %s — skipping reaction", event.message_id, chat_id)
+        logger.warning("No author cached for message %s in chat %s — skipping reaction", reaction.message_id, chat_id)
         return
-    logger.debug("Reaction update for message %s: author=%s", event.message_id, author[1])
     author_id, author_username = author
-
-    new_counts: dict[str, int] = {}
-    for reaction in event.reactions:
-        if reaction.type.type == "emoji":
-            new_counts[reaction.type.emoji] = reaction.total_count
-    logger.debug(f"New counts: {new_counts}")
-
-    deltas = await achievements.apply_reaction_counts(chat_id, event.message_id, new_counts)
-    if not deltas:
-        return
+    logger.debug("Reaction %s on message %s credited to %s", added_emojis, reaction.message_id, author_username)
 
     stat_map = [
         (__LAUGH_EMOJIS, "laugh_reactions"),
@@ -418,11 +413,9 @@ async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TY
     ]
     credited_any = False
     for emoji_set, stat_name in stat_map:
-        total_delta = sum(count for emoji, count in deltas.items() if emoji in emoji_set)
-        for _ in range(total_delta):
+        if added_emojis & emoji_set:
             await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
             credited_any = True
 
-    logger.debug(f"Credited any: {credited_any}")
     if credited_any:
         await notify_unlocks(context, chat_id, author_id, author_username)

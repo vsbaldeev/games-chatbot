@@ -116,8 +116,8 @@ def main() -> None:
         )
     )
     app.add_handler(MessageReactionHandler(
-        handlers.handle_reaction_count,
-        message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_COUNT_UPDATED,
+        handlers.handle_reaction,
+        message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_UPDATED,
     ))
 
     logger.info("Starting polling...")
