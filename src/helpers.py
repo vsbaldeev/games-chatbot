@@ -22,13 +22,9 @@ __TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 __INTERMEDIATE_LINE_RE = re.compile(r"^(#{1,3} |\d+\. | {2,}- )")
 
 
-def fallback_username(user_id: int) -> str:
-    return f"user_{user_id}"
-
-
 def get_username(update: Update) -> str:
     user = update.effective_user
-    return user.username or user.first_name or fallback_username(user.id)
+    return user.username or user.first_name or f"user_{user.id}"
 
 
 def to_telegram_md(text: str) -> str:

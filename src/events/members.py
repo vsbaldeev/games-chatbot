@@ -5,7 +5,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src import achievements
-from src.helpers import fallback_username
 
 logger = log.get_logger(__name__)
 
@@ -14,7 +13,7 @@ async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not update.effective_user or not update.effective_chat:
         return
     user = update.effective_user
-    username = user.username or user.first_name or fallback_username(user.id)
+    username = user.username or user.first_name or f"user_{user.id}"
     await achievements.register_member(update.effective_chat.id, user.id, username)
 
     if update.message and not user.is_bot:
@@ -30,7 +29,7 @@ async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_
     for user in update.message.new_chat_members:
         if user.is_bot:
             continue
-        username = user.username or user.first_name or fallback_username(user.id)
+        username = user.username or user.first_name or f"user_{user.id}"
         await achievements.register_member(chat_id, user.id, username)
 
 
@@ -47,7 +46,7 @@ async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT
         for admin in admins:
             if admin.user.is_bot:
                 continue
-            username = admin.user.username or admin.user.first_name or fallback_username(admin.user.id)
+            username = admin.user.username or admin.user.first_name or f"user_{admin.user.id}"
             await achievements.register_member(chat_id, admin.user.id, username)
         logger.info("Seeded %d admins for chat %s on bot join", len(admins), chat_id)
     except Exception as error:
