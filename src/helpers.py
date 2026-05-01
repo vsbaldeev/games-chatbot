@@ -3,10 +3,8 @@ from src import log
 import re
 
 from telegram import Update
-from telegram.error import BadRequest
-from telegram.ext import ContextTypes
 
-from src import achievements, config
+from src import config
 
 logger = log.get_logger(__name__)
 
@@ -97,25 +95,3 @@ def is_night_message(update: Update) -> bool:
     return 0 <= moscow_time.hour < 5
 
 
-async def notify_unlocks(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    user_id: int,
-    username: str,
-) -> None:
-    try:
-        new_ach = await achievements.check_new_achievements(user_id, chat_id, username)
-        for ach in new_ach:
-            text = (
-                f"🏆 @{username} получил достижение!\n\n"
-                f"{ach.emoji} *{ach.title}*\n_{ach.description}_"
-            )
-            try:
-                await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
-            except BadRequest:
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"🏆 {username}: {ach.emoji} {ach.title} — {ach.description}",
-                )
-    except Exception as error:
-        logger.warning(f"Achievement notification failed for user {user_id} in chat {chat_id}: {error}")

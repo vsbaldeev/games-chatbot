@@ -1,10 +1,14 @@
 """
 Achievement business logic: computing earned achievements, checking for new ones,
-summarising what a user or chat has unlocked.
+summarising what a user or chat has unlocked, and notifying the chat on unlock.
 """
 
 import time
 
+from telegram.error import BadRequest
+from telegram.ext import ContextTypes
+
+from src import log
 from src.achievements.definitions import (
     Achievement,
     ACHIEVEMENT_MAP,
@@ -18,6 +22,8 @@ from src.achievements.store import (
     mark_and_get_new,
 )
 from src.store import db as database
+
+logger = log.get_logger(__name__)
 
 
 def compute_earned(stats: dict[str, int]) -> list[Achievement]:
@@ -79,3 +85,28 @@ async def get_chat_achievements_summary(chat_id: int) -> dict[str, list[Achievem
         if earned:
             result[username] = earned
     return result
+
+
+async def notify_unlocks(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    user_id: int,
+    username: str,
+) -> None:
+    """Check for newly earned achievements and announce each one in the chat."""
+    try:
+        new_ach = await check_new_achievements(user_id, chat_id, username)
+        for ach in new_ach:
+            text = (
+                f"🏆 @{username} получил достижение!\n\n"
+                f"{ach.emoji} *{ach.title}*\n_{ach.description}_"
+            )
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+            except BadRequest:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🏆 {username}: {ach.emoji} {ach.title} — {ach.description}",
+                )
+    except Exception as error:
+        logger.warning("Achievement notification failed for user %s in chat %s: %s", user_id, chat_id, error)

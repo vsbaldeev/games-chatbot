@@ -15,7 +15,8 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
-from src.helpers import notify_unlocks, to_telegram_md
+from src.achievements import notify_unlocks
+from src.helpers import to_telegram_md
 from src.memory import get_chat_history, get_recent_messages
 
 logger = log.get_logger(__name__)

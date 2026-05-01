@@ -35,6 +35,7 @@ from src.achievements.checker import (
     check_silence_achievements,
     get_user_achievements,
     get_chat_achievements_summary,
+    notify_unlocks,
 )
 
 __all__ = [
@@ -65,4 +66,5 @@ __all__ = [
     "check_silence_achievements",
     "get_user_achievements",
     "get_chat_achievements_summary",
+    "notify_unlocks",
 ]

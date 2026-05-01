@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src import achievements
-from src.helpers import notify_unlocks
+from src.achievements import notify_unlocks
 
 logger = log.get_logger(__name__)
 

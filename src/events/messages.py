@@ -12,11 +12,11 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config
 from src.agent import agent, DailyLimitError, RateLimitError
+from src.achievements import notify_unlocks
 from src.helpers import (
     get_username,
     is_night_message,
     is_reply_to_game_message,
-    notify_unlocks,
     strip_markdown,
     OFFENSE_RE,
 )
