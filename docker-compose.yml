@@ -10,6 +10,7 @@ services:
       LOG_LEVEL: DEBUG
       AIOSQLITE_LOG_LEVEL: WARNING
       TELEGRAM_APP_LOG_LEVEL: WARNING
+      TELEGRAM_UPDATER_LOG_LEVEL: WARNING
     volumes:
       - db-data:/data
     mem_limit: 800m
