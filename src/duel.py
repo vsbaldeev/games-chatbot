@@ -185,28 +185,9 @@ class DuelManager:
             return
 
         target_id, target_username = candidates[index]
-
-        self.__pending_picks.pop(message_id, None)
-        job = self.__pick_jobs.pop(message_id, None)
-        if job:
-            job.schedule_removal()
-
-        await query.answer()
-        try:
-            await query.edit_message_text(
-                f"⚔️ @{caller_username} вызывает @{target_username} на дуэль!",
-                reply_markup=None,
-            )
-        except TelegramError:
-            pass
-
-        started = await self.__send_challenge(
-            context, chat_id, caller_id, caller_username, target_id, target_username,
+        await self.__commit_pick(
+            query, context, message_id, chat_id, caller_id, caller_username, target_id, target_username,
         )
-        if not started:
-            await context.bot.send_message(
-                chat_id, "В чате уже идёт дуэль. Дождитесь её завершения."
-            )
 
     async def __handle_accept(self, query: Any, context: ContextTypes.DEFAULT_TYPE) -> None:
         message_id = query.message.message_id
@@ -293,58 +274,23 @@ class DuelManager:
         )
         other_id = p2_id if clicker_id == p1_id else p1_id
         other_username = p2_username if clicker_id == p1_id else p1_username
-
         outcome = random.choices(["hit", "self", "miss"], weights=[60, 20, 20])[0]
         elapsed_str = f"⚡ {elapsed:.2f} сек"
 
         if outcome == "miss":
-            miss_line = (
-                f"{self.__fmt(random.choice(DUEL_MISS), shooter=shooter_username)} ({elapsed_str})"
+            await self.__apply_miss_shot(
+                query, message_id, chat_id, p1_id, p1_username, p2_id, p2_username,
+                shot_log, shooter_username, elapsed_str,
             )
-            updated_log = shot_log + [miss_line]
-            # Re-insert before any await so the duel stays claimable by the next shooter.
-            self.__active_duels[message_id] = (
-                chat_id, p1_id, p1_username, p2_id, p2_username, updated_log, time.monotonic()
+        else:
+            winner_id = other_id if outcome == "self" else clicker_id
+            winner_username = other_username if outcome == "self" else shooter_username
+            answer_text = "😵 Ты выстрелил себе! Дуэль проиграна!" if outcome == "self" else "💥 БАХ! Ты попал!"
+            result_line = self.__build_result_line(outcome, shooter_username, other_username, elapsed_str)
+            await self.__apply_decisive_shot(
+                query, context, message_id, chat_id, p1_username, p2_username,
+                shot_log, result_line, winner_id, winner_username, answer_text,
             )
-            await query.answer("💨 Промах! Теперь ход соперника!")
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🔫", callback_data=DUEL_FIRE_CALLBACK)]]
-            )
-            try:
-                await query.edit_message_text(
-                    self.__build_duel_text(p1_username, p2_username, updated_log),
-                    reply_markup=keyboard,
-                )
-            except TelegramError:
-                pass
-
-        elif outcome == "self":
-            self_line = (
-                f"{self.__fmt(random.choice(DUEL_SELF), shooter=shooter_username, other=other_username)}"
-                f" ({elapsed_str})"
-            )
-            updated_log = shot_log + [self_line]
-            await query.answer("😵 Ты выстрелил себе! Дуэль проиграна!")
-            await self.__finish_duel(
-                query, chat_id, message_id,
-                self.__build_duel_text(p1_username, p2_username, updated_log),
-            )
-            await achievements.increment_stat(other_id, chat_id, other_username, "duel_wins")
-            await notify_unlocks(context, chat_id, other_id, other_username)
-
-        else:  # hit
-            hit_line = (
-                f"{self.__fmt(random.choice(DUEL_HIT), shooter=shooter_username, target=other_username)}"
-                f" ({elapsed_str})"
-            )
-            updated_log = shot_log + [hit_line]
-            await query.answer("💥 БАХ! Ты попал!")
-            await self.__finish_duel(
-                query, chat_id, message_id,
-                self.__build_duel_text(p1_username, p2_username, updated_log),
-            )
-            await achievements.increment_stat(clicker_id, chat_id, shooter_username, "duel_wins")
-            await notify_unlocks(context, chat_id, clicker_id, shooter_username)
 
     # ------------------------------------------------------------------
     # Private: job callbacks
@@ -367,37 +313,11 @@ class DuelManager:
                 pass
             await asyncio.sleep(2)
 
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔫", callback_data=DUEL_FIRE_CALLBACK)]]
+        activated = await self.__activate_duel(
+            context, message_id, chat_id, p1_id, p1_username, p2_id, p2_username,
         )
-        activated = False
-        for _ in range(5):
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=self.__build_duel_text(p1_username, p2_username, []),
-                    reply_markup=keyboard,
-                )
-                activated = True
-                break
-            except RetryAfter as error:
-                await asyncio.sleep(error.retry_after)
-            except TelegramError as error:
-                logger.warning("Failed to activate duel %s: %s", message_id, error)
-                break
-
         if not activated:
             self.__active_duel_chats.discard(chat_id)
-            return
-
-        self.__active_duels[message_id] = (
-            chat_id, p1_id, p1_username, p2_id, p2_username, [], time.monotonic()
-        )
-        job = context.job_queue.run_once(
-            self.__expire_duel, DUEL_FIRE_TIMEOUT, data=message_id
-        )
-        self.__duel_timeout_jobs[message_id] = job
 
     async def __expire_pick(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         message_id = context.job.data
@@ -462,6 +382,136 @@ class DuelManager:
     # ------------------------------------------------------------------
     # Private: helpers
     # ------------------------------------------------------------------
+
+    async def __commit_pick(
+        self,
+        query: Any,
+        context: ContextTypes.DEFAULT_TYPE,
+        message_id: int,
+        chat_id: int,
+        caller_id: int,
+        caller_username: str,
+        target_id: int,
+        target_username: str,
+    ) -> None:
+        self.__pending_picks.pop(message_id, None)
+        job = self.__pick_jobs.pop(message_id, None)
+        if job:
+            job.schedule_removal()
+        await query.answer()
+        try:
+            await query.edit_message_text(
+                f"⚔️ @{caller_username} вызывает @{target_username} на дуэль!",
+                reply_markup=None,
+            )
+        except TelegramError:
+            pass
+        started = await self.__send_challenge(
+            context, chat_id, caller_id, caller_username, target_id, target_username,
+        )
+        if not started:
+            await context.bot.send_message(
+                chat_id, "В чате уже идёт дуэль. Дождитесь её завершения."
+            )
+
+    async def __activate_duel(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        message_id: int,
+        chat_id: int,
+        p1_id: int,
+        p1_username: str,
+        p2_id: int,
+        p2_username: str,
+    ) -> bool:
+        """Show the fire button. Returns True when the activation message was sent."""
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔫", callback_data=DUEL_FIRE_CALLBACK)]]
+        )
+        for _ in range(5):
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=self.__build_duel_text(p1_username, p2_username, []),
+                    reply_markup=keyboard,
+                )
+                self.__active_duels[message_id] = (
+                    chat_id, p1_id, p1_username, p2_id, p2_username, [], time.monotonic()
+                )
+                job = context.job_queue.run_once(
+                    self.__expire_duel, DUEL_FIRE_TIMEOUT, data=message_id
+                )
+                self.__duel_timeout_jobs[message_id] = job
+                return True
+            except RetryAfter as error:
+                await asyncio.sleep(error.retry_after)
+            except TelegramError as error:
+                logger.warning("Failed to activate duel %s: %s", message_id, error)
+                break
+        return False
+
+    async def __apply_miss_shot(
+        self,
+        query: Any,
+        message_id: int,
+        chat_id: int,
+        p1_id: int,
+        p1_username: str,
+        p2_id: int,
+        p2_username: str,
+        shot_log: list,
+        shooter_username: str,
+        elapsed_str: str,
+    ) -> None:
+        miss_line = f"{self.__fmt(random.choice(DUEL_MISS), shooter=shooter_username)} ({elapsed_str})"
+        updated_log = shot_log + [miss_line]
+        self.__active_duels[message_id] = (
+            chat_id, p1_id, p1_username, p2_id, p2_username, updated_log, time.monotonic()
+        )
+        await query.answer("💨 Промах! Теперь ход соперника!")
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔫", callback_data=DUEL_FIRE_CALLBACK)]]
+        )
+        try:
+            await query.edit_message_text(
+                self.__build_duel_text(p1_username, p2_username, updated_log),
+                reply_markup=keyboard,
+            )
+        except TelegramError:
+            pass
+
+    async def __apply_decisive_shot(
+        self,
+        query: Any,
+        context: ContextTypes.DEFAULT_TYPE,
+        message_id: int,
+        chat_id: int,
+        p1_username: str,
+        p2_username: str,
+        shot_log: list,
+        result_line: str,
+        winner_id: int,
+        winner_username: str,
+        answer_text: str,
+    ) -> None:
+        updated_log = shot_log + [result_line]
+        await query.answer(answer_text)
+        await self.__finish_duel(
+            query, chat_id, message_id,
+            self.__build_duel_text(p1_username, p2_username, updated_log),
+        )
+        await achievements.increment_stat(winner_id, chat_id, winner_username, "duel_wins")
+        await notify_unlocks(context, chat_id, winner_id, winner_username)
+
+    def __build_result_line(
+        self, outcome: str, shooter_username: str, other_username: str, elapsed_str: str
+    ) -> str:
+        if outcome == "self":
+            msg = self.__fmt(random.choice(DUEL_SELF), shooter=shooter_username, other=other_username)
+        else:
+            msg = self.__fmt(random.choice(DUEL_HIT), shooter=shooter_username, target=other_username)
+        return f"{msg} ({elapsed_str})"
 
     async def __send_challenge(
         self,

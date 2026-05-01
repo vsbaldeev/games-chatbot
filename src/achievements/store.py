@@ -13,95 +13,107 @@ from src import config
 from src.achievements.definitions import TRACKABLE_STATS, MAX_TRACKABLE_STATS
 
 
+async def __create_core_tables(db: aiosqlite.Connection) -> None:
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS chat_members (
+            chat_id  INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            username TEXT,
+            PRIMARY KEY (chat_id, user_id)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS user_stats (
+            user_id              INTEGER NOT NULL,
+            chat_id              INTEGER NOT NULL,
+            username             TEXT,
+            laugh_reactions      INTEGER NOT NULL DEFAULT 0,
+            heart_reactions      INTEGER NOT NULL DEFAULT 0,
+            fire_reactions       INTEGER NOT NULL DEFAULT 0,
+            thumbsup_reactions   INTEGER NOT NULL DEFAULT 0,
+            emoji_messages       INTEGER NOT NULL DEFAULT 0,
+            sticker_messages     INTEGER NOT NULL DEFAULT 0,
+            forwarded_messages   INTEGER NOT NULL DEFAULT 0,
+            link_messages        INTEGER NOT NULL DEFAULT 0,
+            voice_messages       INTEGER NOT NULL DEFAULT 0,
+            video_messages       INTEGER NOT NULL DEFAULT 0,
+            video_note_messages  INTEGER NOT NULL DEFAULT 0,
+            photo_messages       INTEGER NOT NULL DEFAULT 0,
+            night_messages       INTEGER NOT NULL DEFAULT 0,
+            roasted_count        INTEGER NOT NULL DEFAULT 0,
+            roulette_win_count   INTEGER NOT NULL DEFAULT 0,
+            duel_wins            INTEGER NOT NULL DEFAULT 0,
+            long_messages        INTEGER NOT NULL DEFAULT 0,
+            voice_max_duration   INTEGER NOT NULL DEFAULT 0,
+            long_message_max     INTEGER NOT NULL DEFAULT 0,
+            last_seen            INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, chat_id)
+        )
+    """)
+
+
+async def __create_event_tables(db: aiosqlite.Connection) -> None:
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS announced_achievements (
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            key     TEXT NOT NULL,
+            PRIMARY KEY (user_id, chat_id, key)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS message_authors (
+            chat_id    INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL,
+            username   TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (chat_id, message_id)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS message_reaction_counts (
+            chat_id     INTEGER NOT NULL,
+            message_id  INTEGER NOT NULL,
+            emoji       TEXT NOT NULL,
+            total_count INTEGER NOT NULL,
+            updated_at  INTEGER NOT NULL,
+            PRIMARY KEY (chat_id, message_id, emoji)
+        )
+    """)
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_authors_created "
+        "ON message_authors(created_at)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_reaction_counts_updated "
+        "ON message_reaction_counts(updated_at)"
+    )
+
+
+async def __run_migrations(db: aiosqlite.Connection) -> None:
+    for migration in [
+        "ALTER TABLE user_stats ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE user_stats ADD COLUMN roasted_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE user_stats ADD COLUMN roulette_win_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE user_stats ADD COLUMN duel_wins INTEGER NOT NULL DEFAULT 0",
+    ]:
+        try:
+            await db.execute(migration)
+        except aiosqlite.OperationalError as error:
+            if "duplicate column" not in str(error):
+                raise
+
+
 async def init_tables() -> None:
     """Create all achievement-related tables and run pending column migrations."""
     async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA synchronous=NORMAL")
         await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS chat_members (
-                chat_id  INTEGER NOT NULL,
-                user_id  INTEGER NOT NULL,
-                username TEXT,
-                PRIMARY KEY (chat_id, user_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_stats (
-                user_id              INTEGER NOT NULL,
-                chat_id              INTEGER NOT NULL,
-                username             TEXT,
-                laugh_reactions      INTEGER NOT NULL DEFAULT 0,
-                heart_reactions      INTEGER NOT NULL DEFAULT 0,
-                fire_reactions       INTEGER NOT NULL DEFAULT 0,
-                thumbsup_reactions   INTEGER NOT NULL DEFAULT 0,
-                emoji_messages       INTEGER NOT NULL DEFAULT 0,
-                sticker_messages     INTEGER NOT NULL DEFAULT 0,
-                forwarded_messages   INTEGER NOT NULL DEFAULT 0,
-                link_messages        INTEGER NOT NULL DEFAULT 0,
-                voice_messages       INTEGER NOT NULL DEFAULT 0,
-                video_messages       INTEGER NOT NULL DEFAULT 0,
-                video_note_messages  INTEGER NOT NULL DEFAULT 0,
-                photo_messages       INTEGER NOT NULL DEFAULT 0,
-                night_messages       INTEGER NOT NULL DEFAULT 0,
-                roasted_count        INTEGER NOT NULL DEFAULT 0,
-                roulette_win_count   INTEGER NOT NULL DEFAULT 0,
-                duel_wins            INTEGER NOT NULL DEFAULT 0,
-                long_messages        INTEGER NOT NULL DEFAULT 0,
-                voice_max_duration   INTEGER NOT NULL DEFAULT 0,
-                long_message_max     INTEGER NOT NULL DEFAULT 0,
-                last_seen            INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (user_id, chat_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS announced_achievements (
-                user_id INTEGER NOT NULL,
-                chat_id INTEGER NOT NULL,
-                key     TEXT NOT NULL,
-                PRIMARY KEY (user_id, chat_id, key)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS message_authors (
-                chat_id    INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                user_id    INTEGER NOT NULL,
-                username   TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                PRIMARY KEY (chat_id, message_id)
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS message_reaction_counts (
-                chat_id     INTEGER NOT NULL,
-                message_id  INTEGER NOT NULL,
-                emoji       TEXT NOT NULL,
-                total_count INTEGER NOT NULL,
-                updated_at  INTEGER NOT NULL,
-                PRIMARY KEY (chat_id, message_id, emoji)
-            )
-        """)
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_message_authors_created "
-            "ON message_authors(created_at)"
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_reaction_counts_updated "
-            "ON message_reaction_counts(updated_at)"
-        )
-        for migration in [
-            "ALTER TABLE user_stats ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE user_stats ADD COLUMN roasted_count INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE user_stats ADD COLUMN roulette_win_count INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE user_stats ADD COLUMN duel_wins INTEGER NOT NULL DEFAULT 0",
-        ]:
-            try:
-                await db.execute(migration)
-            except aiosqlite.OperationalError as error:
-                if "duplicate column" not in str(error):
-                    raise
+        await __create_core_tables(db)
+        await __create_event_tables(db)
+        await __run_migrations(db)
         await db.commit()
 
 

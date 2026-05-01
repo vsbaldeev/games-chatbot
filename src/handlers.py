@@ -49,13 +49,12 @@ __URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 __offense_reply_counts: dict[int, dict[int, int]] = {}
 
 
-async def __run_pipeline(
+def __build_pipeline_state(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     media_type: str,
-    file_id: str | None = None,
-) -> None:
-    """Build BotState and run the LangGraph pipeline. Sends reply if one is produced."""
+    file_id: str | None,
+) -> BotState:
     msg = update.message
     user = update.effective_user
     chat = update.effective_chat
@@ -77,13 +76,25 @@ async def __run_pipeline(
         "reply_to_msg_id": reply_to_msg_id,
         "file_id": file_id,
     }
-    initial_state: BotState = {
+    return {
         "incoming": incoming,
         "should_respond": False,
         "context": None,
         "response": None,
         "context_types": context,
     }
+
+
+async def __run_pipeline(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    media_type: str,
+    file_id: str | None = None,
+) -> None:
+    """Build BotState and run the LangGraph pipeline. Sends reply if one is produced."""
+    msg = update.message
+    chat = update.effective_chat
+    initial_state = __build_pipeline_state(update, context, media_type, file_id)
 
     try:
         pipeline = agent.get_pipeline()
@@ -155,17 +166,14 @@ async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT
         logger.warning("Failed to seed admins for chat %s: %s", chat_id, error)
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.text:
-        return
-
-    bot_id = context.bot.id
-    text = update.message.text
-    username = get_username(update)
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-
-    # Achievement tracking.
+async def __track_text_stats(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    chat_id: int,
+    username: str,
+    text: str,
+) -> None:
     if is_night_message(update):
         await achievements.increment_stat(user_id, chat_id, username, "night_messages")
     if __EMOJI_RE.search(text):
@@ -176,6 +184,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
     await achievements.update_max_stat(user_id, chat_id, username, "long_message_max", len(text))
     await notify_unlocks(context, chat_id, user_id, username)
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.text:
+        return
+
+    bot_id = context.bot.id
+    text = update.message.text
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    await __track_text_stats(update, context, user_id, chat_id, username, text)
 
     if is_reply_to_game_message(update):
         return
@@ -339,15 +360,43 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await notify_unlocks(context, chat_id, user_id, username)
 
 
+async def __credit_reaction_stats(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    author_id: int,
+    author_username: str,
+    added_emojis: set[str],
+) -> None:
+    laugh_emojis = {"😁", "🤣"}
+    heart_emojis = {"❤", "🥰", "😍", "💘", "❤️‍\U0001f525"}
+    fire_emojis = {"🔥"}
+    thumb_emojis = {"👍"}
+
+    stat_map = [
+        (laugh_emojis, "laugh_reactions"),
+        (heart_emojis, "heart_reactions"),
+        (fire_emojis, "fire_reactions"),
+        (thumb_emojis, "thumbsup_reactions"),
+    ]
+    credited_any = False
+    for emoji_set, stat_name in stat_map:
+        if added_emojis & emoji_set:
+            await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
+            credited_any = True
+
+    if credited_any:
+        await notify_unlocks(context, chat_id, author_id, author_username)
+
+
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reaction = update.message_reaction
     if not reaction:
         return
 
-    old_emojis = {r.emoji for r in reaction.old_reaction if hasattr(r, "emoji")}
+    old_emojis = {react_item.emoji for react_item in reaction.old_reaction if hasattr(react_item, "emoji")}
     added_emojis = {
-        r.emoji for r in reaction.new_reaction
-        if hasattr(r, "emoji") and r.emoji not in old_emojis
+        react_item.emoji for react_item in reaction.new_reaction
+        if hasattr(react_item, "emoji") and react_item.emoji not in old_emojis
     }
     if not added_emojis:
         return
@@ -368,22 +417,4 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         added_emojis, reaction.message_id, chat_id, author_username,
     )
 
-    __LAUGH_EMOJIS = {"😁", "🤣"}
-    __HEART_EMOJIS = {"❤", "🥰", "😍", "💘", "❤️‍\U0001f525"}
-    __FIRE_EMOJIS  = {"🔥"}
-    __THUMB_EMOJIS = {"👍"}
-
-    stat_map = [
-        (__LAUGH_EMOJIS, "laugh_reactions"),
-        (__HEART_EMOJIS, "heart_reactions"),
-        (__FIRE_EMOJIS,  "fire_reactions"),
-        (__THUMB_EMOJIS, "thumbsup_reactions"),
-    ]
-    credited_any = False
-    for emoji_set, stat_name in stat_map:
-        if added_emojis & emoji_set:
-            await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
-            credited_any = True
-
-    if credited_any:
-        await notify_unlocks(context, chat_id, author_id, author_username)
+    await __credit_reaction_stats(context, chat_id, author_id, author_username, added_emojis)

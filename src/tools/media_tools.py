@@ -33,9 +33,47 @@ query ($search: String) {
 """
 
 
-def register(mcp: FastMCP, cfg) -> None:
-    """Register all media tools with the FastMCP server."""
+async def __fetch_tmdb_item_details(
+    client: httpx.AsyncClient, api_key: str, media_type: str, item_id: int
+) -> dict:
+    response = await client.get(
+        f"https://api.themoviedb.org/3/{media_type}/{item_id}",
+        params={"api_key": api_key, "language": "en-US"},
+    )
+    response.raise_for_status()
+    return response.json()
 
+
+def __format_tmdb_result(details: dict, media_type: str, item_id: int) -> dict:
+    title = details.get("title") or details.get("name")
+    year = (details.get("release_date") or details.get("first_air_date") or "")[:4]
+    return {
+        "title": title,
+        "year": year,
+        "overview": details.get("overview"),
+        "vote_average": details.get("vote_average"),
+        "vote_count": details.get("vote_count"),
+        "genres": [genre_item["name"] for genre_item in details.get("genres", [])],
+        "tmdb_url": f"https://www.themoviedb.org/{media_type}/{item_id}",
+    }
+
+
+def __parse_wikipedia_extract(pages: dict, term: str) -> dict | None:
+    page = next(iter(pages.values()))
+    if page.get("pageid") == -1 or not page.get("extract"):
+        return None
+    extract = page["extract"].strip()
+    short_extract = extract[:600]
+    if len(extract) > 600:
+        short_extract = short_extract.rsplit(" ", 1)[0] + "…"
+    return {
+        "term": page.get("title"),
+        "summary": short_extract,
+        "url": f"https://en.wikipedia.org/wiki/{page['title'].replace(' ', '_')}",
+    }
+
+
+def __register_search_movie_or_tv(mcp: FastMCP, cfg) -> None:
     @mcp.tool()
     async def search_movie_or_tv(query: str, media_type: str = "movie") -> str:
         """
@@ -52,43 +90,20 @@ def register(mcp: FastMCP, cfg) -> None:
             async with httpx.AsyncClient(timeout=15) as client:
                 search_response = await client.get(
                     f"https://api.themoviedb.org/3/search/{media_type}",
-                    params={
-                        "api_key": cfg.TMDB_API_KEY,
-                        "query": query,
-                        "language": "en-US",
-                        "page": 1,
-                    },
+                    params={"api_key": cfg.TMDB_API_KEY, "query": query, "language": "en-US", "page": 1},
                 )
                 search_response.raise_for_status()
                 results = search_response.json().get("results", [])
                 if not results:
                     return json.dumps({"error": f"No results for '{query}'"})
-
-                item = results[0]
-                item_id = item["id"]
-
-                details_response = await client.get(
-                    f"https://api.themoviedb.org/3/{media_type}/{item_id}",
-                    params={"api_key": cfg.TMDB_API_KEY, "language": "en-US"},
-                )
-                details_response.raise_for_status()
-                details = details_response.json()
-
-            title = details.get("title") or details.get("name")
-            year = (details.get("release_date") or details.get("first_air_date") or "")[:4]
-            genres = [g["name"] for g in details.get("genres", [])]
-            return json.dumps({
-                "title": title,
-                "year": year,
-                "overview": details.get("overview"),
-                "vote_average": details.get("vote_average"),
-                "vote_count": details.get("vote_count"),
-                "genres": genres,
-                "tmdb_url": f"https://www.themoviedb.org/{media_type}/{item_id}",
-            }, ensure_ascii=False)
+                item_id = results[0]["id"]
+                details = await __fetch_tmdb_item_details(client, cfg.TMDB_API_KEY, media_type, item_id)
+            return json.dumps(__format_tmdb_result(details, media_type, item_id), ensure_ascii=False)
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_search_anime(mcp: FastMCP) -> None:
     @mcp.tool()
     async def search_anime(query: str) -> str:
         """
@@ -124,6 +139,8 @@ def register(mcp: FastMCP, cfg) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_get_game_reviews(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_game_reviews(game_name: str) -> str:
         """
@@ -163,6 +180,8 @@ def register(mcp: FastMCP, cfg) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_explain_term(mcp: FastMCP) -> None:
     @mcp.tool()
     async def explain_term(term: str) -> str:
         """
@@ -189,19 +208,17 @@ def register(mcp: FastMCP, cfg) -> None:
                 data = response.json()
 
             pages = data.get("query", {}).get("pages", {})
-            page = next(iter(pages.values()))
-            if page.get("pageid") == -1 or not page.get("extract"):
+            parsed = __parse_wikipedia_extract(pages, term)
+            if parsed is None:
                 return json.dumps({"error": f"Wikipedia article not found for '{term}'"})
-
-            extract = page["extract"].strip()
-            short_extract = extract[:600]
-            if len(extract) > 600:
-                short_extract = short_extract.rsplit(" ", 1)[0] + "…"
-
-            return json.dumps({
-                "term": page.get("title"),
-                "summary": short_extract,
-                "url": f"https://en.wikipedia.org/wiki/{page['title'].replace(' ', '_')}",
-            }, ensure_ascii=False)
+            return json.dumps(parsed, ensure_ascii=False)
         except Exception as error:
             return json.dumps({"error": str(error)})
+
+
+def register(mcp: FastMCP, cfg) -> None:
+    """Register all media tools with the FastMCP server."""
+    __register_search_movie_or_tv(mcp, cfg)
+    __register_search_anime(mcp)
+    __register_get_game_reviews(mcp)
+    __register_explain_term(mcp)

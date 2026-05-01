@@ -32,17 +32,10 @@ EMOJI_RE = re.compile(
 class Roaster:
     """Generates LLM-powered roasts and handles the /roast Telegram command."""
 
-    async def generate(self, chat_id: int, target_username: str) -> str:
-        """Generate and return a roast string for the given user."""
-        llm = ChatGroq(
-            model=ROAST_MODEL,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.95,
-            max_tokens=180,
-        )
-        history_text = await self.__get_user_history_text(chat_id, target_username)
-        is_supportive = random.random() < 0.1
-
+    def __build_roast_prompts(
+        self, target_username: str, history_text: str, is_supportive: bool
+    ) -> tuple[str, str]:
+        """Return (system_prompt, user_prompt) for the LLM call."""
         if is_supportive:
             style_instruction = (
                 f"Напиши искреннее тёплое поддерживающее сообщение для @{target_username} — "
@@ -77,7 +70,21 @@ class Roaster:
                 f"позови поучаствовать в общении, скажи что рады его видеть. "
                 f"Обязательно упомяни @{target_username}. До 2 предложений."
             )
+        return system_prompt, user_prompt
 
+    async def generate(self, chat_id: int, target_username: str) -> str:
+        """Generate and return a roast string for the given user."""
+        llm = ChatGroq(
+            model=ROAST_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.95,
+            max_tokens=180,
+        )
+        history_text = await self.__get_user_history_text(chat_id, target_username)
+        is_supportive = random.random() < 0.1
+        system_prompt, user_prompt = self.__build_roast_prompts(
+            target_username, history_text, is_supportive
+        )
         response = await llm.ainvoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),

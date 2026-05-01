@@ -24,7 +24,7 @@ from src.pipeline.state import BotState
 logger = log.get_logger(__name__)
 
 
-def _should_respond(state: BotState) -> str:
+def route_by_response(state: BotState) -> str:
     return "ingester" if state["should_respond"] else END
 
 
@@ -44,7 +44,7 @@ def build_pipeline(agent) -> StateGraph:
     graph.add_node("memory_writer", memory_writer)
 
     graph.add_edge(START, "router")
-    graph.add_conditional_edges("router", _should_respond, {"ingester": "ingester", END: END})
+    graph.add_conditional_edges("router", route_by_response, {"ingester": "ingester", END: END})
     graph.add_edge("ingester", "context_builder")
     graph.add_edge("context_builder", "agent")
     graph.add_edge("agent", "memory_writer")

@@ -33,9 +33,29 @@ async def __find_steam_appid(game_name: str, client: httpx.AsyncClient) -> tuple
     return items[0]["id"], items[0]["name"]
 
 
-def register(mcp: FastMCP) -> None:
-    """Register all store tools with the FastMCP server."""
+def __parse_psdeals_price(page_data: dict, game_name: str) -> dict:
+    """Extract price info for a game from psdeals.net page JSON."""
+    games_list = page_data.get("props", {}).get("pageProps", {}).get("gamesList", [])
+    name_lower = game_name.lower()
+    for game_item in games_list[:20]:
+        if name_lower not in game_item.get("name", "").lower():
+            continue
+        price_obj = game_item.get("price") or {}
+        result: dict = {"name": game_item.get("name", game_name)}
+        if price_obj.get("regular"):
+            result["regular_price_try"] = price_obj["regular"]
+        if price_obj.get("discount"):
+            result["sale_price_try"] = price_obj["discount"]
+        if price_obj.get("discountPercent"):
+            result["discount_percent"] = price_obj["discountPercent"]
+        psdeals_id = game_item.get("id") or game_item.get("slug") or ""
+        if psdeals_id:
+            result["psdeals_url"] = f"https://psdeals.net/tr-store/game/{psdeals_id}"
+        return result
+    return {}
 
+
+def __register_ps_sales(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_ps_store_sales(limit: CoercedInt = 12) -> str:
         """
@@ -60,6 +80,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_ps_price(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_ps_store_price_tr(game_name: str) -> str:
         """
@@ -88,25 +110,8 @@ def register(mcp: FastMCP) -> None:
             )
             if next_data_match:
                 page_data = json.loads(next_data_match.group(1))
-                games_list = (
-                    page_data.get("props", {}).get("pageProps", {}).get("gamesList", [])
-                )
-                name_lower = game_name.lower()
-                for game in games_list[:20]:
-                    if name_lower not in game.get("name", "").lower():
-                        continue
-                    price_obj = game.get("price") or {}
-                    result["name"] = game.get("name", game_name)
-                    if price_obj.get("regular"):
-                        result["regular_price_try"] = price_obj["regular"]
-                    if price_obj.get("discount"):
-                        result["sale_price_try"] = price_obj["discount"]
-                    if price_obj.get("discountPercent"):
-                        result["discount_percent"] = price_obj["discountPercent"]
-                    psdeals_id = game.get("id") or game.get("slug") or ""
-                    if psdeals_id:
-                        result["psdeals_url"] = f"https://psdeals.net/tr-store/game/{psdeals_id}"
-                    break
+                price_fields = __parse_psdeals_price(page_data, game_name)
+                result.update(price_fields)
             else:
                 result["note"] = "Price unavailable — use ps_store_search_url"
 
@@ -115,6 +120,8 @@ def register(mcp: FastMCP) -> None:
 
         return json.dumps(result, ensure_ascii=False)
 
+
+def __register_steam_players(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_steam_player_count(game_name: str) -> str:
         """
@@ -142,6 +149,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_steam_details(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_steam_app_details(game_name: str) -> str:
         """
@@ -172,7 +181,7 @@ def register(mcp: FastMCP) -> None:
                     "short_description": data.get("short_description"),
                     "developers": data.get("developers", []),
                     "release_date": data.get("release_date", {}).get("date"),
-                    "genres": [g["description"] for g in data.get("genres", [])],
+                    "genres": [genre_item["description"] for genre_item in data.get("genres", [])],
                     "price_usd": price_overview.get("final_formatted"),
                     "metacritic_score": metacritic.get("score"),
                     "steam_url": f"https://store.steampowered.com/app/{app_id}/",
@@ -180,6 +189,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_steam_reviews(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_steam_reviews_summary(game_name: str) -> str:
         """
@@ -208,3 +219,12 @@ def register(mcp: FastMCP) -> None:
                 }, ensure_ascii=False)
         except Exception as error:
             return json.dumps({"error": str(error)})
+
+
+def register(mcp: FastMCP) -> None:
+    """Register all store tools with the FastMCP server."""
+    __register_ps_sales(mcp)
+    __register_ps_price(mcp)
+    __register_steam_players(mcp)
+    __register_steam_details(mcp)
+    __register_steam_reviews(mcp)

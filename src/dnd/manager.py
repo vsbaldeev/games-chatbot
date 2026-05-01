@@ -106,12 +106,7 @@ class DndManager:
         initiator_id = initiator.id
         initiator_username = initiator.username or initiator.first_name or f"user_{initiator_id}"
 
-        # Fill the roster with a bot NPC when there aren't enough real players.
-        members = await achievements.get_chat_members(chat_id)
-        initial_players: list[tuple[int, str]] = [(initiator_id, initiator_username)]
-        if len(members) < DND_MIN_PLAYERS:
-            initial_players.append((DND_BOT_PLAYER_ID, DND_BOT_PLAYER_NAME))
-
+        initial_players = await self.__build_initial_players(chat_id, initiator_id, initiator_username)
         self.__active_chats.add(chat_id)
         lobby = LobbyState(
             chat_id=chat_id,
@@ -162,31 +157,7 @@ class DndManager:
             )
             return
 
-        # Minimum reached — atomically claim the lobby before any await to prevent double-start.
-        popped = self.__lobbies.pop(chat_id, None)
-        if popped is None:
-            await query.answer()
-            return
-
-        job = self.__lobby_timeout_jobs.pop(chat_id, None)
-        if job:
-            job.schedule_removal()
-
-        players = list(lobby.players)
-        message_id = query.message.message_id
-
-        await query.answer("Отряд собран! Начинаем приключение!")
-
-        try:
-            await query.edit_message_text("⚔️ D&D Приключение\n\n🎲 Генерация сценария...")
-        except TelegramError:
-            pass
-
-        context.job_queue.run_once(
-            self.__start_game_job,
-            0,
-            data=(chat_id, message_id, players, max_rounds, mode),
-        )
+        await self.__launch_game_from_lobby(query, context, chat_id, lobby, max_rounds, mode)
 
     async def __handle_action(
         self, query: Any, context: ContextTypes.DEFAULT_TYPE, action_index: int
@@ -227,13 +198,7 @@ class DndManager:
         )
 
         if all_chosen:
-            resolved_game = self.__active_games.pop(chat_id, None)
-            if not resolved_game:
-                return
-            job = self.__action_timeout_jobs.pop(chat_id, None)
-            if job:
-                job.schedule_removal()
-            context.job_queue.run_once(self.__resolve_game_job, 0, data=(chat_id, resolved_game))
+            self.__trigger_resolve(context, chat_id)
 
     # ------------------------------------------------------------------
     # Private: job callbacks
@@ -241,29 +206,16 @@ class DndManager:
 
     async def __start_game_job(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id, message_id, players, max_rounds, mode = context.job.data
-
-        boss_name = ""
-        boss_max_hp = 0
-
         try:
-            if mode == "coop":
-                scenario, boss_name, actions = await self.__llm.generate_coop_round(
-                    len(players), round_number=1,
-                    boss_name="", boss_hp=0, boss_max_hp=0, history=[],
-                )
-                boss_max_hp = random.randint(len(players) * 15, len(players) * 20)
-            else:
-                scenario, actions = await self.__llm.generate_round(
-                    len(players), round_number=1, max_rounds=max_rounds,
-                    mode=mode, history=[], players=players,
-                )
+            scenario, actions, boss_name, boss_max_hp = await self.__generate_first_scenario(
+                players, max_rounds, mode
+            )
         except Exception as error:
             logger.warning("DnD scenario generation failed for chat %s: %s", chat_id, error)
             self.__active_chats.discard(chat_id)
             try:
                 await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
+                    chat_id=chat_id, message_id=message_id,
                     text="⚔️ Волшебник сценариев ушёл на перекур. Попробуйте снова.",
                 )
             except TelegramError:
@@ -271,27 +223,18 @@ class DndManager:
             return
 
         game = ActiveGame(
-            chat_id=chat_id,
-            message_id=message_id,
-            scenario=scenario,
-            actions=actions,
-            players=players,
-            max_rounds=max_rounds,
-            round_number=1,
-            mode=mode,
-            boss_name=boss_name,
-            boss_hp=boss_max_hp,
-            boss_max_hp=boss_max_hp,
+            chat_id=chat_id, message_id=message_id, scenario=scenario,
+            actions=actions, players=players, max_rounds=max_rounds,
+            round_number=1, mode=mode, boss_name=boss_name,
+            boss_hp=boss_max_hp, boss_max_hp=boss_max_hp,
         )
         self.__assign_bot_choice(game)
         self.__active_games[chat_id] = game
-
         await edit_safe(
             context.bot, chat_id, message_id,
             build_game_text(game),
             keyboard=build_game_keyboard(game),
         )
-
         job = context.job_queue.run_once(self.__expire_actions, DND_ACTION_TIMEOUT, data=chat_id)
         self.__action_timeout_jobs[chat_id] = job
 
@@ -342,48 +285,12 @@ class DndManager:
         except TelegramError:
             pass
 
-        try:
-            narrative = await self.__llm.generate_coop_narrative(
-                scenario=game.scenario,
-                player_results=player_results,
-                boss_name=game.boss_name,
-                damage_this_round=total_damage,
-                boss_hp_after=game.boss_hp,
-                boss_max_hp=game.boss_max_hp,
-                history=game.history,
-                players_won=players_won,
-                is_final=is_final,
-            )
-        except Exception as error:
-            logger.warning("DnD coop narrative failed for chat %s: %s", chat_id, error)
-            narrative = "Летописец выронил перо в разгар битвы. Но отряд устоял. Кажется."
-
-        roll_lines = format_roll_lines(player_results)
-
-        if is_final:
-            if players_won:
-                round_title = "Победа! 🏆"
-                boss_line = f"👹 {game.boss_name} повержен!"
-            else:
-                round_title = "Поражение 💀"
-                boss_line = f"👹 {game.boss_name} выжил... ({game.boss_hp} HP осталось)"
-            damage_line = (
-                f"💥 Финальный урон: {total_damage} — "
-                f"итого {game.boss_max_hp - game.boss_hp}/{game.boss_max_hp}"
-            )
-        else:
-            round_title = f"Раунд {game.round_number}/{game.max_rounds} — Итог"
-            boss_line = f"👹 {game.boss_name} — ❤️ {game.boss_hp}/{game.boss_max_hp} HP осталось"
-            damage_line = f"💥 Суммарный урон: {total_damage}"
-
-        result_text = (
-            f"⚔️ D&D Кооп — {round_title}\n\n"
-            f"{narrative}\n\n"
-            f"{damage_line}\n"
-            f"{boss_line}\n\n"
-            f"🎲 Броски:\n" + "\n".join(roll_lines)
+        narrative = await self.__generate_coop_narrative_safe(
+            chat_id, game, player_results, total_damage, is_final, players_won
         )
-
+        result_text = self.__format_coop_result_text(
+            game, player_results, narrative, total_damage, is_final, players_won
+        )
         await edit_safe(context.bot, chat_id, game.message_id, result_text)
 
         if is_final:
@@ -415,36 +322,8 @@ class DndManager:
         except TelegramError:
             pass
 
-        try:
-            narrative = await self.__llm.generate_narrative(
-                game.scenario, player_results, game.history, is_final,
-                is_pvp=(game.mode == "pvp"),
-                is_heist=(game.mode == "heist"),
-            )
-        except Exception as error:
-            logger.warning("DnD narrative failed for chat %s: %s", chat_id, error)
-            narrative = "Летописец выронил перо и всё размазалось. Но все выжили. Кажется."
-
-        roll_lines = format_roll_lines(player_results)
-
-        if game.mode == "heist":
-            heist_result_titles = {
-                1: "Проникновение — Итог",
-                2: "Дело — Итог",
-                3: "Побег — Финал",
-            }
-            round_title = heist_result_titles.get(game.round_number, f"Фаза {game.round_number} — Итог")
-            prefix = "🎩 Великое Ограбление"
-        else:
-            round_title = "Финал" if is_final else f"Раунд {game.round_number}/{game.max_rounds} — Итог"
-            prefix = "⚔️ D&D"
-
-        result_text = (
-            f"{prefix} — {round_title}\n\n"
-            f"{narrative}\n\n"
-            f"🎲 Броски:\n" + "\n".join(roll_lines)
-        )
-
+        narrative = await self.__generate_narrative_safe(chat_id, game, player_results, is_final)
+        result_text = self.__format_standard_result_text(game, player_results, narrative, is_final)
         await edit_safe(context.bot, chat_id, game.message_id, result_text)
 
         if is_final:
@@ -457,22 +336,7 @@ class DndManager:
     async def __next_round_job(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id, game = context.job.data
 
-        if game.mode == "coop":
-            loading_text = (
-                f"⚔️ D&D Кооп — Раунд {game.round_number}/{game.max_rounds}"
-                "\n\n🎲 Генерация продолжения..."
-            )
-        elif game.mode == "heist":
-            loading_text = (
-                f"🎩 Великое Ограбление — {heist_phase_name(game.round_number)}"
-                "\n\n🎲 Генерация следующей фазы..."
-            )
-        else:
-            loading_text = (
-                f"⚔️ D&D — Раунд {game.round_number}/{game.max_rounds}"
-                "\n\n🎲 Генерация продолжения..."
-            )
-
+        loading_text = self.__build_round_loading_text(game)
         try:
             msg = await context.bot.send_message(chat_id=chat_id, text=loading_text)
             game.message_id = msg.message_id
@@ -484,22 +348,8 @@ class DndManager:
             self.__active_chats.discard(chat_id)
             return
 
-        try:
-            if game.mode == "coop":
-                scenario, _, actions = await self.__llm.generate_coop_round(
-                    len(game.players), game.round_number,
-                    game.boss_name, game.boss_hp, game.boss_max_hp, game.history,
-                )
-            else:
-                scenario, actions = await self.__llm.generate_round(
-                    len(game.players), game.round_number, game.max_rounds,
-                    game.mode, game.history, game.players,
-                )
-        except Exception as error:
-            logger.warning(
-                "DnD round %s generation failed for chat %s: %s",
-                game.round_number, chat_id, error,
-            )
+        result = await self.__generate_next_scenario(chat_id, game)
+        if result is None:
             self.__active_chats.discard(chat_id)
             try:
                 await context.bot.edit_message_text(
@@ -511,17 +361,14 @@ class DndManager:
                 pass
             return
 
-        game.scenario = scenario
-        game.actions = actions
+        game.scenario, game.actions = result
         self.__assign_bot_choice(game)
         self.__active_games[chat_id] = game
-
         await edit_safe(
             context.bot, chat_id, game.message_id,
             build_game_text(game),
             keyboard=build_game_keyboard(game),
         )
-
         job = context.job_queue.run_once(self.__expire_actions, DND_ACTION_TIMEOUT, data=chat_id)
         self.__action_timeout_jobs[chat_id] = job
 
@@ -547,6 +394,207 @@ class DndManager:
     # ------------------------------------------------------------------
     # Private: game helpers
     # ------------------------------------------------------------------
+
+    async def __build_initial_players(
+        self, chat_id: int, initiator_id: int, initiator_username: str
+    ) -> list[tuple[int, str]]:
+        members = await achievements.get_chat_members(chat_id)
+        players: list[tuple[int, str]] = [(initiator_id, initiator_username)]
+        if len(members) < DND_MIN_PLAYERS:
+            players.append((DND_BOT_PLAYER_ID, DND_BOT_PLAYER_NAME))
+        return players
+
+    async def __launch_game_from_lobby(
+        self,
+        query: Any,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        lobby: LobbyState,
+        max_rounds: int,
+        mode: str,
+    ) -> None:
+        # Atomically claim the lobby before any await to prevent double-start.
+        popped = self.__lobbies.pop(chat_id, None)
+        if popped is None:
+            await query.answer()
+            return
+        job = self.__lobby_timeout_jobs.pop(chat_id, None)
+        if job:
+            job.schedule_removal()
+        players = list(lobby.players)
+        message_id = query.message.message_id
+        await query.answer("Отряд собран! Начинаем приключение!")
+        try:
+            await query.edit_message_text("⚔️ D&D Приключение\n\n🎲 Генерация сценария...")
+        except TelegramError:
+            pass
+        context.job_queue.run_once(
+            self.__start_game_job,
+            0,
+            data=(chat_id, message_id, players, max_rounds, mode),
+        )
+
+    def __trigger_resolve(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+        resolved_game = self.__active_games.pop(chat_id, None)
+        if not resolved_game:
+            return
+        job = self.__action_timeout_jobs.pop(chat_id, None)
+        if job:
+            job.schedule_removal()
+        context.job_queue.run_once(self.__resolve_game_job, 0, data=(chat_id, resolved_game))
+
+    async def __generate_first_scenario(
+        self, players: list, max_rounds: int, mode: str
+    ) -> tuple:
+        if mode == "coop":
+            scenario, boss_name, actions = await self.__llm.generate_coop_round(
+                len(players), round_number=1,
+                boss_name="", boss_hp=0, boss_max_hp=0, history=[],
+            )
+            boss_max_hp = random.randint(len(players) * 15, len(players) * 20)
+            return scenario, actions, boss_name, boss_max_hp
+        scenario, actions = await self.__llm.generate_round(
+            len(players), round_number=1, max_rounds=max_rounds,
+            mode=mode, history=[], players=players,
+        )
+        return scenario, actions, "", 0
+
+    async def __generate_next_scenario(
+        self, chat_id: int, game: ActiveGame
+    ) -> tuple | None:
+        try:
+            if game.mode == "coop":
+                scenario, _, actions = await self.__llm.generate_coop_round(
+                    len(game.players), game.round_number,
+                    game.boss_name, game.boss_hp, game.boss_max_hp, game.history,
+                )
+            else:
+                scenario, actions = await self.__llm.generate_round(
+                    len(game.players), game.round_number, game.max_rounds,
+                    game.mode, game.history, game.players,
+                )
+            return scenario, actions
+        except Exception as error:
+            logger.warning(
+                "DnD round %s generation failed for chat %s: %s",
+                game.round_number, chat_id, error,
+            )
+            return None
+
+    async def __generate_coop_narrative_safe(
+        self,
+        chat_id: int,
+        game: ActiveGame,
+        player_results: list[dict],
+        total_damage: int,
+        is_final: bool,
+        players_won: bool,
+    ) -> str:
+        try:
+            return await self.__llm.generate_coop_narrative(
+                scenario=game.scenario,
+                player_results=player_results,
+                boss_name=game.boss_name,
+                damage_this_round=total_damage,
+                boss_hp_after=game.boss_hp,
+                boss_max_hp=game.boss_max_hp,
+                history=game.history,
+                players_won=players_won,
+                is_final=is_final,
+            )
+        except Exception as error:
+            logger.warning("DnD coop narrative failed for chat %s: %s", chat_id, error)
+            return "Летописец выронил перо в разгар битвы. Но отряд устоял. Кажется."
+
+    def __format_coop_result_text(
+        self,
+        game: ActiveGame,
+        player_results: list[dict],
+        narrative: str,
+        total_damage: int,
+        is_final: bool,
+        players_won: bool,
+    ) -> str:
+        roll_lines = format_roll_lines(player_results)
+        if is_final:
+            round_title = "Победа! 🏆" if players_won else "Поражение 💀"
+            boss_line = (
+                f"👹 {game.boss_name} повержен!" if players_won
+                else f"👹 {game.boss_name} выжил... ({game.boss_hp} HP осталось)"
+            )
+            damage_line = (
+                f"💥 Финальный урон: {total_damage} — "
+                f"итого {game.boss_max_hp - game.boss_hp}/{game.boss_max_hp}"
+            )
+        else:
+            round_title = f"Раунд {game.round_number}/{game.max_rounds} — Итог"
+            boss_line = f"👹 {game.boss_name} — ❤️ {game.boss_hp}/{game.boss_max_hp} HP осталось"
+            damage_line = f"💥 Суммарный урон: {total_damage}"
+        return (
+            f"⚔️ D&D Кооп — {round_title}\n\n"
+            f"{narrative}\n\n"
+            f"{damage_line}\n"
+            f"{boss_line}\n\n"
+            f"🎲 Броски:\n" + "\n".join(roll_lines)
+        )
+
+    async def __generate_narrative_safe(
+        self,
+        chat_id: int,
+        game: ActiveGame,
+        player_results: list[dict],
+        is_final: bool,
+    ) -> str:
+        try:
+            return await self.__llm.generate_narrative(
+                game.scenario, player_results, game.history, is_final,
+                is_pvp=(game.mode == "pvp"),
+                is_heist=(game.mode == "heist"),
+            )
+        except Exception as error:
+            logger.warning("DnD narrative failed for chat %s: %s", chat_id, error)
+            return "Летописец выронил перо и всё размазалось. Но все выжили. Кажется."
+
+    def __format_standard_result_text(
+        self,
+        game: ActiveGame,
+        player_results: list[dict],
+        narrative: str,
+        is_final: bool,
+    ) -> str:
+        roll_lines = format_roll_lines(player_results)
+        if game.mode == "heist":
+            heist_result_titles = {
+                1: "Проникновение — Итог",
+                2: "Дело — Итог",
+                3: "Побег — Финал",
+            }
+            round_title = heist_result_titles.get(game.round_number, f"Фаза {game.round_number} — Итог")
+            prefix = "🎩 Великое Ограбление"
+        else:
+            round_title = "Финал" if is_final else f"Раунд {game.round_number}/{game.max_rounds} — Итог"
+            prefix = "⚔️ D&D"
+        return (
+            f"{prefix} — {round_title}\n\n"
+            f"{narrative}\n\n"
+            f"🎲 Броски:\n" + "\n".join(roll_lines)
+        )
+
+    def __build_round_loading_text(self, game: ActiveGame) -> str:
+        if game.mode == "coop":
+            return (
+                f"⚔️ D&D Кооп — Раунд {game.round_number}/{game.max_rounds}"
+                "\n\n🎲 Генерация продолжения..."
+            )
+        if game.mode == "heist":
+            return (
+                f"🎩 Великое Ограбление — {heist_phase_name(game.round_number)}"
+                "\n\n🎲 Генерация следующей фазы..."
+            )
+        return (
+            f"⚔️ D&D — Раунд {game.round_number}/{game.max_rounds}"
+            "\n\n🎲 Генерация продолжения..."
+        )
 
     def __assign_bot_choice(self, game: ActiveGame) -> None:
         """Pre-populate the bot NPC's action so it always shows ✅ from round start."""

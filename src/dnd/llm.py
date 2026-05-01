@@ -121,27 +121,10 @@ class ScenarioGenerator:
         is_final: bool,
     ) -> str:
         """Return a short narrative string for a completed coop round."""
-        player_lines = self.__format_player_lines(player_results)
-        context_block = self.__format_context_block(history)
-        outcome_instruction = self.__coop_outcome_instruction(
-            boss_name, damage_this_round, boss_hp_after, boss_max_hp, players_won, is_final
-        )
-
-        system_prompt = (
-            "Ты нарратор D&D-кооп для группы друзей-геймеров. "
-            "Пишешь короткие смешные нарративы о битве с боссом на русском языке. "
-            "Разговорный стиль, юмор, абсурд. Можно крепкие выражения. "
-            "Ответ — только нарратив, без заголовков."
-        )
-        user_prompt = (
-            f"{context_block}"
-            f"Ситуация: {scenario}\n\n"
-            "Игроки и их действия:\n"
-            + "\n".join(player_lines)
-            + f"\n\n{outcome_instruction}\n"
-            "Обязательно упомяни каждого игрока. "
-            "Бросок 1 = катастрофически смешной промах. Бросок 20 = невероятно мощный удар. "
-            "Нарратив — СТРОГО 2 коротких предложения, не длиннее."
+        system_prompt, user_prompt = self.__build_coop_narrative_prompt(
+            scenario, player_results, boss_name,
+            damage_this_round, boss_hp_after, boss_max_hp,
+            history, players_won, is_final,
         )
         response = await asyncio.wait_for(
             self.__create_llm(600).ainvoke(
@@ -152,8 +135,41 @@ class ScenarioGenerator:
         return response.content.strip()
 
     # ------------------------------------------------------------------
-    # Private: system/user prompt builders
+    # Private: prompt builders
     # ------------------------------------------------------------------
+
+    def __build_coop_narrative_prompt(
+        self,
+        scenario: str,
+        player_results: list[dict],
+        boss_name: str,
+        damage_this_round: int,
+        boss_hp_after: int,
+        boss_max_hp: int,
+        history: list[dict],
+        players_won: bool,
+        is_final: bool,
+    ) -> tuple[str, str]:
+        player_lines = self.__format_player_lines(player_results)
+        context_block = self.__format_context_block(history)
+        outcome_instruction = self.__coop_outcome_instruction(
+            boss_name, damage_this_round, boss_hp_after, boss_max_hp, players_won, is_final
+        )
+        system_prompt = (
+            "Ты нарратор D&D-кооп для группы друзей-геймеров. "
+            "Пишешь короткие смешные нарративы о битве с боссом на русском языке. "
+            "Разговорный стиль, юмор, абсурд. Можно крепкие выражения. "
+            "Ответ — только нарратив, без заголовков."
+        )
+        user_prompt = (
+            f"{context_block}Ситуация: {scenario}\n\nИгроки и их действия:\n"
+            + "\n".join(player_lines)
+            + f"\n\n{outcome_instruction}\n"
+            "Обязательно упомяни каждого игрока. "
+            "Бросок 1 = катастрофически смешной промах. Бросок 20 = невероятно мощный удар. "
+            "Нарратив — СТРОГО 2 коротких предложения, не длиннее."
+        )
+        return system_prompt, user_prompt
 
     def __round_system_prompt(self, mode: str) -> str:
         base = (

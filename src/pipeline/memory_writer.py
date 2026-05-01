@@ -55,6 +55,34 @@ class MemoryWriter:
         )
         return {}
 
+    async def __call_extraction_llm(
+        self,
+        chat_id: int,
+        user_id: int,
+        username: str,
+        user_message: str,
+        bot_reply: str,
+    ) -> list[str]:
+        existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
+        existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
+        prompt = (
+            f"User: @{username}\n"
+            f"Existing facts:\n{existing_block}\n\n"
+            f"Exchange:\n@{username}: {user_message}\nBot: {bot_reply}\n\n"
+            f"New facts to add (JSON array):"
+        )
+        llm = ChatGroq(
+            model=MEMORY_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.2,
+            max_tokens=256,
+        )
+        result = await llm.ainvoke([
+            SystemMessage(content=__EXTRACTION_SYSTEM),
+            HumanMessage(content=prompt),
+        ])
+        return self.__parse_facts(result.content.strip())
+
     async def __extract_and_save(
         self,
         chat_id: int,
@@ -64,31 +92,9 @@ class MemoryWriter:
         bot_reply: str,
     ) -> None:
         try:
-            existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
-            existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
-
-            prompt = (
-                f"User: @{username}\n"
-                f"Existing facts:\n{existing_block}\n\n"
-                f"Exchange:\n"
-                f"@{username}: {user_message}\n"
-                f"Bot: {bot_reply}\n\n"
-                f"New facts to add (JSON array):"
+            new_facts = await self.__call_extraction_llm(
+                chat_id, user_id, username, user_message, bot_reply
             )
-
-            llm = ChatGroq(
-                model=MEMORY_MODEL,
-                api_key=config.GROQ_API_KEY,
-                temperature=0.2,
-                max_tokens=256,
-            )
-            result = await llm.ainvoke([
-                SystemMessage(content=__EXTRACTION_SYSTEM),
-                HumanMessage(content=prompt),
-            ])
-            raw = result.content.strip()
-
-            new_facts = self.__parse_facts(raw)
             if new_facts:
                 await user_memories.upsert_facts(
                     chat_id=chat_id,

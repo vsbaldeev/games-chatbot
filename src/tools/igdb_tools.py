@@ -74,9 +74,7 @@ async def igdb_request(endpoint: str, body: str) -> list[dict]:
         return response.json()
 
 
-def register(mcp: FastMCP) -> None:
-    """Register all IGDB tools with the FastMCP server."""
-
+def __register_search_games(mcp: FastMCP) -> None:
     @mcp.tool()
     async def search_games(query: str) -> str:
         """
@@ -96,6 +94,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_get_game_details(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_game_details(game_id: CoercedInt) -> str:
         """
@@ -123,6 +123,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_find_coop_games(mcp: FastMCP) -> None:
     @mcp.tool()
     async def find_coop_games(player_count: CoercedInt, offset: CoercedInt = 0) -> str:
         """
@@ -149,6 +151,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_find_new_ps5_online_games(mcp: FastMCP) -> None:
     @mcp.tool()
     async def find_new_ps5_online_games(days: CoercedInt = 21) -> str:
         """
@@ -176,6 +180,8 @@ def register(mcp: FastMCP) -> None:
         except Exception as error:
             return json.dumps({"error": str(error)})
 
+
+def __register_find_singleplayer_ps_games(mcp: FastMCP) -> None:
     @mcp.tool()
     async def find_singleplayer_ps_games(offset: CoercedInt = 0) -> str:
         """
@@ -202,3 +208,12 @@ def register(mcp: FastMCP) -> None:
             return json.dumps({"error": msg})
         except Exception as error:
             return json.dumps({"error": str(error)})
+
+
+def register(mcp: FastMCP) -> None:
+    """Register all IGDB tools with the FastMCP server."""
+    __register_search_games(mcp)
+    __register_get_game_details(mcp)
+    __register_find_coop_games(mcp)
+    __register_find_new_ps5_online_games(mcp)
+    __register_find_singleplayer_ps_games(mcp)

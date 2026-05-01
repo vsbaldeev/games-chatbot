@@ -66,6 +66,75 @@ class Roulette:
             return_exceptions=True,
         )
 
+    async def __send_announce(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        reply_to_message_id: int | None,
+    ) -> int | None:
+        """Send the opening announcement. Returns the message_id or None on failure."""
+        announce = random.choice(ROULETTE_ANNOUNCE)
+        try:
+            msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=announce,
+                reply_to_message_id=reply_to_message_id,
+            )
+            return msg.message_id
+        except Exception as error:
+            logger.warning("Roulette announce failed for chat %s: %s", chat_id, error)
+            return None
+
+    async def __send_pick(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        members: list[tuple[int, str]],
+        prev_message_id: int,
+    ) -> tuple[int, str, int] | None:
+        """Pick a victim and send the pick message. Returns (victim_id, username, msg_id) or None."""
+        victim_id, victim_username = random.choice(members)
+        pick_msg = random.choice(ROULETTE_PICK).format(username=victim_username)
+        try:
+            msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=pick_msg,
+                parse_mode="Markdown",
+                reply_to_message_id=prev_message_id,
+            )
+            return victim_id, victim_username, msg.message_id
+        except Exception as error:
+            logger.warning("Roulette pick failed for chat %s: %s", chat_id, error)
+            return None
+
+    async def __send_shot_result(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        victim_id: int,
+        victim_username: str,
+        prev_message_id: int,
+    ) -> None:
+        """Fire the shot, send the result, and credit the achievement if survived."""
+        shot = random.random() < 0.5
+        result_pool = ROULETTE_HIT if shot else ROULETTE_MISS
+        result_msg = random.choice(result_pool).format(username=victim_username)
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=result_msg,
+                parse_mode="Markdown",
+                reply_to_message_id=prev_message_id,
+            )
+        except Exception as error:
+            logger.warning("Roulette result failed for chat %s: %s", chat_id, error)
+            return
+        if not shot:
+            await achievements.increment_stat(
+                victim_id, chat_id, victim_username, "roulette_win_count"
+            )
+            await notify_unlocks(context, chat_id, victim_id, victim_username)
+
     async def run_for_chat(
         self,
         context: ContextTypes.DEFAULT_TYPE,
@@ -77,53 +146,19 @@ class Roulette:
         if len(members) < 2:
             return
 
-        announce = random.choice(ROULETTE_ANNOUNCE)
-        try:
-            msg1 = await context.bot.send_message(
-                chat_id=chat_id,
-                text=announce,
-                reply_to_message_id=reply_to_message_id,
-            )
-        except Exception as error:
-            logger.warning("Roulette announce failed for chat %s: %s", chat_id, error)
+        announce_id = await self.__send_announce(context, chat_id, reply_to_message_id)
+        if announce_id is None:
             return
 
         await asyncio.sleep(5)
 
-        victim_id, victim_username = random.choice(members)
-        pick_msg = random.choice(ROULETTE_PICK).format(username=victim_username)
-        try:
-            msg2 = await context.bot.send_message(
-                chat_id=chat_id,
-                text=pick_msg,
-                parse_mode="Markdown",
-                reply_to_message_id=msg1.message_id,
-            )
-        except Exception as error:
-            logger.warning("Roulette pick failed for chat %s: %s", chat_id, error)
+        pick_result = await self.__send_pick(context, chat_id, members, announce_id)
+        if pick_result is None:
             return
 
+        victim_id, victim_username, pick_msg_id = pick_result
         await asyncio.sleep(5)
-
-        shot = random.random() < 0.5
-        result_pool = ROULETTE_HIT if shot else ROULETTE_MISS
-        result_msg = random.choice(result_pool).format(username=victim_username)
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=result_msg,
-                parse_mode="Markdown",
-                reply_to_message_id=msg2.message_id,
-            )
-        except Exception as error:
-            logger.warning("Roulette result failed for chat %s: %s", chat_id, error)
-            return
-
-        if not shot:
-            await achievements.increment_stat(
-                victim_id, chat_id, victim_username, "roulette_win_count"
-            )
-            await notify_unlocks(context, chat_id, victim_id, victim_username)
+        await self.__send_shot_result(context, chat_id, victim_id, victim_username, pick_msg_id)
 
     async def cmd_roulette(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /roulette — run a roulette round on demand."""
