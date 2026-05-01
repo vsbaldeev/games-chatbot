@@ -13,9 +13,9 @@ from langchain_groq import ChatGroq
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from langchain_community.chat_message_histories import SQLChatMessageHistory
 from src import achievements, config, log
 from src.achievements import notify_unlocks
-from src.memory import get_chat_history, get_recent_messages
 
 logger = log.get_logger(__name__)
 
@@ -122,8 +122,8 @@ class Roaster:
 
     async def __get_user_history_text(self, chat_id: int, username: str) -> str:
         """Return the last 40 meaningful messages from the given user as a newline-joined string."""
-        history = get_chat_history(str(chat_id))
-        recent = await get_recent_messages(history, 40)
+        history = SQLChatMessageHistory(session_id=str(chat_id), connection=config.SQLITE_DB_URL, table_name="message_store")
+        recent = (await history.aget_messages())[-40:]
         user_prefix = f"{username}:"
         user_messages = [
             msg.content for msg in recent

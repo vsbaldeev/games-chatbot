@@ -1,16 +1,15 @@
 import asyncio
-from src import log
 import os
-import sys
 from typing import Optional
 
+from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
 
-from src import config
-from src.memory import get_chat_history, trim_db_history, trim_history
+from src import config, log
+from src.tools import PYTHON_TOOLS
 
 logger = log.get_logger(__name__)
 
@@ -100,8 +99,10 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 - НИКОГДА не упоминай названия инструментов в ответе
 
 ━━━ РЕКОМЕНДАЦИИ PS5-ИГР ━━━
+PS5 platform ID в IGDB = 167. Apicalypse syntax: fields ...; where ...; sort ... desc; limit N; offset N;
+
 Когда просят посоветовать мультиплеерную, кооп или онлайн PS5-игру:
-1) find_coop_games(2, offset=<случайное из 0, 8, 16, 24>) — выбери одну игру
+1) custom_query(endpoint="games", query="fields name,summary,rating,multiplayer_modes.*,genres.name; where multiplayer_modes.onlinecoopmax >= 2 & platforms = (167); sort rating desc; limit 8; offset <случайное из 0, 8, 16, 24>;") — выбери одну игру
 2) get_game_details для выбранной игры — для определения кросплея с PC по наличию PC в платформах
 3) get_ps_store_price_tr для выбранной игры
 Ответ строго в таком формате, только plain text, никаких заголовков:
@@ -114,7 +115,7 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 🛒 https://store.playstation.com/tr-tr/...
 
 Когда просят посоветовать одиночную PS5-игру:
-1) find_singleplayer_ps_games(offset=<случайное из 0, 8, 16, 24>)
+1) custom_query(endpoint="games", query="fields name,summary,rating,genres.name,first_release_date; where platforms = (167) & multiplayer_modes = null & rating >= 75; sort rating desc; limit 8; offset <случайное из 0, 8, 16, 24>;") — выбери одну игру
 2) get_ps_store_price_tr для выбранной игры
 Ответ строго в таком формате, только plain text, никаких заголовков:
 🎮 Название игры
@@ -152,17 +153,21 @@ class Agent:
 
         self.__mcp_client = MultiServerMCPClient(
             {
-                "games": {
+                "igdb": {
                     "transport": "stdio",
-                    "command": sys.executable,
-                    "args": [config.MCP_SERVER_PATH],
-                    "env": dict(os.environ),
+                    "command": "igdb-mcp-server",
+                    "env": {
+                        **os.environ,
+                        "IGDB_CLIENT_ID": config.TWITCH_CLIENT_ID,
+                        "IGDB_CLIENT_SECRET": config.TWITCH_CLIENT_SECRET,
+                    },
                 }
             }
         )
-        self.__tools = await self.__mcp_client.get_tools()
+        mcp_tools = await self.__mcp_client.get_tools()
+        self.__tools = mcp_tools + PYTHON_TOOLS
         await self.__rebuild_executor()
-        logger.info(f"MCP agent initialized with {len(self.__tools)} tools")
+        logger.info(f"Agent initialized with {len(self.__tools)} tools ({len(mcp_tools)} MCP, {len(PYTHON_TOOLS)} Python)")
 
     def get_pipeline(self):
         """Return the compiled LangGraph pipeline, building it on first call."""
@@ -177,15 +182,23 @@ class Agent:
             self.__model_index = 0
             await self.__rebuild_executor()
 
-    async def run(self, chat_id: str, username: str, message_text: str) -> str:
+    async def run(
+        self,
+        chat_id: str,
+        username: str,
+        message_text: str,
+        callbacks: list | None = None,
+    ) -> str:
         if self.__executor is None:
             raise RuntimeError("Agent not initialized. Call init() first.")
 
-        history = get_chat_history(chat_id)
-        await trim_history(history, config.MAX_HISTORY_MESSAGES)
+        history = SQLChatMessageHistory(session_id=chat_id, connection=config.SQLITE_DB_URL, table_name="message_store")
+        await Agent.__trim_history(history, config.MAX_HISTORY_MESSAGES)
         past_messages = await asyncio.to_thread(lambda: history.messages)
         prefixed_input = f"{username}: {message_text}"
         input_messages = past_messages + [HumanMessage(content=prefixed_input)]
+
+        run_config = {"callbacks": callbacks} if callbacks else None
 
         for reinit_attempt in range(2):
             try:
@@ -194,6 +207,7 @@ class Agent:
                         result = await self.__invoke_with_retry(
                             self.__executor,
                             {"messages": input_messages},
+                            config=run_config,
                         )
                         ai_message = result["messages"][-1]
 
@@ -203,7 +217,7 @@ class Agent:
                                 history.add_message(ai_message)
 
                             await asyncio.to_thread(save_to_history)
-                            await trim_db_history(history)
+                            await Agent.__trim_db_history(history)
                         return ai_message.content
                     except DailyLimitError:
                         if not await self.__advance_model():
@@ -225,8 +239,8 @@ class Agent:
             temperature=0.8,
             max_tokens=256,
         )
-        history = get_chat_history(chat_id)
-        await trim_history(history, config.MAX_HISTORY_MESSAGES)
+        history = SQLChatMessageHistory(session_id=chat_id, connection=config.SQLITE_DB_URL, table_name="message_store")
+        await Agent.__trim_history(history, config.MAX_HISTORY_MESSAGES)
         past_messages = await asyncio.to_thread(lambda: history.messages)
         prefixed_input = f"{username}: {message_text}"
         messages = [SystemMessage(content=SYSTEM_PROMPT)] + past_messages + [HumanMessage(content=prefixed_input)]
@@ -241,7 +255,7 @@ class Agent:
                     history.add_ai_message(content)
 
                 await asyncio.to_thread(save_to_history)
-                await trim_db_history(history)
+                await Agent.__trim_db_history(history)
                 return content
             except Exception as err:
                 error_str = str(err).lower()
@@ -280,6 +294,34 @@ class Agent:
         )
         await self.__rebuild_executor()
         return True
+
+    @staticmethod
+    async def __trim_history(history: SQLChatMessageHistory, max_messages: int) -> None:
+        def trim_sync() -> None:
+            messages = history.messages
+            if len(messages) <= max_messages:
+                return
+            to_keep = messages[-max_messages:]
+            history.clear()
+            for msg in to_keep:
+                history.add_message(msg)
+
+        await asyncio.to_thread(trim_sync)
+
+    @staticmethod
+    async def __trim_db_history(history: SQLChatMessageHistory, max_user_messages: int = 40) -> None:
+        def trim_sync() -> None:
+            messages = history.messages
+            user_indices = [idx for idx, msg in enumerate(messages) if isinstance(msg, HumanMessage)]
+            if len(user_indices) <= max_user_messages:
+                return
+            cutoff = user_indices[-max_user_messages]
+            to_keep = messages[cutoff:]
+            history.clear()
+            for msg in to_keep:
+                history.add_message(msg)
+
+        await asyncio.to_thread(trim_sync)
 
     @staticmethod
     async def __invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> dict:
