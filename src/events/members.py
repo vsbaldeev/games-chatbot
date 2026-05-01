@@ -9,6 +9,11 @@ from src import achievements
 logger = log.get_logger(__name__)
 
 
+def get_username(update: Update) -> str:
+    user = update.effective_user
+    return user.username or user.first_name or f"user_{user.id}"
+
+
 async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_chat:
         return

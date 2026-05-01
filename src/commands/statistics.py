@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
 from src import achievements
-from src.helpers import get_username
+from src.events.members import get_username
 
 
 async def cmd_achievements(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

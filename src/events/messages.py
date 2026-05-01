@@ -14,10 +14,16 @@ from telegram.ext import ContextTypes
 from src import achievements, config
 from src.agent import agent, DailyLimitError, RateLimitError
 from src.achievements import notify_unlocks
-from src.helpers import (
-    get_username,
-    OFFENSE_RE,
+from src.events.members import get_username
+
+OFFENSE_RE = re.compile(
+    r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
+    r"отстой|бесполезн|сломан|не работает|глупый|глупая|дерьм[оа]|придур|долбо|"
+    r"ёбан|еба[нл]|заткн|иди нах|иди в|stupid|useless|broken|dumb|trash|"
+    r"garbage|sucks|piece of shit|fuck)",
+    re.IGNORECASE | re.UNICODE,
 )
+
 
 __TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
