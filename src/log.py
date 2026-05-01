@@ -8,6 +8,8 @@ def setup() -> None:
     logging.basicConfig(level=level, format=fmt)
     for noisy in ("httpx", "httpcore", "telegram.ext.ExtBot"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    aiosqlite_level = logging.getLevelName(os.getenv("AIOSQLITE_LOG_LEVEL", "WARNING").upper())
+    logging.getLogger("aiosqlite").setLevel(aiosqlite_level)
 
 
 def get_logger(name: str) -> logging.Logger:
