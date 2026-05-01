@@ -74,11 +74,6 @@ def extract_game_card(response: str) -> str:
     return "\n".join(result).strip()
 
 
-def is_bot_mentioned(update: Update) -> bool:
-    text = update.message.text or ""
-    return config.BOT_USERNAME.lower() in text.lower()
-
-
 def is_reply_to_bot(update: Update, bot_id: int) -> bool:
     reply = update.message.reply_to_message
     if not reply or not reply.from_user:

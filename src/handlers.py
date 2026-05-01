@@ -15,7 +15,6 @@ import io
 import re
 from src import log
 
-from groq import AsyncGroq
 from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
 from telegram import Update
