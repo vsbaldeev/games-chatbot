@@ -5,6 +5,8 @@ Run with: python -m src.bot
 
 import datetime
 import logging
+import logging.handlers
+import os
 
 from telegram import Update
 from telegram.ext import (
@@ -24,10 +26,24 @@ from src import achievements, game_tracker
 from src.agent import init_agent, reset_model_index
 from src import commands, dnd, duel, handlers, jobs, prozharka, roulette
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    level=logging.INFO,
-)
+def __configure_logging() -> None:
+    from src import config
+    fmt = "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
+    log_dir = os.path.dirname(os.path.abspath(config.SQLITE_DB_PATH))
+    log_path = os.path.join(log_dir, "bot.log")
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,  # 10 MB — matches docker-compose max-size
+        backupCount=3,               # matches docker-compose max-file
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(fmt))
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter(fmt))
+    logging.basicConfig(level=logging.INFO, handlers=[stream_handler, file_handler])
+
+
+__configure_logging()
 logger = logging.getLogger(__name__)
 
 
