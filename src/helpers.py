@@ -26,46 +26,12 @@ def get_username(update: Update) -> str:
     return user.username or user.first_name or f"user_{user.id}"
 
 
-
-
-def extract_game_card(response: str) -> str:
-    """Strip intermediate tool-result summaries, returning only the final game card."""
-    lines = response.splitlines()
-
-    store_idx = next(
-        (idx for idx in range(len(lines) - 1, -1, -1)
-         if "🛒" in lines[idx] or "store.playstation.com" in lines[idx]),
-        None,
-    )
-    if store_idx is None:
-        return response
-
-    start_idx = store_idx
-    for idx in range(store_idx - 1, -1, -1):
-        if __INTERMEDIATE_LINE_RE.match(lines[idx]):
-            break
-        start_idx = idx
-
-    result = lines[start_idx : store_idx + 1]
-    while result and not result[0].strip():
-        result = result[1:]
-
-    return "\n".join(result).strip()
-
-
 def is_reply_to_bot(update: Update, bot_id: int) -> bool:
     reply = update.message.reply_to_message
     if not reply or not reply.from_user:
         return False
     return reply.from_user.id == bot_id
 
-
-def is_reply_to_game_message(update: Update) -> bool:
-    reply = update.message.reply_to_message
-    if not reply:
-        return False
-    text = reply.text or ""
-    return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
 def is_night_message(update: Update) -> bool:

@@ -16,11 +16,18 @@ from src.achievements import notify_unlocks
 from src.helpers import (
     get_username,
     is_night_message,
-    is_reply_to_game_message,
     OFFENSE_RE,
 )
 
 __TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
+
+
+def __is_reply_to_game_message(update: Update) -> bool:
+    reply = update.message.reply_to_message
+    if not reply:
+        return False
+    text = reply.text or ""
+    return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
 def __strip_markdown(text: str) -> str:
@@ -191,7 +198,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await __track_text_stats(update, context, user_id, chat_id, username, text)
 
-    if is_reply_to_game_message(update):
+    if __is_reply_to_game_message(update):
         return
 
     reply = update.message.reply_to_message
