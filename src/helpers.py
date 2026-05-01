@@ -1,4 +1,3 @@
-import datetime
 from src import log
 import re
 
@@ -16,8 +15,6 @@ OFFENSE_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
-MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
-
 __INTERMEDIATE_LINE_RE = re.compile(r"^(#{1,3} |\d+\. | {2,}- )")
 
 
@@ -33,12 +30,5 @@ def is_reply_to_bot(update: Update, bot_id: int) -> bool:
     return reply.from_user.id == bot_id
 
 
-
-def is_night_message(update: Update) -> bool:
-    """True if the message was sent between 00:00 and 05:00 Moscow time."""
-    if not update.message or not update.message.date:
-        return False
-    moscow_time = update.message.date.astimezone(MOSCOW_TZ)
-    return 0 <= moscow_time.hour < 5
 
 

@@ -1,6 +1,7 @@
 """Message handlers — text, voice, photo, sticker, video."""
 
 import base64
+import datetime
 import io
 import re
 from src import log
@@ -15,11 +16,19 @@ from src.agent import agent, DailyLimitError, RateLimitError
 from src.achievements import notify_unlocks
 from src.helpers import (
     get_username,
-    is_night_message,
     OFFENSE_RE,
 )
 
 __TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
+
+
+__MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
+
+
+def __is_night_message(update: Update) -> bool:
+    if not update.message or not update.message.date:
+        return False
+    return 0 <= update.message.date.astimezone(__MOSCOW_TZ).hour < 5
 
 
 def __is_reply_to_game_message(update: Update) -> bool:
@@ -134,7 +143,7 @@ async def __track_text_stats(
     username: str,
     text: str,
 ) -> None:
-    if is_night_message(update):
+    if __is_night_message(update):
         await achievements.increment_stat(user_id, chat_id, username, "night_messages")
     if __EMOJI_RE.search(text):
         await achievements.increment_stat(user_id, chat_id, username, "emoji_messages")
