@@ -17,9 +17,19 @@ from src.helpers import (
     get_username,
     is_night_message,
     is_reply_to_game_message,
-    strip_markdown,
     OFFENSE_RE,
 )
+
+__TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
+
+
+def __strip_markdown(text: str) -> str:
+    """Remove *bold* and _italic_ markers left by LLMs that ignore plain-text instructions."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"_(.+?)_", r"\1", text, flags=re.DOTALL)
+    lines = [line for line in text.splitlines() if not __TABLE_SEPARATOR_RE.match(line)]
+    return "\n".join(lines)
 from src.pipeline.state import BotState, IncomingMessage
 from src.commands.fun.prozharka import generate_prozharka_text
 
@@ -90,7 +100,7 @@ async def __run_pipeline(
         response = final_state.get("response") or ""
         if response.strip():
             await msg.chat.send_action("typing")
-            await msg.reply_text(strip_markdown(response))
+            await msg.reply_text(__strip_markdown(response))
     except DailyLimitError:
         logger.warning("Daily token quota exhausted for chat %s", chat.id)
         await msg.reply_text(
@@ -198,7 +208,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 prozharka_text = await generate_prozharka_text(chat_id, username)
                 await update.message.reply_text(
-                    f"🔥 Прожарка @{username}:\n\n{strip_markdown(prozharka_text)}"
+                    f"🔥 Прожарка @{username}:\n\n{__strip_markdown(prozharka_text)}"
                 )
                 await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
                 await notify_unlocks(context, chat_id, user_id, username)
