@@ -20,21 +20,24 @@ from telegram.ext import (
 )
 
 from src import achievements, game_tracker, log
-from src.agent import init_agent, reset_model_index
+from src.agent import agent
 from src import commands, dnd, duel, handlers, jobs, prozharka, roulette
+from src.store import unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
 logger = log.get_logger(__name__)
 
 
 async def __reset_model_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    await reset_model_index()
+    await agent.reset_model_index()
 
 
 async def __on_startup(application: Application) -> None:
-    await init_agent()
+    await agent.init()
     await achievements.init_tables()
     await game_tracker.init_tables()
+    await msg_store.init_table()
+    await memory_store.init_table()
 
     application.job_queue.run_daily(
         roulette.russian_roulette,

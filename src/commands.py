@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
 from src import achievements, config, game_tracker
-from src.agent import DailyLimitError, RateLimitError, run_agent
+from src.agent import agent, DailyLimitError, RateLimitError
 from src.helpers import get_username, extract_game_card, notify_unlocks
 
 logger = log.get_logger(__name__)
@@ -48,7 +48,7 @@ async def __send_game_command(
 
     await update.message.chat.send_action("typing")
     try:
-        response = await run_agent(str(chat_id), username, prompt)
+        response = await agent.run(str(chat_id), username, prompt)
         card = extract_game_card(response)
 
         game_name = card.splitlines()[0].strip().lstrip("🎮").strip() if card else None

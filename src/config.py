@@ -25,4 +25,8 @@ BOT_USERNAME: str = __require("BOT_USERNAME")
 SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "data/chat_history.db")
 MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 
+# Optional — leave empty to disable the respective service
+TMDB_API_KEY: str = os.getenv("TMDB_API_KEY", "")
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+
 MCP_SERVER_PATH: str = str(Path(__file__).parent / "mcp_server.py")
