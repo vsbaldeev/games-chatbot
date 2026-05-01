@@ -21,7 +21,8 @@ from telegram.ext import (
 
 from src import achievements, game_tracker, log
 from src.agent import agent
-from src import commands, dnd, duel, handlers, jobs, prozharka, roulette
+from src import commands, handlers, jobs, prozharka, roulette
+from src.commands import games, statistics
 from src.store import unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
@@ -75,16 +76,16 @@ def __register_command_handlers(app: Application) -> None:
     group_only = filters.ChatType.GROUPS
     app.add_handler(CommandHandler("start", commands.cmd_start, filters=group_only))
     app.add_handler(CommandHandler("help", commands.cmd_help, filters=group_only))
-    app.add_handler(CommandHandler("achievements", commands.cmd_achievements, filters=group_only))
-    app.add_handler(CommandHandler("top", commands.cmd_top, filters=group_only))
     app.add_handler(CommandHandler("roast", prozharka.cmd_roast, filters=group_only))
     app.add_handler(CommandHandler("roulette", roulette.cmd_roulette, filters=group_only))
-    app.add_handler(CommandHandler("duel", duel.cmd_duel, filters=group_only))
-    app.add_handler(CallbackQueryHandler(duel.handle_duel_callback, pattern=duel.DUEL_CALLBACK_PATTERN))
-    app.add_handler(CommandHandler("dnd_pvp", dnd.cmd_dnd_pvp, filters=group_only))
-    app.add_handler(CommandHandler("dnd_coop", dnd.cmd_dnd_coop, filters=group_only))
-    app.add_handler(CommandHandler("dnd_heist", dnd.cmd_dnd_heist, filters=group_only))
-    app.add_handler(CallbackQueryHandler(dnd.handle_dnd_callback, pattern=dnd.DND_CALLBACK_PATTERN))
+    app.add_handler(CommandHandler("duel", games.cmd_duel, filters=group_only))
+    app.add_handler(CallbackQueryHandler(games.handle_duel_callback, pattern=games.DUEL_CALLBACK_PATTERN))
+    app.add_handler(CommandHandler("dnd_pvp", games.cmd_dnd_pvp, filters=group_only))
+    app.add_handler(CommandHandler("dnd_coop", games.cmd_dnd_coop, filters=group_only))
+    app.add_handler(CommandHandler("dnd_heist", games.cmd_dnd_heist, filters=group_only))
+    app.add_handler(CallbackQueryHandler(games.handle_dnd_callback, pattern=games.DND_CALLBACK_PATTERN))
+    app.add_handler(CommandHandler("achievements", statistics.cmd_achievements, filters=group_only))
+    app.add_handler(CommandHandler("top", statistics.cmd_top, filters=group_only))
 
 
 def __register_message_handlers(app: Application) -> None:
