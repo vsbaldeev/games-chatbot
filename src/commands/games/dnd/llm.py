@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from src import config
-from src.commands.dnd.state import DND_MODEL, DND_LLM_TIMEOUT
+from src.commands.games.dnd.state import DND_MODEL, DND_LLM_TIMEOUT
 
 ACTION_RE = re.compile(r"^Д([1-3]):\s*(.+)$")
 

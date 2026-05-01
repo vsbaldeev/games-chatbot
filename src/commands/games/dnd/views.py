@@ -10,7 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, TelegramError
 
 from src import log
-from src.commands.dnd.state import (
+from src.commands.games.dnd.state import (
     LobbyState,
     ActiveGame,
     DND_JOIN_CALLBACK,

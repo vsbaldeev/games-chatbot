@@ -21,7 +21,7 @@ from src.helpers import (
     OFFENSE_RE,
 )
 from src.pipeline.state import BotState, IncomingMessage
-from src.prozharka import generate_prozharka_text
+from src.commands.fun.prozharka import generate_prozharka_text
 
 logger = log.get_logger(__name__)
 

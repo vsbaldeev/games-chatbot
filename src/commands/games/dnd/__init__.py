@@ -11,8 +11,8 @@ existing call sites work without changes:
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.commands.dnd.manager import dnd_manager
-from src.commands.dnd.state import DND_CALLBACK_PATTERN
+from src.commands.games.dnd.manager import dnd_manager
+from src.commands.games.dnd.state import DND_CALLBACK_PATTERN
 
 __all__ = [
     "cmd_dnd_pvp",

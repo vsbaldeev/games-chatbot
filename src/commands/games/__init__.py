@@ -1,13 +1,13 @@
 """Game command handlers — D&D and duel."""
 
-from src.commands.dnd import (
+from src.commands.games.dnd import (
     cmd_dnd_pvp,
     cmd_dnd_coop,
     cmd_dnd_heist,
     handle_dnd_callback,
     DND_CALLBACK_PATTERN,
 )
-from src.duel import (
+from src.commands.games.duel import (
     cmd_duel,
     handle_duel_callback,
     DUEL_CALLBACK_PATTERN,
