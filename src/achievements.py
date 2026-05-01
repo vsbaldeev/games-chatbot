@@ -527,6 +527,34 @@ async def init_tables() -> None:
                 PRIMARY KEY (user_id, chat_id, key)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS message_authors (
+                chat_id    INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                username   TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (chat_id, message_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS message_reaction_counts (
+                chat_id     INTEGER NOT NULL,
+                message_id  INTEGER NOT NULL,
+                emoji       TEXT NOT NULL,
+                total_count INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL,
+                PRIMARY KEY (chat_id, message_id, emoji)
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_message_authors_created "
+            "ON message_authors(created_at)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reaction_counts_updated "
+            "ON message_reaction_counts(updated_at)"
+        )
         for migration in [
             "ALTER TABLE user_stats ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE user_stats ADD COLUMN roasted_count INTEGER NOT NULL DEFAULT 0",
@@ -736,3 +764,65 @@ async def get_chat_achievements_summary(chat_id: int) -> dict[str, list[Achievem
         if earned:
             result[username] = earned
     return result
+
+
+async def set_message_author(
+    chat_id: int, message_id: int, user_id: int, username: str
+) -> None:
+    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO message_authors "
+            "(chat_id, message_id, user_id, username, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chat_id, message_id, user_id, username, int(time.time())),
+        )
+        await db.commit()
+
+
+async def get_message_author(chat_id: int, message_id: int) -> tuple[int, str] | None:
+    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT user_id, username FROM message_authors "
+            "WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        )
+        row = await cursor.fetchone()
+    return (row[0], row[1]) if row else None
+
+
+async def apply_reaction_counts(
+    chat_id: int, message_id: int, new_counts: dict[str, int]
+) -> dict[str, int]:
+    """Store the latest reaction counts for a message and return positive deltas per emoji."""
+    deltas: dict[str, int] = {}
+    now = int(time.time())
+    async with aiosqlite.connect(config.SQLITE_DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT emoji, total_count FROM message_reaction_counts "
+            "WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        )
+        previous = {row[0]: row[1] for row in await cursor.fetchall()}
+
+        for emoji, new_total in new_counts.items():
+            delta = max(0, new_total - previous.get(emoji, 0))
+            if delta > 0:
+                deltas[emoji] = delta
+            await db.execute(
+                "INSERT OR REPLACE INTO message_reaction_counts "
+                "(chat_id, message_id, emoji, total_count, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (chat_id, message_id, emoji, new_total, now),
+            )
+
+        for emoji in previous:
+            if emoji not in new_counts:
+                await db.execute(
+                    "INSERT OR REPLACE INTO message_reaction_counts "
+                    "(chat_id, message_id, emoji, total_count, updated_at) "
+                    "VALUES (?, ?, ?, 0, ?)",
+                    (chat_id, message_id, emoji, now),
+                )
+
+        await db.commit()
+    return deltas

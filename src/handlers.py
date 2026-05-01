@@ -3,7 +3,6 @@ import io
 import logging
 import random
 import re
-from collections import OrderedDict
 
 from groq import AsyncGroq
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -29,10 +28,6 @@ from src.helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-# (chat_id, message_id) → (user_id, username); capped to avoid unbounded growth
-__MSG_AUTHOR_CACHE: OrderedDict[tuple[int, int], tuple[int, str]] = OrderedDict()
-__MSG_AUTHOR_CACHE_MAX = 2000
 
 WHISPER_MODEL = "whisper-large-v3"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -113,10 +108,9 @@ async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await achievements.register_member(update.effective_chat.id, user.id, username)
 
     if update.message and not user.is_bot:
-        key = (update.effective_chat.id, update.message.message_id)
-        __MSG_AUTHOR_CACHE[key] = (user.id, username)
-        if len(__MSG_AUTHOR_CACHE) > __MSG_AUTHOR_CACHE_MAX:
-            __MSG_AUTHOR_CACHE.popitem(last=False)
+        await achievements.set_message_author(
+            update.effective_chat.id, update.message.message_id, user.id, username
+        )
 
 
 async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -390,32 +384,38 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await notify_unlocks(context, chat_id, user_id, username)
 
 
-async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    reaction = update.message_reaction
-    if not reaction or not reaction.user:
-        return
-    # Only count newly added reactions, not removed ones
-    old_emojis = {react.emoji for react in reaction.old_reaction if hasattr(react, "emoji")}
-    added_emojis = {
-        react.emoji for react in reaction.new_reaction
-        if hasattr(react, "emoji") and react.emoji not in old_emojis
-    }
-    if not added_emojis:
+async def handle_reaction_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    event = update.message_reaction_count
+    if not event:
         return
 
-    chat_id = reaction.chat.id
-    author = __MSG_AUTHOR_CACHE.get((chat_id, reaction.message_id))
+    chat_id = event.chat.id
+    author = await achievements.get_message_author(chat_id, event.message_id)
     if not author:
         return
-
     author_id, author_username = author
+
+    new_counts: dict[str, int] = {}
+    for reaction in event.reactions:
+        if reaction.type.type == "emoji":
+            new_counts[reaction.type.emoji] = reaction.total_count
+
+    deltas = await achievements.apply_reaction_counts(chat_id, event.message_id, new_counts)
+    if not deltas:
+        return
+
     stat_map = [
         (__LAUGH_EMOJIS, "laugh_reactions"),
         (__HEART_EMOJIS, "heart_reactions"),
         (__FIRE_EMOJIS,  "fire_reactions"),
         (__THUMB_EMOJIS, "thumbsup_reactions"),
     ]
+    credited_any = False
     for emoji_set, stat_name in stat_map:
-        if added_emojis & emoji_set:
+        total_delta = sum(count for emoji, count in deltas.items() if emoji in emoji_set)
+        for _ in range(total_delta):
             await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
-            await notify_unlocks(context, chat_id, author_id, author_username)
+            credited_any = True
+
+    if credited_any:
+        await notify_unlocks(context, chat_id, author_id, author_username)
