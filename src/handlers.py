@@ -403,6 +403,8 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.warning("No author cached for message %s in chat %s — skipping reaction", reaction.message_id, chat_id)
         return
     author_id, author_username = author
+    if reaction.user and reaction.user.id == author_id:
+        return
     logger.debug("Reaction %s on message %s credited to %s", added_emojis, reaction.message_id, author_username)
 
     stat_map = [
