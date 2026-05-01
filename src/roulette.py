@@ -109,7 +109,7 @@ async def russian_roulette(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def cmd_ruletka(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_roulette(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     members = await achievements.get_chat_members(chat_id)
     if len(members) < 2:

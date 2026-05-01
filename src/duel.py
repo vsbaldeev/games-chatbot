@@ -1,14 +1,13 @@
 import asyncio
 from src import log
 import random
-import re
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import RetryAfter, TelegramError
 from telegram.ext import ContextTypes, Job
 
-from src import achievements, config
+from src import achievements
 from src.helpers import notify_unlocks
 
 logger = log.get_logger(__name__)
@@ -16,10 +15,10 @@ logger = log.get_logger(__name__)
 DUEL_ACCEPT_CALLBACK = "duel_accept"
 DUEL_REJECT_CALLBACK = "duel_reject"
 DUEL_FIRE_CALLBACK = "duel_fire"
+DUEL_PICK_CALLBACK = "duel_pick"
 DUEL_CALLBACK_PATTERN = r"^duel_"
 
-DUEL_CHALLENGE_RE = re.compile(r"дуэл", re.IGNORECASE)
-
+DUEL_PICK_TIMEOUT = 60
 DUEL_ACCEPTANCE_TIMEOUT = 30
 DUEL_COUNTDOWN_SECONDS = 10
 DUEL_FIRE_TIMEOUT = 300
@@ -67,6 +66,10 @@ __DUEL_EXPIRED = [
     "💨 Оба испугались курка.",
     "🏳️ Никто не решился нажать. Позор.",
 ]
+
+# message_id → (chat_id, caller_id, caller_username, candidates: list[(id, username)])
+__pending_picks: dict[int, tuple[int, int, str, list[tuple[int, str]]]] = {}
+__pick_jobs: dict[int, Job] = {}
 
 # message_id → (chat_id, p1_id, p1_username, p2_id, p2_username)
 __pending_acceptance: dict[int, tuple[int, int, str, int, str]] = {}
@@ -180,72 +183,39 @@ async def __countdown_and_activate(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_duel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     members = await achievements.get_chat_members(chat_id)
-    if len(members) < 2:
-        await update.message.reply_text("Недостаточно участников для дуэли. Нужно хотя бы 2.")
-        return
 
     caller_id = update.effective_user.id
-    eligible = [member for member in members if member[0] != caller_id]
-    pool = eligible if len(eligible) >= 2 else members
-    (p1_id, p1_username), (p2_id, p2_username) = random.sample(pool, 2)
-
-    started = await __send_duel_challenge(
-        context, chat_id, p1_id, p1_username, p2_id, p2_username,
-        reply_to_message_id=update.message.message_id,
-    )
-    if not started:
-        await update.message.reply_text("В чате уже идёт дуэль. Дождитесь её завершения.")
-
-
-async def handle_duel_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Start a targeted duel if the message contains a valid non-bot @mention. Returns True if a duel was started."""
-    bot_username = config.BOT_USERNAME.lower().lstrip("@")
-    text = update.message.text or ""
-
-    target_username = None
-    for entity in (update.message.entities or []):
-        if entity.type != MessageEntity.MENTION:
-            continue
-        mentioned = text[entity.offset + 1: entity.offset + entity.length]
-        if mentioned.lower() != bot_username:
-            target_username = mentioned
-            break
-
-    if not target_username:
-        return False
-
-    chat_id = update.effective_chat.id
-    challenger_id = update.effective_user.id
-    challenger_username = (
+    caller_username = (
         update.effective_user.username
         or update.effective_user.first_name
-        or f"user_{challenger_id}"
+        or f"user_{caller_id}"
     )
 
-    members = await achievements.get_chat_members(chat_id)
-    target = next(
-        ((uid, uname) for uid, uname in members if uname.lower() == target_username.lower()),
-        None,
+    candidates = [member for member in members if member[0] != caller_id]
+    if not candidates:
+        await update.message.reply_text("Нет доступных соперников для дуэли.")
+        return
+
+    rows = []
+    row: list[InlineKeyboardButton] = []
+    for index, (_, uname) in enumerate(candidates):
+        row.append(InlineKeyboardButton(f"@{uname}", callback_data=f"{DUEL_PICK_CALLBACK}:{index}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    keyboard = InlineKeyboardMarkup(rows)
+    msg = await update.message.reply_text(
+        f"@{caller_username}, выбери соперника для дуэли:",
+        reply_markup=keyboard,
     )
 
-    if not target:
-        await update.message.reply_text(f"Не нашёл @{target_username} среди участников чата.")
-        return True
+    __pending_picks[msg.message_id] = (chat_id, caller_id, caller_username, candidates)
+    job = context.job_queue.run_once(__expire_pick, DUEL_PICK_TIMEOUT, data=msg.message_id)
+    __pick_jobs[msg.message_id] = job
 
-    target_id, target_uname = target
-    if target_id == challenger_id:
-        await update.message.reply_text("Нельзя вызвать на дуэль самого себя.")
-        return True
-
-    started = await __send_duel_challenge(
-        context, chat_id,
-        challenger_id, challenger_username,
-        target_id, target_uname,
-        reply_to_message_id=update.message.message_id,
-    )
-    if not started:
-        await update.message.reply_text("В чате уже идёт дуэль. Дождитесь её завершения.")
-    return True
 
 
 async def handle_duel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -256,6 +226,51 @@ async def handle_duel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await __handle_reject(query, context)
     elif query.data == DUEL_FIRE_CALLBACK:
         await __handle_fire(query, context)
+    elif query.data.startswith(DUEL_PICK_CALLBACK + ":"):
+        await __handle_pick(query, context)
+
+
+async def __handle_pick(query, context):
+    message_id = query.message.message_id
+    clicker_id = query.from_user.id
+
+    pick_data = __pending_picks.get(message_id)
+    if not pick_data:
+        await query.answer("Выбор уже недействителен.", show_alert=True)
+        return
+
+    chat_id, caller_id, caller_username, candidates = pick_data
+
+    if clicker_id != caller_id:
+        await query.answer("Это не твоя дуэль, зритель! 👀", show_alert=True)
+        return
+
+    index = int(query.data.split(":")[1])
+    if index >= len(candidates):
+        await query.answer("Ошибка выбора.", show_alert=True)
+        return
+
+    target_id, target_username = candidates[index]
+
+    __pending_picks.pop(message_id, None)
+    job = __pick_jobs.pop(message_id, None)
+    if job:
+        job.schedule_removal()
+
+    await query.answer()
+    try:
+        await query.edit_message_text(
+            f"⚔️ @{caller_username} вызывает @{target_username} на дуэль!",
+            reply_markup=None,
+        )
+    except TelegramError:
+        pass
+
+    started = await __send_duel_challenge(
+        context, chat_id, caller_id, caller_username, target_id, target_username,
+    )
+    if not started:
+        await context.bot.send_message(chat_id, "В чате уже идёт дуэль. Дождитесь её завершения.")
 
 
 async def __handle_accept(query, context):
@@ -391,6 +406,25 @@ async def __finish_duel(query, chat_id: int, message_id: int, text: str) -> None
         await query.edit_message_text(text)
     except TelegramError:
         pass
+
+
+async def __expire_pick(context: ContextTypes.DEFAULT_TYPE) -> None:
+    message_id = context.job.data
+    pick_data = __pending_picks.pop(message_id, None)
+    __pick_jobs.pop(message_id, None)
+    if not pick_data:
+        return
+
+    chat_id, caller_id, caller_username, _ = pick_data
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f"⏳ @{caller_username} не выбрал соперника. Время вышло.",
+            reply_markup=None,
+        )
+    except TelegramError as err:
+        logger.warning(f"Pick expiry failed for msg {message_id}: {err}")
 
 
 async def __expire_acceptance(context: ContextTypes.DEFAULT_TYPE) -> None:

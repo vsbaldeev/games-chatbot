@@ -96,7 +96,7 @@ async def generate_prozharka_text(chat_id: int, target_username: str) -> str:
     return response.content
 
 
-async def cmd_prozharka(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_roast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
 
     members = await achievements.get_chat_members(chat_id)

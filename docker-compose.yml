@@ -7,7 +7,7 @@ services:
     environment:
       # Override the default relative path so the DB lands on the named volume
       SQLITE_DB_PATH: /data/chat_history.db
-      LOG_LEVEL: DEBUG
+      LOG_LEVEL: INFO
       AIOSQLITE_LOG_LEVEL: WARNING
       TELEGRAM_APP_LOG_LEVEL: WARNING
       TELEGRAM_UPDATER_LOG_LEVEL: WARNING

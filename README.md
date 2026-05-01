@@ -79,7 +79,7 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - Anti-prompt-injection: mocks "forget your instructions" attempts
 
 **Прожарка (roasts)**
-- `/prozharka` — on-demand roast of a randomly chosen chat member
+- `/roast` — on-demand roast of a randomly chosen chat member
 - Auto-roast on repeated insults: if a user replies to the bot with offensive words twice in a row, the bot generates a roast and credits `roasted_count`
 - Roast style: short (≤ 2 sentences), sarcastic stand-up comedian; 10% chance of a warm supportive message instead
 - Content source: based on the member's recent chat messages
@@ -88,7 +88,7 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 **Russian roulette**
 - Daily at 21:00 MSK the bot picks one random chat member and fires — 50% chance to hit, 50% chance to miss
 - 3-message reply chain: announce → victim selection → result (5 s pauses between messages)
-- `/ruletka` — on-demand roulette; requires at least 2 members in the chat
+- `/roulette` — on-demand roulette; requires at least 2 members in the chat
 - Miss gives the victim `roulette_win_count += 1` with achievements up to 50 survivals
 
 **Gamification**
@@ -97,8 +97,7 @@ SQLite  (aiosqlite, WAL mode, busy_timeout=5 s)
 - `/top` — top-3 chat leaderboard by achievement count with medal emojis
 
 **Emoji duel**
-- `/duel` — bot picks 2 random chat members (caller excluded when 3+ members); first to tap 🔫 wins; 5-minute timeout
-- Natural challenge: write «хочу дуэль с @vasya» to start a targeted duel without a command
+- `/duel` — shows buttons with all registered chat members; caller picks their opponent; target can accept or reject; first to tap 🔫 wins; 5-minute timeout
 
 ---
 
@@ -113,9 +112,9 @@ See [bot_commands.md](bot_commands.md) for the full reference — lobby flow, ro
 | `/dnd_heist` | The Great Heist — 3 phases: infiltration → the job → escape |
 | `/multiplayer` | One PS5/PC co-op or online game — crossplay status, TRY price, PS Store link; no repeats per chat |
 | `/singleplayer` | One PS5 single-player game (IGDB rating ≥ 75) — TRY price, PS Store link; no repeats per chat |
-| `/duel` | Emoji duel between 2 random chat members |
-| `/ruletka` | On-demand Russian roulette |
-| `/prozharka` | On-demand прожарка of a randomly chosen chat member |
+| `/duel` | Emoji duel — pick your opponent from chat members |
+| `/roulette` | On-demand Russian roulette |
+| `/roast` | On-demand прожарка of a randomly chosen chat member |
 | `/achievements` | Last 3 earned achievements with total count |
 | `/top` | Top-3 chat leaderboard by achievement count |
 | `/help` | Command list |
@@ -206,8 +205,8 @@ dnd_heist - Великое Ограбление — 3 фазы
 multiplayer - одна кооп/онлайн игра PS5/PC с ценой в TRY
 singleplayer - одна одиночная игра PS5 с ценой в TRY
 duel - эмодзи-дуэль между двумя участниками
-ruletka - русская рулетка
-prozharka - случайный участник получает по заслугам
+roulette - русская рулетка
+roast - случайный участник получает по заслугам
 achievements - последние достижения
 top - топ чата по достижениям
 help - помощь

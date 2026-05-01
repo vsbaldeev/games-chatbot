@@ -13,7 +13,6 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config
 from src.agent import SYSTEM_PROMPT, DailyLimitError, RateLimitError, run_agent
-from src.duel import DUEL_CHALLENGE_RE, handle_duel_mention
 from src.prozharka import generate_prozharka_text
 from src.helpers import (
     fallback_username,
@@ -166,11 +165,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await achievements.update_max_stat(user_id, chat_id, username, "long_message_max", len(text))
     await notify_unlocks(context, chat_id, user_id, username)
 
-    if DUEL_CHALLENGE_RE.search(text) and "@" in text:
-        duel_started = await handle_duel_mention(update, context)
-        if duel_started:
-            return
-
     if not is_direct:
         return
 
@@ -193,10 +187,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             except Exception as error:
                 logger.error(f"Offense prozharka failed for {username} in chat {chat_id}: {error}")
             return
-
-    if DUEL_CHALLENGE_RE.search(text) and "@" in text:
-        await handle_duel_mention(update, context)
-        return
 
     await __send_agent_reply(update, context, username, text)
 
@@ -405,7 +395,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     author_id, author_username = author
     if reaction.user and reaction.user.id == author_id:
         return
-    logger.debug("Reaction %s on message %s credited to %s", added_emojis, reaction.message_id, author_username)
+    logger.info("Reaction %s on message %s in chat %s credited to %s", added_emojis, reaction.message_id, chat_id, author_username)
 
     stat_map = [
         (__LAUGH_EMOJIS, "laugh_reactions"),
