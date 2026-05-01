@@ -1,10 +1,9 @@
 import logging
-
-from src import config
+import os
 
 
 def setup() -> None:
-    level = logging.getLevelName(config.LOG_LEVEL.upper())
+    level = logging.getLevelName(os.getenv("LOG_LEVEL", "INFO").upper())
     fmt = "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
     logging.basicConfig(level=level, format=fmt)
 
