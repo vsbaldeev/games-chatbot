@@ -1,5 +1,5 @@
 """
-Telegram update handlers.
+Telegram update handlers — core logic.
 
 Achievement tracking lives here.  All AI response logic (routing, transcription,
 vision, context assembly, LLM invocation, memory writing) is delegated to the

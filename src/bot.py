@@ -6,23 +6,11 @@ Run with: python -m src.bot
 import datetime
 
 from telegram import Update
-from telegram.ext import (
-    Application,
-    ApplicationBuilder,
-    CallbackQueryHandler,
-    ChatMemberHandler,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    MessageReactionHandler,
-    TypeHandler,
-    filters,
-)
+from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
 from src import achievements, game_tracker, log
 from src.agent import agent
-from src import commands, handlers, jobs, prozharka, roulette
-from src.commands import games, statistics
+from src import jobs, roulette
 from src.store import unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
@@ -55,65 +43,13 @@ async def __on_startup(application: Application) -> None:
     logger.info("Bot started, all tables and jobs initialized")
 
 
-def __register_event_handlers(app: Application) -> None:
-    app.add_handler(TypeHandler(Update, handlers.track_member), group=-1)
-    app.add_handler(
-        MessageHandler(
-            filters.StatusUpdate.NEW_CHAT_MEMBERS & filters.ChatType.GROUPS,
-            handlers.handle_new_chat_members,
-        )
-    )
-    app.add_handler(ChatMemberHandler(
-        handlers.handle_bot_added_to_chat, ChatMemberHandler.MY_CHAT_MEMBER
-    ))
-    app.add_handler(MessageReactionHandler(
-        handlers.handle_reaction,
-        message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_UPDATED,
-    ))
-
-
-def __register_command_handlers(app: Application) -> None:
-    group_only = filters.ChatType.GROUPS
-    app.add_handler(CommandHandler("start", commands.cmd_start, filters=group_only))
-    app.add_handler(CommandHandler("help", commands.cmd_help, filters=group_only))
-    app.add_handler(CommandHandler("roast", prozharka.cmd_roast, filters=group_only))
-    app.add_handler(CommandHandler("roulette", roulette.cmd_roulette, filters=group_only))
-    app.add_handler(CommandHandler("duel", games.cmd_duel, filters=group_only))
-    app.add_handler(CallbackQueryHandler(games.handle_duel_callback, pattern=games.DUEL_CALLBACK_PATTERN))
-    app.add_handler(CommandHandler("dnd_pvp", games.cmd_dnd_pvp, filters=group_only))
-    app.add_handler(CommandHandler("dnd_coop", games.cmd_dnd_coop, filters=group_only))
-    app.add_handler(CommandHandler("dnd_heist", games.cmd_dnd_heist, filters=group_only))
-    app.add_handler(CallbackQueryHandler(games.handle_dnd_callback, pattern=games.DND_CALLBACK_PATTERN))
-    app.add_handler(CommandHandler("achievements", statistics.cmd_achievements, filters=group_only))
-    app.add_handler(CommandHandler("top", statistics.cmd_top, filters=group_only))
-
-
-def __register_message_handlers(app: Application) -> None:
-    group_only = filters.ChatType.GROUPS
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & group_only,
-        handlers.handle_message,
-    ))
-    app.add_handler(MessageHandler(
-        (filters.VOICE | filters.VIDEO_NOTE) & group_only,
-        handlers.handle_voice_message,
-    ))
-    app.add_handler(MessageHandler(
-        filters.PHOTO & group_only,
-        handlers.handle_photo_message,
-    ))
-    app.add_handler(MessageHandler(
-        filters.Sticker.ALL & group_only,
-        handlers.handle_sticker_message,
-    ))
-    app.add_handler(MessageHandler(
-        filters.VIDEO & group_only,
-        handlers.handle_video_message,
-    ))
-
-
 def main() -> None:
     from src import config
+    from src.handlers.registry import (
+        EventHandlerRegistry,
+        CommandHandlerRegistry,
+        MessageHandlerRegistry,
+    )
 
     app = (
         ApplicationBuilder()
@@ -122,9 +58,8 @@ def main() -> None:
         .build()
     )
 
-    __register_event_handlers(app)
-    __register_command_handlers(app)
-    __register_message_handlers(app)
+    for registry in [EventHandlerRegistry(), CommandHandlerRegistry(), MessageHandlerRegistry()]:
+        registry.register(app)
 
     logger.info("Starting polling...")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
