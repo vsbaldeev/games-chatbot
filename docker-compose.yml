@@ -7,6 +7,7 @@ services:
     environment:
       # Override the default relative path so the DB lands on the named volume
       SQLITE_DB_PATH: /data/chat_history.db
+      LOG_LEVEL: INFO
     volumes:
       - db-data:/data
     mem_limit: 800m

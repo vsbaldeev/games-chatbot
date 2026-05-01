@@ -23,6 +23,7 @@ TWITCH_CLIENT_SECRET: str = __require("TWITCH_CLIENT_SECRET")
 BOT_USERNAME: str = __require("BOT_USERNAME")
 
 SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "data/chat_history.db")
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 
 MCP_SERVER_PATH: str = str(Path(__file__).parent / "mcp_server.py")
