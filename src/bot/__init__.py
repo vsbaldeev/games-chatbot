@@ -8,9 +8,9 @@ import datetime
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
-from src import achievements, game_tracker, log
+from src import achievements, game_tracker, jobs, log
 from src.agent import agent
-from src import jobs, roulette
+from src.commands.fun import russian_roulette
 from src.store import unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
@@ -29,7 +29,7 @@ async def __on_startup(application: Application) -> None:
     await memory_store.init_table()
 
     application.job_queue.run_daily(
-        roulette.russian_roulette,
+        russian_roulette,
         time=datetime.time(hour=18, minute=0, tzinfo=datetime.timezone.utc),
     )
     application.job_queue.run_daily(
@@ -54,7 +54,7 @@ def main() -> None:
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(__on_startup).build()
 
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
-        manager.register(app)
+        manager.add_handlers(app)
 
     logger.info("Starting polling...")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)

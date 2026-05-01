@@ -14,8 +14,7 @@ from telegram.ext import (
     filters,
 )
 
-from src import commands, prozharka, roulette
-from src.commands import games, statistics
+from src.commands import general, fun, games, statistics
 from src.events.members import (
     track_member,
     handle_new_chat_members,
@@ -33,11 +32,11 @@ from src.events.reactions import handle_reaction
 
 class HandlerManagerInterface(ABC):
     @abstractmethod
-    def register(self, app: Application) -> None: ...
+    def add_handlers(self, app: Application) -> None: ...
 
 
 class EventHandlerManager(HandlerManagerInterface):
-    def register(self, app: Application) -> None:
+    def add_handlers(self, app: Application) -> None:
         app.add_handler(TypeHandler(Update, track_member), group=-1)
         app.add_handler(MessageHandler(
             filters.StatusUpdate.NEW_CHAT_MEMBERS & filters.ChatType.GROUPS,
@@ -53,12 +52,12 @@ class EventHandlerManager(HandlerManagerInterface):
 
 
 class CommandHandlerManager(HandlerManagerInterface):
-    def register(self, app: Application) -> None:
+    def add_handlers(self, app: Application) -> None:
         group_only = filters.ChatType.GROUPS
-        app.add_handler(CommandHandler("start", commands.cmd_start, filters=group_only))
-        app.add_handler(CommandHandler("help", commands.cmd_help, filters=group_only))
-        app.add_handler(CommandHandler("roast", prozharka.cmd_roast, filters=group_only))
-        app.add_handler(CommandHandler("roulette", roulette.cmd_roulette, filters=group_only))
+        app.add_handler(CommandHandler("start", general.cmd_start, filters=group_only))
+        app.add_handler(CommandHandler("help", general.cmd_help, filters=group_only))
+        app.add_handler(CommandHandler("roast", fun.cmd_roast, filters=group_only))
+        app.add_handler(CommandHandler("roulette", fun.cmd_roulette, filters=group_only))
         app.add_handler(CommandHandler("duel", games.cmd_duel, filters=group_only))
         app.add_handler(CallbackQueryHandler(games.handle_duel_callback, pattern=games.DUEL_CALLBACK_PATTERN))
         app.add_handler(CommandHandler("dnd_pvp", games.cmd_dnd_pvp, filters=group_only))
@@ -70,7 +69,7 @@ class CommandHandlerManager(HandlerManagerInterface):
 
 
 class MessageHandlerManager(HandlerManagerInterface):
-    def register(self, app: Application) -> None:
+    def add_handlers(self, app: Application) -> None:
         group_only = filters.ChatType.GROUPS
         app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND & group_only,
