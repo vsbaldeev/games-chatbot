@@ -1,9 +1,12 @@
-from src import log
+"""Scheduled jobs registered on bot startup."""
 
+from src import log
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements
+from src.agent import agent
+from src.commands.fun import russian_roulette
 
 logger = log.get_logger(__name__)
 
@@ -28,4 +31,8 @@ async def silence_sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                             text=f"🏆 {username}: {ach.emoji} {ach.title} — {ach.description}",
                         )
             except Exception as error:
-                logger.warning(f"Silence achievement check failed for user {user_id} in chat {chat_id}: {error}")
+                logger.warning("Silence check failed for user %s in chat %s: %s", user_id, chat_id, error)
+
+
+async def reset_model_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await agent.reset_model_index()
