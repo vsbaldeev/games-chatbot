@@ -22,15 +22,6 @@ logger = log.get_logger(__name__)
 ROAST_MODEL = "llama-3.3-70b-versatile"
 
 URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-__TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
-
-
-def __strip_markdown(text: str) -> str:
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"_(.+?)_", r"\1", text, flags=re.DOTALL)
-    lines = [line for line in text.splitlines() if not __TABLE_SEP_RE.match(line)]
-    return "\n".join(lines)
 EMOJI_RE = re.compile(
     "[\U0001F300-\U0001F9FF\U00002600-\U000027FF\U0001FA00-\U0001FAFF]",
     re.UNICODE,
@@ -115,7 +106,7 @@ class Roaster:
         try:
             roast_text = await self.generate(chat_id, target_username)
             await update.message.reply_text(
-                f"🔥 Прожарка @{target_username}:\n\n{__strip_markdown(roast_text)}"
+                f"🔥 Прожарка @{target_username}:\n\n{roast_text}"
             )
             await achievements.increment_stat(target_id, chat_id, target_username, "roasted_count")
             await notify_unlocks(context, chat_id, target_id, target_username)

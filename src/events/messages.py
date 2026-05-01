@@ -20,15 +20,14 @@ from src.helpers import (
     OFFENSE_RE,
 )
 
-__TABLE_SEPARATOR_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
+__TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 
 def __strip_markdown(text: str) -> str:
-    """Remove *bold* and _italic_ markers left by LLMs that ignore plain-text instructions."""
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"_(.+?)_", r"\1", text, flags=re.DOTALL)
-    lines = [line for line in text.splitlines() if not __TABLE_SEPARATOR_RE.match(line)]
+    lines = [line for line in text.splitlines() if not __TABLE_SEP_RE.match(line)]
     return "\n".join(lines)
 from src.pipeline.state import BotState, IncomingMessage
 from src.commands.fun.prozharka import generate_prozharka_text
