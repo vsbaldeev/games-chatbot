@@ -98,7 +98,7 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
     for _ in range(CHAIN_DEPTH_LIMIT):
         if current_id is None:
             break
-        row = await db.execute_fetchone(
+        cursor = await db.execute(
             """
             SELECT message_id, user_id, username, content, media_type, reply_to_msg_id
             FROM unified_messages
@@ -106,6 +106,7 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
             """,
             (chat_id, current_id),
         )
+        row = await cursor.fetchone()
         if row is None:
             break
         chain.append(dict(row))

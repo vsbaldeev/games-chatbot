@@ -26,7 +26,7 @@ logger = log.get_logger(__name__)
 MEMORY_MODEL = "llama-3.1-8b-instant"
 MAX_NEW_FACTS = 3
 
-__EXTRACTION_SYSTEM = (
+_EXTRACTION_SYSTEM = (
     "You extract concise facts about a person from a single chat exchange. "
     "Return a JSON array of short English strings (max 15 words each). "
     "Only include facts that are new or update existing ones. "
@@ -78,7 +78,7 @@ class MemoryWriter:
             max_tokens=256,
         )
         result = await llm.ainvoke([
-            SystemMessage(content=__EXTRACTION_SYSTEM),
+            SystemMessage(content=_EXTRACTION_SYSTEM),
             HumanMessage(content=prompt),
         ])
         return self.__parse_facts(result.content.strip())
