@@ -14,7 +14,7 @@ from src.tools import PYTHON_TOOLS
 
 logger = log.get_logger(__name__)
 
-__FOREIGN_SCRIPT_RE = re.compile(
+_FOREIGN_SCRIPT_RE = re.compile(
     "[一-鿿"   # CJK Unified Ideographs
     "㐀-䶿"    # CJK Extension A
     "가-힯"    # Hangul Syllables
@@ -253,7 +253,7 @@ class Agent:
 
     @staticmethod
     def __has_foreign_script(text: str) -> bool:
-        return bool(__FOREIGN_SCRIPT_RE.search(text))
+        return bool(_FOREIGN_SCRIPT_RE.search(text))
 
     async def __apply_language_correction(
         self,
