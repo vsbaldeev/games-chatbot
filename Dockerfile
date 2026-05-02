@@ -2,6 +2,10 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# git is required to install igdb-mcp-server from GitHub (not on PyPI)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies in a separate layer so rebuilds on code changes are fast
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
