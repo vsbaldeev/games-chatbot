@@ -248,7 +248,7 @@ class Agent:
             temperature=0.7,
             max_tokens=512,
         )
-        self.__executor = create_agent(llm, self.__tools, prompt=SYSTEM_PROMPT)
+        self.__executor = create_agent(llm, self.__tools, system_prompt=SYSTEM_PROMPT)
         logger.info(f"Agent executor using model: {model}")
 
     @staticmethod
