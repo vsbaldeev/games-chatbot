@@ -37,8 +37,8 @@ class MessageRouter:
 
         await self.__store_message(msg)
 
-        should_respond = self.__decide(msg, message)
-        return {"should_respond": should_respond}
+        should_respond, response_trigger = self.__decide(msg, message)
+        return {"should_respond": should_respond, "response_trigger": response_trigger}
 
     async def __store_message(self, msg: IncomingMessage) -> None:
         media_type = msg["media_type"]
@@ -70,27 +70,27 @@ class MessageRouter:
         except Exception as err:
             logger.warning("Failed to store message %s: %s", msg["message_id"], err)
 
-    def __decide(self, msg: IncomingMessage, telegram_message: Any) -> bool:
+    def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:
         media_type = msg["media_type"]
 
         if media_type == "text":
             text = msg["raw_text"] or ""
             if self.__bot_username in text.lower():
-                return True
+                return True, "explicit"
             if self.__is_reply_to_bot(telegram_message):
-                return True
-            return False
+                return True, "explicit"
+            return False, "random"
 
         if media_type in ("voice", "video_note", "video"):
-            return random.random() < VOICE_RESPONSE_CHANCE
+            return random.random() < VOICE_RESPONSE_CHANCE, "random"
 
         if media_type == "photo":
             caption = (telegram_message.caption or "").lower()
             if self.__bot_username in caption:
-                return True
-            return random.random() < PHOTO_RESPONSE_CHANCE
+                return True, "explicit"
+            return random.random() < PHOTO_RESPONSE_CHANCE, "random"
 
-        return False
+        return False, "random"
 
     @staticmethod
     def __is_reply_to_bot(telegram_message: Any) -> bool:

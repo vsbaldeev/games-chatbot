@@ -55,13 +55,13 @@ class GuardNode:
 
         if label == "MALICIOUS":
             logger.warning(
-                "Guard blocked message from @%s in chat %s", msg["username"], msg["chat_id"]
+                "Guard blocked message from @%s in chat %s (trigger: %s)",
+                msg["username"], msg["chat_id"], state.get("response_trigger"),
             )
-            asyncio.create_task(self.__record_hack_attempt(msg))
-            return {
-                "blocked": True,
-                "response": random.choice(GUARD_REFUSALS),
-            }
+            if state.get("response_trigger") == "explicit":
+                asyncio.create_task(self.__record_hack_attempt(msg))
+                return {"blocked": True, "response": random.choice(GUARD_REFUSALS)}
+            return {"blocked": True}
 
         return {"blocked": False}
 

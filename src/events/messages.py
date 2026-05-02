@@ -99,6 +99,7 @@ def __build_pipeline_state(
     return {
         "incoming": incoming,
         "should_respond": False,
+        "response_trigger": "random",
         "blocked": False,
         "context": None,
         "response": None,
