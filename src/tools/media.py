@@ -12,7 +12,7 @@ OPENCRITIC_SEARCH_API = "https://api.opencritic.com/api/game/search"
 OPENCRITIC_GAME_API = "https://api.opencritic.com/api/game"
 ANILIST_API = "https://graphql.anilist.co"
 
-__ANILIST_QUERY = """
+ANILIST_QUERY = """
 query ($search: String) {
   Media(search: $search, type: ANIME) {
     title { romaji english native }
@@ -106,7 +106,7 @@ async def search_anime(query: str) -> str:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(
                 ANILIST_API,
-                json={"query": __ANILIST_QUERY, "variables": {"search": query}},
+                json={"query": ANILIST_QUERY, "variables": {"search": query}},
                 headers={"Content-Type": "application/json"},
             )
             response.raise_for_status()

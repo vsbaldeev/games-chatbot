@@ -36,13 +36,13 @@ logger = log.get_logger(__name__)
 WHISPER_MODEL = "whisper-large-v3"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
-__VISION_PROMPT = (
+VISION_PROMPT = (
     "Describe this image in one concise sentence in Russian. "
     "Focus on what's visible: people, objects, text on screen, game UI, etc."
 )
 
-__FRAME_DURATION_AUDIO_ONLY = 120
-__FRAME_DURATION_SINGLE = 15
+FRAME_DURATION_AUDIO_ONLY = 120
+FRAME_DURATION_SINGLE = 15
 
 
 class MessageIngester:
@@ -137,7 +137,7 @@ class MessageIngester:
     async def __extract_and_describe_frames(self, video_bytes: bytes) -> list[str]:
         loop = asyncio.get_event_loop()
         try:
-            frames = await loop.run_in_executor(None, __extract_frames_sync, video_bytes)
+            frames = await loop.run_in_executor(None, extract_frames_sync, video_bytes)
         except Exception as err:
             logger.warning("Frame extraction failed: %s", err)
             return []
@@ -160,7 +160,7 @@ class MessageIngester:
         response = await llm.ainvoke([
             HumanMessage(content=[
                 {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": __VISION_PROMPT},
+                {"type": "text", "text": VISION_PROMPT},
             ]),
         ])
         return response.content.strip()
@@ -191,7 +191,7 @@ class MessageIngester:
             response = await llm.ainvoke([
                 HumanMessage(content=[
                     {"type": "image_url", "image_url": {"url": image_url}},
-                    {"type": "text", "text": __VISION_PROMPT},
+                    {"type": "text", "text": VISION_PROMPT},
                 ]),
             ])
             return response.content.strip()
@@ -200,7 +200,7 @@ class MessageIngester:
             return ""
 
 
-def __extract_frames_sync(video_bytes: bytes) -> list[bytes]:
+def extract_frames_sync(video_bytes: bytes) -> list[bytes]:
     buffer = io.BytesIO(video_bytes)
     with av.open(buffer) as container:
         if not container.streams.video:
@@ -209,10 +209,10 @@ def __extract_frames_sync(video_bytes: bytes) -> list[bytes]:
         stream = container.streams.video[0]
         duration_seconds = float(container.duration) / 1_000_000 if container.duration else 0
 
-        if duration_seconds > __FRAME_DURATION_AUDIO_ONLY:
+        if duration_seconds > FRAME_DURATION_AUDIO_ONLY:
             return []
 
-        fractions = [0.5] if duration_seconds < __FRAME_DURATION_SINGLE else [0.25, 0.5, 0.75]
+        fractions = [0.5] if duration_seconds < FRAME_DURATION_SINGLE else [0.25, 0.5, 0.75]
         frames = []
         for fraction in fractions:
             seek_offset = int(duration_seconds * fraction * 1_000_000)

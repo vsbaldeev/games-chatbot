@@ -25,19 +25,19 @@ OFFENSE_RE = re.compile(
 )
 
 
-__TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
+TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 
-__MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
+MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
 
-def __is_night_message(update: Update) -> bool:
+def is_night_message(update: Update) -> bool:
     if not update.message or not update.message.date:
         return False
-    return 0 <= update.message.date.astimezone(__MOSCOW_TZ).hour < 5
+    return 0 <= update.message.date.astimezone(MOSCOW_TZ).hour < 5
 
 
-def __is_reply_to_game_message(update: Update) -> bool:
+def is_reply_to_game_message(update: Update) -> bool:
     reply = update.message.reply_to_message
     if not reply:
         return False
@@ -45,11 +45,11 @@ def __is_reply_to_game_message(update: Update) -> bool:
     return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
-def __strip_markdown(text: str) -> str:
+def strip_markdown(text: str) -> str:
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"_(.+?)_", r"\1", text, flags=re.DOTALL)
-    lines = [line for line in text.splitlines() if not __TABLE_SEP_RE.match(line)]
+    lines = [line for line in text.splitlines() if not TABLE_SEP_RE.match(line)]
     return "\n".join(lines)
 from src.pipeline.state import BotState, IncomingMessage
 from src.commands.fun.roast import generate_roast_text
@@ -59,17 +59,17 @@ logger = log.get_logger(__name__)
 WHISPER_MODEL = "whisper-large-v3"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
-__EMOJI_RE = re.compile(
+EMOJI_RE = re.compile(
     "[\U0001F300-\U0001F9FF\U00002600-\U000027FF\U0001FA00-\U0001FAFF]",
     re.UNICODE,
 )
-__URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 
 # {chat_id: {user_id: count}} — tracks consecutive offensive replies toward the bot
-__offense_reply_counts: dict[int, dict[int, int]] = {}
+offense_reply_counts: dict[int, dict[int, int]] = {}
 
 
-def __build_pipeline_state(
+def build_pipeline_state(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     media_type: str,
@@ -107,7 +107,7 @@ def __build_pipeline_state(
     }
 
 
-async def __run_pipeline(
+async def run_pipeline(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     media_type: str,
@@ -115,7 +115,7 @@ async def __run_pipeline(
 ) -> None:
     msg = update.message
     chat = update.effective_chat
-    initial_state = __build_pipeline_state(update, context, media_type, file_id)
+    initial_state = build_pipeline_state(update, context, media_type, file_id)
 
     try:
         pipeline = agent.get_pipeline()
@@ -123,7 +123,7 @@ async def __run_pipeline(
         response = final_state.get("response") or ""
         if response.strip():
             await msg.chat.send_action("typing")
-            await msg.reply_text(__strip_markdown(response))
+            await msg.reply_text(strip_markdown(response))
     except DailyLimitError:
         logger.warning("Daily token quota exhausted for chat %s", chat.id)
         await msg.reply_text(
@@ -143,7 +143,7 @@ async def __run_pipeline(
         )
 
 
-async def __track_text_stats(
+async def track_text_stats(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int,
@@ -151,11 +151,11 @@ async def __track_text_stats(
     username: str,
     text: str,
 ) -> None:
-    if __is_night_message(update):
+    if is_night_message(update):
         await achievements.increment_stat(user_id, chat_id, username, "night_messages")
-    if __EMOJI_RE.search(text):
+    if EMOJI_RE.search(text):
         await achievements.increment_stat(user_id, chat_id, username, "emoji_messages")
-    if __URL_RE.search(text):
+    if URL_RE.search(text):
         await achievements.increment_stat(user_id, chat_id, username, "link_messages")
     if update.message.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
@@ -163,7 +163,7 @@ async def __track_text_stats(
     await notify_unlocks(context, chat_id, user_id, username)
 
 
-async def __is_real_photo(file_id: str, bot) -> bool:
+async def is_real_photo(file_id: str, bot) -> bool:
     """Return True if the image appears to be a real photograph taken with a camera."""
     try:
         tg_file = await bot.get_file(file_id)
@@ -213,9 +213,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    await __track_text_stats(update, context, user_id, chat_id, username, text)
+    await track_text_stats(update, context, user_id, chat_id, username, text)
 
-    if __is_reply_to_game_message(update):
+    if is_reply_to_game_message(update):
         return
 
     reply = update.message.reply_to_message
@@ -223,7 +223,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Offense auto-roast: if user insults the bot twice in a row.
     if OFFENSE_RE.search(text) and is_reply_to_bot:
-        counts = __offense_reply_counts.setdefault(chat_id, {})
+        counts = offense_reply_counts.setdefault(chat_id, {})
         counts[user_id] = counts.get(user_id, 0) + 1
         if counts[user_id] >= 2:
             counts[user_id] = 0
@@ -231,7 +231,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 roast_text = await generate_roast_text(chat_id, username)
                 await update.message.reply_text(
-                    f"🔥 Прожарка @{username}:\n\n{__strip_markdown(roast_text)}"
+                    f"🔥 Прожарка @{username}:\n\n{strip_markdown(roast_text)}"
                 )
                 await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
                 await notify_unlocks(context, chat_id, user_id, username)
@@ -239,7 +239,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.error("Offense roast failed for %s in chat %s: %s", username, chat_id, error)
             return
 
-    await __run_pipeline(update, context, media_type="text")
+    await run_pipeline(update, context, media_type="text")
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -271,7 +271,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await notify_unlocks(context, chat_id, user_id, username)
-    await __run_pipeline(update, context, media_type=media_type, file_id=file_id)
+    await run_pipeline(update, context, media_type=media_type, file_id=file_id)
 
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -296,11 +296,11 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     photo = msg.photo[-1]
 
     # Pre-filter: only respond to real photographs (not memes/screenshots/game art).
-    if not await __is_real_photo(photo.file_id, context.bot):
+    if not await is_real_photo(photo.file_id, context.bot):
         logger.info("Photo skipped (not real photo) in chat %s", chat_id)
         return
 
-    await __run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
+    await run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
 
 
 async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -356,4 +356,4 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await notify_unlocks(context, chat_id, user_id, username)
-    await __run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)
+    await run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)

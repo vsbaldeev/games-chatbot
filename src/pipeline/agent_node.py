@@ -12,7 +12,7 @@ from src.pipeline.state import BotState
 
 logger = log.get_logger(__name__)
 
-__SEARCH_TOOLS = frozenset({"web_search", "fetch_article"})
+SEARCH_TOOLS = frozenset({"web_search", "fetch_article"})
 
 
 class SearchNotificationCallback(AsyncCallbackHandler):
@@ -25,7 +25,7 @@ class SearchNotificationCallback(AsyncCallbackHandler):
 
     async def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
         tool_name = serialized.get("name", "")
-        if tool_name not in __SEARCH_TOOLS or self.__notified:
+        if tool_name not in SEARCH_TOOLS or self.__notified:
             return
         self.__notified = True
         text = "🔗 Читаю страницу, подождите..." if tool_name == "fetch_article" else "🔍 Ищу, подождите немного..."
