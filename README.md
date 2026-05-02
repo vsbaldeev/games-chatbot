@@ -56,8 +56,11 @@ src/bot/handlers.py
                   ▼
                 guard_node (GuardNode)
                   • classifies processed_text with llama-prompt-guard-2-86m
-                  • MALICIOUS → random refusal (1 of 10), hack attempt recorded
-                               in user_memories, short-circuits to END
+                  • MALICIOUS + explicit trigger (@mention/reply):
+                      random refusal (1 of 10) sent, hack attempt recorded
+                      in user_memories, short-circuits to END
+                  • MALICIOUS + random trigger (25% chance):
+                      silently blocked, no message sent, no hack recorded
                   • BENIGN    → continue; fails open on API error
                   │
                   ├─ blocked=True ──► END  (refusal already sent)
@@ -445,7 +448,7 @@ src/
 Every message flows through a typed `BotState` graph: Router → Ingester → Guard → ContextBuilder → Agent → MemoryWriter. Each node has a single responsibility and can be tested independently. Two short-circuits exist: `should_respond=False` exits after the router for messages the bot ignores; `blocked=True` exits after the guard for injection/jailbreak attempts — neither reaches the main LLM.
 
 **Guard Node with fail-open design.**
-`llama-prompt-guard-2-86m` classifies every processed message before the ReAct agent runs. On `MALICIOUS`, a random refusal from a pool of 10 is sent directly, and the hack attempt is recorded in `user_memories` as an incrementing counter fact (`Пытался взломать бота N раз`) — available to `/roast` as material. The guard fails open (passes through) if the Groq API is unavailable, so a transient outage never silences the bot.
+`llama-prompt-guard-2-86m` classifies every processed message before the ReAct agent runs. Behavior on `MALICIOUS` depends on how the bot decided to respond (`response_trigger` in `BotState`): if the user explicitly addressed the bot (@mention or reply), a random refusal from a pool of 10 is sent and the hack attempt is recorded in `user_memories` as an incrementing counter fact (`Пытался взломать бота N раз`) — available to `/roast` as material. If the bot picked the message by random chance (25% media trigger), it silently blocks without sending anything — the user wasn't talking to the bot, so a refusal would be confusing. The guard fails open (passes through) if the Groq API is unavailable, so a transient outage never silences the bot.
 
 **Three-model fallback chain.**
 The main agent tries `llama-4-scout` first. On `DailyLimitError`, `advance_model()` rebuilds the executor with `qwen/qwen3-32b`, then `openai/gpt-oss-20b` as last resort — all transparently within the same request. MCP crash recovery preserves the current model index rather than resetting to the primary.
@@ -564,19 +567,3 @@ docker compose down -v          # remove everything including database
 
 The compose file sets `mem_limit: 800m`. Estimated steady-state RSS is 300–450 MB
 (Python process + MCP subprocess), leaving ~1.2 GB free on a 2 GB VPS.
-
----
-
-## Groq free-tier limits
-
-| Model | Used for | TPD | RPD |
-|---|---|---|---|
-| `meta-llama/llama-4-scout-17b-16e-instruct` | Agent primary + vision | 500K | 1K |
-| `qwen/qwen3-32b` | Agent fallback-1 | 500K | 1K |
-| `openai/gpt-oss-20b` | Agent fallback-2 | 200K | 1K |
-| `llama-3.3-70b-versatile` | Прожарки | 100K | 1K |
-| `llama-3.1-8b-instant` | Memory extraction | 500K | 14.4K RPD |
-| `whisper-large-v3` | Voice/video transcription | — | 2K |
-| `meta-llama/llama-prompt-guard-2-86m` | Guard Node (injection classifier) | 500K | 14.4K |
-
-Combined daily token budget across the agent fallback chain: **1.2M tokens**. The model index resets to the primary at **00:05 UTC** daily.
