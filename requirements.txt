@@ -13,3 +13,4 @@ aiosqlite>=0.21.0
 trafilatura>=1.6.0
 duckduckgo-search>=8.0.0
 tavily-python>=0.5.0
+av>=12.0.0

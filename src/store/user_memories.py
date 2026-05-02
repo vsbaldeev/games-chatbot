@@ -11,6 +11,7 @@ The table is keyed by (chat_id, user_id) so the same user is tracked separately
 in different group chats.
 """
 
+import re
 import time
 
 from src.store import db as database
@@ -80,6 +81,49 @@ async def get_facts_for_users(
     for row in rows:
         result.setdefault(row["user_id"], []).append(row["fact"])
     return result
+
+
+def __format_hack_fact(count: int) -> str:
+    last_two = count % 100
+    last_one = count % 10
+    if 11 <= last_two <= 19:
+        suffix = "раз"
+    elif last_one == 1:
+        suffix = "раз"
+    elif 2 <= last_one <= 4:
+        suffix = "раза"
+    else:
+        suffix = "раз"
+    return f"Пытался взломать бота {count} {suffix}"
+
+
+async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> None:
+    """Increment (or create) the hack-attempt counter fact for this user."""
+    db = await database.get()
+    rows = await db.execute_fetchall(
+        """
+        SELECT id, fact FROM user_memories
+        WHERE chat_id = ? AND user_id = ? AND fact LIKE 'Пытался взломать бота%'
+        """,
+        (chat_id, user_id),
+    )
+    now = time.time()
+    if rows:
+        match = re.search(r"(\d+)", rows[0]["fact"])
+        count = int(match.group(1)) + 1 if match else 2
+        await db.execute(
+            "UPDATE user_memories SET fact = ?, updated_at = ? WHERE id = ?",
+            (__format_hack_fact(count), now, rows[0]["id"]),
+        )
+    else:
+        await db.execute(
+            """
+            INSERT INTO user_memories (chat_id, user_id, username, fact, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (chat_id, user_id, username, __format_hack_fact(1), now),
+        )
+    await db.commit()
 
 
 async def upsert_facts(

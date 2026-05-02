@@ -99,6 +99,7 @@ def __build_pipeline_state(
     return {
         "incoming": incoming,
         "should_respond": False,
+        "blocked": False,
         "context": None,
         "response": None,
         "context_types": context,
@@ -333,3 +334,4 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await notify_unlocks(context, chat_id, user_id, username)
+    await __run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)

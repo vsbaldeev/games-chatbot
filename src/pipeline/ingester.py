@@ -2,19 +2,27 @@
 MessageIngester — second node in the LangGraph pipeline.
 
 Processes raw media into readable text:
-  - text      → passed through unchanged
-  - voice     → transcribed via Groq Whisper
-  - video_note → transcribed via Groq Whisper
-  - photo     → described via vision LLM (one-sentence description)
+  - text       → passed through unchanged
+  - voice      → transcribed via Groq Whisper
+  - video_note → transcribed via Groq Whisper + frames described via Vision LLM
+  - video      → transcribed via Groq Whisper + frames described via Vision LLM
+  - photo      → described via vision LLM (one-sentence description)
+
+Frame extraction (PyAV):
+  duration < 15s   → 1 keyframe (middle)
+  15s – 120s       → 3 keyframes (uniformly distributed)
+  > 120s           → audio only, no frames
 
 Updates the unified_messages row written by the Router with the real content
 so that reply-chain queries later in the pipeline return useful text.
 """
 
+import asyncio
 import base64
 import io
 from src import log
 
+import av
 from groq import AsyncGroq
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
@@ -33,6 +41,9 @@ __VISION_PROMPT = (
     "Focus on what's visible: people, objects, text on screen, game UI, etc."
 )
 
+__FRAME_DURATION_AUDIO_ONLY = 120
+__FRAME_DURATION_SINGLE = 15
+
 
 class MessageIngester:
     """Converts media messages to text and updates the unified_messages store."""
@@ -40,13 +51,14 @@ class MessageIngester:
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
         media_type = msg["media_type"]
-        context_types = state["context_types"]
-        bot = context_types.bot
+        bot = state["context_types"].bot
 
         if media_type == "text":
             processed = msg["raw_text"] or ""
-        elif media_type in ("voice", "video_note"):
-            processed = await self.__transcribe(msg["file_id"], media_type, bot)
+        elif media_type == "voice":
+            processed = await self.__transcribe(msg["file_id"], "voice", bot)
+        elif media_type in ("video_note", "video"):
+            processed = await self.__transcribe_with_frames(msg["file_id"], media_type, bot)
         elif media_type == "photo":
             processed = await self.__describe_photo(msg["file_id"], bot)
         else:
@@ -68,7 +80,7 @@ class MessageIngester:
 
     async def __transcribe(self, file_id: str, media_type: str, bot) -> str:
         try:
-            filename = "voice.ogg" if media_type == "voice" else "video_note.mp4"
+            filename = "voice.ogg" if media_type == "voice" else "video.mp4"
             tg_file = await bot.get_file(file_id)
             buffer = io.BytesIO()
             await tg_file.download_to_memory(buffer)
@@ -84,6 +96,74 @@ class MessageIngester:
         except Exception as err:
             logger.error("Transcription failed for file %s: %s", file_id, err)
             return ""
+
+    async def __transcribe_with_frames(self, file_id: str, media_type: str, bot) -> str:
+        try:
+            tg_file = await bot.get_file(file_id)
+            buffer = io.BytesIO()
+            await tg_file.download_to_memory(buffer)
+            video_bytes = buffer.getvalue()
+        except Exception as err:
+            logger.error("Video download failed for file %s: %s", file_id, err)
+            return ""
+
+        transcript, frame_descriptions = await asyncio.gather(
+            self.__transcribe_bytes(video_bytes, media_type),
+            self.__extract_and_describe_frames(video_bytes),
+        )
+
+        parts = []
+        if transcript:
+            parts.append(f"[Аудио]: {transcript}")
+        total = len(frame_descriptions)
+        for index, description in enumerate(frame_descriptions, start=1):
+            parts.append(f"[Видео {index}/{total}]: {description}")
+
+        return "\n".join(parts)
+
+    async def __transcribe_bytes(self, video_bytes: bytes, media_type: str) -> str:
+        try:
+            filename = "video_note.mp4" if media_type == "video_note" else "video.mp4"
+            client = AsyncGroq(api_key=config.GROQ_API_KEY)
+            transcription = await client.audio.transcriptions.create(
+                file=(filename, video_bytes),
+                model=WHISPER_MODEL,
+            )
+            return transcription.text.strip()
+        except Exception as err:
+            logger.error("Video transcription failed: %s", err)
+            return ""
+
+    async def __extract_and_describe_frames(self, video_bytes: bytes) -> list[str]:
+        loop = asyncio.get_event_loop()
+        try:
+            frames = await loop.run_in_executor(None, __extract_frames_sync, video_bytes)
+        except Exception as err:
+            logger.warning("Frame extraction failed: %s", err)
+            return []
+
+        descriptions = await asyncio.gather(
+            *[self.__describe_frame(frame) for frame in frames],
+            return_exceptions=True,
+        )
+        return [desc for desc in descriptions if isinstance(desc, str) and desc]
+
+    async def __describe_frame(self, frame_bytes: bytes) -> str:
+        b64_image = base64.b64encode(frame_bytes).decode()
+        image_url = f"data:image/jpeg;base64,{b64_image}"
+        llm = ChatGroq(
+            model=VISION_MODEL,
+            api_key=config.GROQ_API_KEY,
+            temperature=0.1,
+            max_tokens=100,
+        )
+        response = await llm.ainvoke([
+            HumanMessage(content=[
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": __VISION_PROMPT},
+            ]),
+        ])
+        return response.content.strip()
 
     async def __describe_photo(self, file_id: str, bot) -> str:
         try:
@@ -118,3 +198,29 @@ class MessageIngester:
         except Exception as err:
             logger.error("Photo description failed for file %s: %s", file_id, err)
             return ""
+
+
+def __extract_frames_sync(video_bytes: bytes) -> list[bytes]:
+    buffer = io.BytesIO(video_bytes)
+    with av.open(buffer) as container:
+        if not container.streams.video:
+            return []
+
+        stream = container.streams.video[0]
+        duration_seconds = float(container.duration) / 1_000_000 if container.duration else 0
+
+        if duration_seconds > __FRAME_DURATION_AUDIO_ONLY:
+            return []
+
+        fractions = [0.5] if duration_seconds < __FRAME_DURATION_SINGLE else [0.25, 0.5, 0.75]
+        frames = []
+        for fraction in fractions:
+            seek_offset = int(duration_seconds * fraction * 1_000_000)
+            container.seek(seek_offset)
+            for frame in container.decode(stream):
+                img_buffer = io.BytesIO()
+                frame.to_image().save(img_buffer, format="JPEG")
+                frames.append(img_buffer.getvalue())
+                break
+
+    return frames

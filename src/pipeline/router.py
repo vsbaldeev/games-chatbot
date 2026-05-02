@@ -49,6 +49,8 @@ class MessageRouter:
             content = unified_messages.VOICE_PLACEHOLDER
         elif media_type == "video_note":
             content = unified_messages.VIDEO_NOTE_PLACEHOLDER
+        elif media_type == "video":
+            content = unified_messages.VIDEO_PLACEHOLDER
         elif media_type == "photo":
             content = unified_messages.PHOTO_PLACEHOLDER
         else:
@@ -79,7 +81,7 @@ class MessageRouter:
                 return True
             return False
 
-        if media_type in ("voice", "video_note"):
+        if media_type in ("voice", "video_note", "video"):
             return random.random() < VOICE_RESPONSE_CHANCE
 
         if media_type == "photo":

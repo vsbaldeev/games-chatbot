@@ -14,6 +14,7 @@ from src.store import db as database
 # transcription/description is available.
 VOICE_PLACEHOLDER = "[voice]"
 VIDEO_NOTE_PLACEHOLDER = "[video_note]"
+VIDEO_PLACEHOLDER = "[video]"
 PHOTO_PLACEHOLDER = "[photo]"
 
 # Maximum number of hops to follow when resolving a reply chain.

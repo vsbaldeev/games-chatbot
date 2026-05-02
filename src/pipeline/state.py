@@ -19,7 +19,7 @@ class IncomingMessage(TypedDict):
     username: str
     raw_text: str | None          # original message text or caption
     processed_text: str | None    # transcript / vision description, filled by Ingester
-    media_type: str               # "text" | "voice" | "video_note" | "photo"
+    media_type: str               # "text" | "voice" | "video_note" | "video" | "photo"
     message_id: int
     reply_to_msg_id: int | None
     file_id: str | None           # Telegram file_id for voice / photo messages
@@ -38,6 +38,7 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
+    blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
     context_types: Any            # telegram.ext.ContextTypes instance for sending replies
