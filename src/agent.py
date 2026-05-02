@@ -159,6 +159,7 @@ class Agent:
                 "igdb": {
                     "transport": "stdio",
                     "command": "igdb-mcp-server",
+                    "args": [],
                     "env": {
                         **os.environ,
                         "IGDB_CLIENT_ID": config.TWITCH_CLIENT_ID,
