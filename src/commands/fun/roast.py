@@ -111,7 +111,7 @@ class Roaster:
             await achievements.increment_stat(target_id, chat_id, target_username, "roasted_count")
             await notify_unlocks(context, chat_id, target_id, target_username)
         except Exception as error:
-            logger.error("Prozharka failed for %s in chat %s: %s", target_username, chat_id, error)
+            logger.error("Roast failed for %s in chat %s: %s", target_username, chat_id, error)
             await update.message.reply_text(
                 "Прожарка не задалась. Groq на перекуре — попробуй позже."
             )
@@ -149,7 +149,7 @@ class Roaster:
 roaster = Roaster()
 
 
-async def generate_prozharka_text(chat_id: int, target_username: str) -> str:
+async def generate_roast_text(chat_id: int, target_username: str) -> str:
     return await roaster.generate(chat_id, target_username)
 
 

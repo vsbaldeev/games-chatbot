@@ -52,7 +52,7 @@ def __strip_markdown(text: str) -> str:
     lines = [line for line in text.splitlines() if not __TABLE_SEP_RE.match(line)]
     return "\n".join(lines)
 from src.pipeline.state import BotState, IncomingMessage
-from src.commands.fun.prozharka import generate_prozharka_text
+from src.commands.fun.roast import generate_roast_text
 
 logger = log.get_logger(__name__)
 
@@ -228,14 +228,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             counts[user_id] = 0
             await update.message.chat.send_action("typing")
             try:
-                prozharka_text = await generate_prozharka_text(chat_id, username)
+                roast_text = await generate_roast_text(chat_id, username)
                 await update.message.reply_text(
-                    f"🔥 Прожарка @{username}:\n\n{__strip_markdown(prozharka_text)}"
+                    f"🔥 Прожарка @{username}:\n\n{__strip_markdown(roast_text)}"
                 )
                 await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
                 await notify_unlocks(context, chat_id, user_id, username)
             except Exception as error:
-                logger.error("Offense prozharka failed for %s in chat %s: %s", username, chat_id, error)
+                logger.error("Offense roast failed for %s in chat %s: %s", username, chat_id, error)
             return
 
     await __run_pipeline(update, context, media_type="text")

@@ -305,7 +305,7 @@ CREATE INDEX idx_user_memories_lookup
 - Refuses to discuss sex, drugs, politics, religion, medicine, terrorism, or weapons — redirects in-style
 - Prompt injection and jailbreak attempts blocked by Guard Node (llama-prompt-guard-2-86m) before reaching the LLM; repeat offenders tracked in user_memories for roast material
 
-**Прожарка (roasts)**
+**Roasts**
 - `/roast` — on-demand roast of a randomly chosen chat member
 - Auto-roast on repeated insults: two consecutive offensive replies to the bot trigger a roast
 - Style: short (≤ 2 sentences), sarcastic stand-up comedian; 10% chance of a warm message instead
@@ -393,7 +393,7 @@ src/
 │   ├── general.py          cmd_start, cmd_help
 │   ├── statistics.py       cmd_achievements, cmd_top
 │   ├── fun/
-│   │   ├── prozharka.py    Roaster class, cmd_roast, generate_prozharka_text
+│   │   ├── roast.py        Roaster class, cmd_roast, generate_roast_text
 │   │   └── roulette.py     Roulette class, cmd_roulette, russian_roulette (job)
 │   └── games/
 │       ├── duel.py         DuelManager class, cmd_duel, handle_duel_callback
