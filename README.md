@@ -33,10 +33,10 @@ src/bot/handlers.py
           router_node (MessageRouter)
             • writes message to unified_messages (text or placeholder)
             • decides should_respond:
-                – text:        @mention or reply-to-bot → True
-                – voice/video: 25% random chance
-                – photo:       @mention in caption → True, else 25% chance
-                               (real-photo pre-filter: vision LLM call)
+                – text:             @mention or reply-to-bot → True
+                – voice/video_note/video: 25% random chance
+                – photo:            @mention in caption → True, else 25% chance
+                                    (real-photo pre-filter: vision LLM call)
             │
             ├─ should_respond=False ──► END  (no reply sent)
             │
@@ -44,35 +44,51 @@ src/bot/handlers.py
                   │
                   ▼
                 ingester_node (MessageIngester)
-                  • text:        processed_text = raw_text
-                  • voice/video: Groq Whisper transcription → updates unified_messages
-                  • photo:       vision LLM one-sentence description → updates unified_messages
+                  • text:            processed_text = raw_text
+                  • voice:           Groq Whisper transcription
+                  • video_note/video: Whisper + PyAV frame extraction
+                                       <15s → 1 frame; 15s–2min → 3 frames; >2min → audio only
+                                       each frame described by vision LLM
+                                       combined as [Аудио]: … / [Видео N/M]: …
+                  • photo:           vision LLM one-sentence description
+                  all non-text results update unified_messages
                   │
                   ▼
-                context_builder_node (ContextBuilder)
-                  • walks reply_to_msg_id chain (max 10 hops) from unified_messages
-                  • loads user_memories for every user in the chain
-                  • falls back to last 20 messages for flat context fill
+                guard_node (GuardNode)
+                  • classifies processed_text with llama-prompt-guard-2-86m
+                  • MALICIOUS → random refusal (1 of 10), hack attempt recorded
+                               in user_memories, short-circuits to END
+                  • BENIGN    → continue; fails open on API error
                   │
-                  ▼
-                agent_node (AgentNode)
-                  • builds enriched prompt:
-                      [SYSTEM_PROMPT]
-                      What I know about people:
-                        @user: fact1, fact2 …
-                      Reply thread:
-                        @user [photo]: <description>
-                        @other: lol
-                      Recent history: …
-                  • invokes Agent.run() → ReAct executor → MCP tools
-                  • handles DailyLimitError / RateLimitError
-                  • sends reply
+                  ├─ blocked=True ──► END  (refusal already sent)
                   │
-                  ▼
-                memory_writer_node (MemoryWriter)
-                  • fires asyncio.create_task() — does NOT block the reply
-                  • calls llama-3.1-8b-instant to extract new facts from exchange
-                  • upserts up to 3 new facts into user_memories (cap: 10 per user)
+                  └─ blocked=False
+                        │
+                        ▼
+                      context_builder_node (ContextBuilder)
+                        • walks reply_to_msg_id chain (max 10 hops) from unified_messages
+                        • loads user_memories for every user in the chain
+                        • falls back to last 20 messages for flat context fill
+                        │
+                        ▼
+                      agent_node (AgentNode)
+                        • builds enriched prompt:
+                            [SYSTEM_PROMPT]
+                            What I know about people:
+                              @user: fact1, fact2 …
+                            Reply thread:
+                              @user [photo]: <description>
+                              @other: lol
+                            Recent history: …
+                        • invokes Agent.run() → ReAct executor → MCP tools
+                        • handles DailyLimitError / RateLimitError
+                        • sends reply
+                        │
+                        ▼
+                      memory_writer_node (MemoryWriter)
+                        • fires asyncio.create_task() — does NOT block the reply
+                        • calls llama-3.1-8b-instant to extract new facts from exchange
+                        • upserts up to 3 new facts into user_memories (cap: 10 per user)
 ```
 
 ---
@@ -104,13 +120,10 @@ Agent (src/agent.py)
   │     RateLimitError  → exponential back-off (5s, 10s, 20s)
   │     MCP crash (BrokenPipeError/EOFError) → reinit(reset_model=False), retry once
   │
-  ├── run(chat_id, username, message) — full ReAct agent with tool use
-  │     • loads SQLChatMessageHistory (per chat_id)
-  │     • trims to MAX_HISTORY_MESSAGES before inference
-  │     • trims DB to 40 user messages after save
-  │
-  └── run_lightweight(chat_id, username, message) — llama-3.1-8b-instant, no tools
-        used for passive responses (keyword/mention when full agent is unavailable)
+  └── run(chat_id, username, message) — full ReAct agent with tool use
+        • loads SQLChatMessageHistory (per chat_id)
+        • trims to MAX_HISTORY_MESSAGES before inference
+        • trims DB to 40 user messages after save
 ```
 
 Model index resets to 0 at **00:05 UTC** daily via `ResetModelJobManager`.
@@ -275,8 +288,10 @@ CREATE INDEX idx_user_memories_lookup
 - Bot remembers facts about each user across sessions (per-chat user memories)
 
 **Voice & video**
-- Voice messages and circle video notes: 25% chance to transcribe (Groq Whisper) and comment
-- Forwarded audio is tracked for stats but never responded to
+- Voice messages: 25% chance to transcribe (Groq Whisper) and comment
+- Circle video notes and regular videos: 25% chance to transcribe + extract frames (PyAV) for visual understanding
+  - <15s → 1 frame; 15s–2min → 3 uniformly distributed frames; >2min → audio only
+- Forwarded media is tracked for stats but never responded to
 
 **Photos**
 - 25% chance to respond to real photographs (pre-filtered: memes/screenshots skipped)
@@ -287,8 +302,8 @@ CREATE INDEX idx_user_memories_lookup
 - Per-chat conversation history (capped at 40 user messages; trimmed to 10 turns for LLM context)
 - Per-user long-term facts extracted from conversations and injected into future prompts
 - Reply-chain awareness: the bot reads the full thread before responding
-- Refuses to discuss politics, religion, or drugs — redirects in-style
-- Anti-prompt-injection: mocks "forget your instructions" attempts
+- Refuses to discuss sex, drugs, politics, religion, medicine, terrorism, or weapons — redirects in-style
+- Prompt injection and jailbreak attempts blocked by Guard Node (llama-prompt-guard-2-86m) before reaching the LLM; repeat offenders tracked in user_memories for roast material
 
 **Прожарка (roasts)**
 - `/roast` — on-demand roast of a randomly chosen chat member
@@ -350,7 +365,8 @@ src/
 ├── pipeline/               LangGraph message processing pipeline
 │   ├── state.py            BotState, IncomingMessage, AssembledContext TypedDicts
 │   ├── router.py           MessageRouter — store + should_respond decision
-│   ├── ingester.py         MessageIngester — Whisper transcription, vision description
+│   ├── ingester.py         MessageIngester — Whisper transcription, PyAV frame extraction, vision description
+│   ├── guard_node.py       GuardNode — prompt injection classifier, hack attempt tracking
 │   ├── context_builder.py  ContextBuilder — reply chain, user facts, recent history
 │   ├── agent_node.py       AgentNode — enriched prompt assembly, agent invocation
 │   ├── memory_writer.py    MemoryWriter — background fact extraction and upsert
@@ -359,7 +375,7 @@ src/
 ├── store/                  aiosqlite data access layer
 │   ├── db.py               single shared connection (WAL, busy_timeout, row_factory)
 │   ├── unified_messages.py message store: insert, update_content, get_chain, get_recent
-│   └── user_memories.py    fact store: upsert_facts, get_facts, get_facts_for_users
+│   └── user_memories.py    fact store: upsert_facts, upsert_hack_attempt, get_facts, get_facts_for_users
 │
 ├── tools/                  MCP tool implementations
 │   ├── igdb_tools.py       IGDB: search, details, coop, singleplayer, new releases
@@ -410,7 +426,9 @@ src/
 | LLM (roasts) | Groq `llama-3.3-70b-versatile` | Better creative output for прожарки |
 | STT | Groq `whisper-large-v3` | 2K RPD free; transcribes voice/video-note messages |
 | Vision | Groq `meta-llama/llama-4-scout-17b-16e-instruct` | Photo description and reality-check |
-| Pipeline | LangGraph StateGraph | Router → Ingester → ContextBuilder → Agent → MemoryWriter |
+| Security | Groq `meta-llama/llama-prompt-guard-2-86m` | Prompt injection / jailbreak classifier; 14.4K RPD free |
+| Video frames | PyAV (`av`) | In-process frame extraction from video/video_note, no subprocess overhead |
+| Pipeline | LangGraph StateGraph | Router → Ingester → Guard → ContextBuilder → Agent → MemoryWriter |
 | Tool protocol | MCP (stdio) via langchain-mcp-adapters | Clean isolation; tool server restarts independently |
 | Game data | IGDB API (Twitch OAuth) | Structured multiplayer/platform/release metadata |
 | Store data | Steam public API, psdeals.net RSS | No auth required |
@@ -424,7 +442,10 @@ src/
 ## Key engineering decisions
 
 **LangGraph pipeline instead of flat handlers.**
-Every message flows through a typed `BotState` graph: Router → Ingester → ContextBuilder → Agent → MemoryWriter. Each node has a single responsibility and can be tested independently. The `should_respond=False` short-circuit exits after the router for messages the bot should ignore, so no LLM calls are made.
+Every message flows through a typed `BotState` graph: Router → Ingester → Guard → ContextBuilder → Agent → MemoryWriter. Each node has a single responsibility and can be tested independently. Two short-circuits exist: `should_respond=False` exits after the router for messages the bot ignores; `blocked=True` exits after the guard for injection/jailbreak attempts — neither reaches the main LLM.
+
+**Guard Node with fail-open design.**
+`llama-prompt-guard-2-86m` classifies every processed message before the ReAct agent runs. On `MALICIOUS`, a random refusal from a pool of 10 is sent directly, and the hack attempt is recorded in `user_memories` as an incrementing counter fact (`Пытался взломать бота N раз`) — available to `/roast` as material. The guard fails open (passes through) if the Groq API is unavailable, so a transient outage never silences the bot.
 
 **Three-model fallback chain.**
 The main agent tries `llama-4-scout` first. On `DailyLimitError`, `advance_model()` rebuilds the executor with `qwen/qwen3-32b`, then `openai/gpt-oss-20b` as last resort — all transparently within the same request. MCP crash recovery preserves the current model index rather than resetting to the primary.
@@ -556,5 +577,6 @@ The compose file sets `mem_limit: 800m`. Estimated steady-state RSS is 300–450
 | `llama-3.3-70b-versatile` | Прожарки | 100K | 1K |
 | `llama-3.1-8b-instant` | Memory extraction | 500K | 14.4K RPD |
 | `whisper-large-v3` | Voice/video transcription | — | 2K |
+| `meta-llama/llama-prompt-guard-2-86m` | Guard Node (injection classifier) | 500K | 14.4K |
 
 Combined daily token budget across the agent fallback chain: **1.2M tokens**. The model index resets to the primary at **00:05 UTC** daily.
