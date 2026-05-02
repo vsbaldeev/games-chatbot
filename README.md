@@ -127,6 +127,8 @@ Agent (src/agent.py)
         • loads SQLChatMessageHistory (per chat_id)
         • trims to MAX_HISTORY_MESSAGES before inference
         • trims DB to 40 user messages after save
+        • detects foreign-script contamination (CJK, Hangul, Thai, etc.) in the response;
+          retries once with a language correction prompt if found
 ```
 
 Model index resets to 0 at **00:05 UTC** daily via `ResetModelJobManager`.
@@ -467,6 +469,9 @@ Before running the full pipeline for a photo message, the handler calls the visi
 
 **MCP subprocess crash recovery.**
 If the tool server dies (OOM, network crash), `Agent.run()` catches `BrokenPipeError`/`EOFError`, calls `init(reset_model=False)` to respawn the subprocess without resetting the model fallback index, and retries once.
+
+**Foreign script correction.**
+Multilingual LLMs occasionally bleed non-Cyrillic characters into Russian responses (e.g. Korean `추천` fused with a Russian suffix). After every agent call, `__apply_language_correction` checks the response against a regex covering CJK, Hangul, Hiragana/Katakana, Thai, Arabic, and Hebrew. On a match it retries once with the original context plus a one-line correction prompt. If the retry itself fails the original response is returned unchanged — the correction path never crashes the bot.
 
 ---
 

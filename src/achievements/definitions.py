@@ -27,6 +27,7 @@ TRACKABLE_STATS = {
     "video_note_messages",
     "photo_messages",
     "night_messages",
+    "animation_messages",
     "roasted_count",
     "roulette_win_count",
     "duel_wins",
@@ -255,6 +256,18 @@ ALL_ACHIEVEMENTS: list[Achievement] = [
     Achievement("photo_100", "🏺", "Архивариус баянов",
                 "100 фото. Ты собрал здесь всю историю интернета, включая те фотки, которые лучше было оставить в корзине. Твой вклад в визуальное загрязнение чата — бесценен."),
 
+    # --- animations (GIFs) ---
+    Achievement("animation_1",   "🎬", "Первое движение",
+                "1 GIF. Ты открыл для себя ожившие картинки. Добро пожаловать в мир зацикленного хаоса."),
+    Achievement("animation_10",  "📽️", "Анимашечный",
+                "10 GIF. Ты стабильно поставляешь движущийся мусор. Чат молчаливо принимает."),
+    Achievement("animation_25",  "🌀", "Гифомат",
+                "25 GIF. Ты нашёл пак и теперь все об этом знают. Слова кончились, остались петли."),
+    Achievement("animation_50",  "🎞️", "Цикл бесконечен",
+                "50 GIF. Твои анимашки зациклились вместе с твоей жизнью. Мы всё ещё ждём смысла."),
+    Achievement("animation_100", "🤯", "Архив движущегося мусора",
+                "100 GIF. Ты превратил чат в ленту сломанного телевизора. Поздравляем, ты — главный по вибрирующим квадратикам."),
+
     # --- night messages ---
     Achievement("night_1",   "🕯️", "Ночной дозор",
                 "1 ночное сообщение. Кто-то должен хранить тишину, пока чат спит. Сегодня это ты. Надеемся, это была важная мысль, а не опечатка."),
@@ -311,6 +324,7 @@ ACHIEVEMENT_RULES: list[tuple[str, list[int], list[str]]] = [
     ("video_messages",     [1, 10, 25, 50, 100],          ["video_1",          "video_10",          "video_25",          "video_50",          "video_100"]),
     ("video_note_messages",[1, 10, 25, 50, 100],          ["circle_1",         "circle_10",         "circle_25",         "circle_50",         "circle_100"]),
     ("photo_messages",     [1, 10, 25, 50, 100],          ["photo_1",          "photo_10",          "photo_25",          "photo_50",          "photo_100"]),
+    ("animation_messages", [1, 10, 25, 50, 100],          ["animation_1",      "animation_10",      "animation_25",      "animation_50",      "animation_100"]),
     ("night_messages",     [1, 10, 25, 50, 100],          ["night_1",          "night_10",          "night_25",          "night_50",          "night_100"]),
     ("long_message_max",   [140, 250, 500, 1000, 2000],   ["essay_140",        "essay_250",         "essay_500",         "essay_1000",        "essay_2000"]),
 ]

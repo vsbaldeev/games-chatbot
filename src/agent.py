@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from typing import Optional
 
 from langchain_community.chat_message_histories import SQLChatMessageHistory
@@ -12,6 +13,17 @@ from src import config, log
 from src.tools import PYTHON_TOOLS
 
 logger = log.get_logger(__name__)
+
+__FOREIGN_SCRIPT_RE = re.compile(
+    "[一-鿿"   # CJK Unified Ideographs
+    "㐀-䶿"    # CJK Extension A
+    "가-힯"    # Hangul Syllables
+    "ᄀ-ᇿ"    # Hangul Jamo
+    "぀-ヿ"    # Hiragana + Katakana
+    "฀-๿"    # Thai
+    "؀-ۿ"    # Arabic
+    "֐-׿]"   # Hebrew
+)
 
 
 class RateLimitError(Exception):
@@ -201,6 +213,9 @@ class Agent:
                             config=run_config,
                         )
                         ai_message = result["messages"][-1]
+                        ai_message = await self.__apply_language_correction(
+                            ai_message, input_messages, run_config
+                        )
 
                         if ai_message.content and ai_message.content.strip():
                             def save_to_history() -> None:
@@ -234,6 +249,36 @@ class Agent:
         )
         self.__executor = create_agent(llm, self.__tools, prompt=SYSTEM_PROMPT)
         logger.info(f"Agent executor using model: {model}")
+
+    @staticmethod
+    def __has_foreign_script(text: str) -> bool:
+        return bool(__FOREIGN_SCRIPT_RE.search(text))
+
+    async def __apply_language_correction(
+        self,
+        ai_message,
+        input_messages: list,
+        run_config,
+    ):
+        if not ai_message.content or not Agent.__has_foreign_script(ai_message.content):
+            return ai_message
+        logger.warning("Foreign script detected in response, retrying with language correction")
+        correction_messages = input_messages + [
+            HumanMessage(content=(
+                "Твой предыдущий ответ содержал символы не на русском языке. "
+                "Ответь ТОЛЬКО на русском языке."
+            ))
+        ]
+        try:
+            result = await self.__invoke_with_retry(
+                self.__executor,
+                {"messages": correction_messages},
+                config=run_config,
+            )
+            return result["messages"][-1]
+        except Exception as err:
+            logger.warning("Language correction retry failed: %s", err)
+            return ai_message
 
     async def __advance_model(self) -> bool:
         next_index = self.__model_index + 1

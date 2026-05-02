@@ -320,6 +320,27 @@ async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_T
     await notify_unlocks(context, chat_id, user_id, username)
 
 
+async def handle_animation_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.animation:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        return
+    await achievements.increment_stat(user_id, chat_id, username, "animation_messages")
+    await notify_unlocks(context, chat_id, user_id, username)
+
+
+async def handle_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pass
+
+
 async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     if not msg or not msg.video:

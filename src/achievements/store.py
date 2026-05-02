@@ -37,6 +37,7 @@ async def __create_core_tables(db: aiosqlite.Connection) -> None:
             video_note_messages  INTEGER NOT NULL DEFAULT 0,
             photo_messages       INTEGER NOT NULL DEFAULT 0,
             night_messages       INTEGER NOT NULL DEFAULT 0,
+            animation_messages   INTEGER NOT NULL DEFAULT 0,
             roasted_count        INTEGER NOT NULL DEFAULT 0,
             roulette_win_count   INTEGER NOT NULL DEFAULT 0,
             duel_wins            INTEGER NOT NULL DEFAULT 0,
@@ -91,6 +92,7 @@ async def __run_migrations(db: aiosqlite.Connection) -> None:
         "ALTER TABLE user_stats ADD COLUMN photo_messages INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE user_stats ADD COLUMN night_messages INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE user_stats ADD COLUMN duel_wins INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE user_stats ADD COLUMN animation_messages INTEGER NOT NULL DEFAULT 0",
     ]
     for migration in migrations:
         try:
@@ -181,7 +183,7 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
                   link_messages, voice_messages, video_messages, video_note_messages,
                   photo_messages, night_messages, long_messages,
                   voice_max_duration, long_message_max,
-                  roasted_count, roulette_win_count, duel_wins
+                  roasted_count, roulette_win_count, duel_wins, animation_messages
            FROM user_stats WHERE user_id = ? AND chat_id = ?""",
         (user_id, chat_id),
     )
@@ -208,6 +210,7 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
         "roasted_count":       row[16],
         "roulette_win_count":  row[17],
         "duel_wins":           row[18],
+        "animation_messages":  row[19],
     }
 
 

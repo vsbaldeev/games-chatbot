@@ -54,7 +54,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id = reaction.chat.id
     author = await achievements.get_message_author(chat_id, reaction.message_id)
     if not author:
-        logger.warning(
+        logger.debug(
             "No author cached for message %s in chat %s — skipping reaction",
             reaction.message_id, chat_id,
         )

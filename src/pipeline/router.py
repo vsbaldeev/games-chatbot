@@ -82,6 +82,9 @@ class MessageRouter:
             return False, "random"
 
         if media_type in ("voice", "video_note", "video"):
+            caption = (getattr(telegram_message, "caption", None) or "").lower()
+            if self.__bot_username in caption:
+                return True, "explicit"
             return random.random() < VOICE_RESPONSE_CHANCE, "random"
 
         if media_type == "photo":
