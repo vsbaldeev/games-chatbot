@@ -266,6 +266,6 @@ class ActiveGame:
 ## Смежные документы
 
 - `duel.md` — эмодзи-дуэль
-- `ruletka.md` — русская рулетка
+- `roulette.md` — русская рулетка
 - `achievements.md` — схема статистики и достижений
 - `mechanics.md` — общая механика бота
