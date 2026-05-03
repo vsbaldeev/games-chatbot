@@ -10,35 +10,41 @@ from langchain_core.tools import tool
 from src import config
 
 @tool
-def get_current_datetime(part: str = "full", utc_offset: str = "0") -> str:
+def get_current_datetime(request: str = "full") -> str:
     """Return the current date/time or a specific part of it.
 
     Args:
-        part: What to return. One of:
-              "full"    — full datetime in the given timezone, e.g. "2026-05-03 15:42 (UTC+3)"
-              "year"    — current year, e.g. "2026"
-              "month"   — current month name and number, e.g. "May (5)"
-              "weekday" — day of the week, e.g. "Saturday"
-              "time"    — current time HH:MM in the given timezone, e.g. "15:42 (UTC+3)"
-              "utc"     — full datetime in UTC, e.g. "2026-05-03 12:42 UTC"
-        utc_offset: Timezone as hours offset from UTC, e.g. "3" for Moscow, "-5" for New York EST.
-                    Only used for "full" and "time" parts. Defaults to "0" (UTC).
+        request: What to return. Examples:
+                 "year"     — current year, e.g. "2026"
+                 "month"    — current month, e.g. "May (5)"
+                 "weekday"  — day of the week, e.g. "Saturday"
+                 "utc"      — full datetime in UTC, e.g. "2026-05-03 12:42 UTC"
+                 "full"     — full datetime in UTC+0 (default)
+                 "full UTC+3"  — full datetime in UTC+3 (Moscow)
+                 "time UTC+8"  — time only in UTC+8
+                 "full UTC-5"  — full datetime in UTC-5 (New York EST)
     """
     utc_now = datetime.datetime.now(datetime.timezone.utc)
+    parts = request.strip().split()
+    part = parts[0].lower()
 
     if part == "year":
         return str(utc_now.year)
-
     if part == "month":
         return f"{utc_now.strftime('%B')} ({utc_now.month})"
-
     if part == "weekday":
         return utc_now.strftime("%A")
-
     if part == "utc":
         return utc_now.strftime("%Y-%m-%d %H:%M UTC")
 
-    offset = int(utc_offset)
+    offset = 0
+    if len(parts) > 1:
+        tz_str = parts[1].upper().replace("UTC", "").replace("+", "")
+        try:
+            offset = int(tz_str)
+        except ValueError:
+            offset = 0
+
     tz = datetime.timezone(datetime.timedelta(hours=offset))
     local_now = utc_now.astimezone(tz)
     sign = "+" if offset >= 0 else ""
@@ -46,7 +52,6 @@ def get_current_datetime(part: str = "full", utc_offset: str = "0") -> str:
 
     if part == "time":
         return local_now.strftime(f"%H:%M ({label})")
-
     return local_now.strftime(f"%Y-%m-%d %H:%M ({label})")
 
 
