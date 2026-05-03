@@ -43,6 +43,7 @@ class ToolMessageSanitizer(AgentMiddleware):
     """
 
     async def abefore_model(self, state, runtime):
+        messages = state["messages"]
         sanitized = [
             ToolMessage(
                 content="(no output)",
@@ -51,9 +52,9 @@ class ToolMessageSanitizer(AgentMiddleware):
             )
             if isinstance(msg, ToolMessage) and not (msg.content or "").strip()
             else msg
-            for msg in state.messages
+            for msg in messages
         ]
-        if sanitized == state.messages:
+        if sanitized == messages:
             return None
         return {"messages": sanitized}
 
