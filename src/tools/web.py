@@ -1,5 +1,6 @@
 """Web search and article extraction tools."""
 
+import datetime
 import json
 
 import httpx
@@ -7,6 +8,15 @@ import trafilatura
 from langchain_core.tools import tool
 
 from src import config
+
+MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
+
+
+@tool
+def get_current_date() -> str:
+    """Return the current date and time in Moscow timezone (UTC+3)."""
+    now = datetime.datetime.now(MOSCOW_TZ)
+    return now.strftime("%Y-%m-%d %H:%M MSK (UTC+3)")
 
 
 @tool
@@ -88,4 +98,4 @@ async def __search_duckduckgo(query: str) -> str:
         return json.dumps({"error": f"DuckDuckGo search failed: {error}"})
 
 
-ALL_TOOLS = [web_search, fetch_article]
+ALL_TOOLS = [get_current_date, web_search, fetch_article]
