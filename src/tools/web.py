@@ -9,14 +9,18 @@ from langchain_core.tools import tool
 
 from src import config
 
-MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
-
-
 @tool
-def get_current_date() -> str:
-    """Return the current date and time in Moscow timezone (UTC+3)."""
-    now = datetime.datetime.now(MOSCOW_TZ)
-    return now.strftime("%Y-%m-%d %H:%M MSK (UTC+3)")
+def get_current_date(utc_offset: int = 3) -> str:
+    """Return the current date and time for a given UTC offset.
+
+    Args:
+        utc_offset: Hours offset from UTC, e.g. 3 for Moscow, 0 for London, -5 for New York EST.
+                    Defaults to 3 (Moscow / UTC+3).
+    """
+    tz = datetime.timezone(datetime.timedelta(hours=utc_offset))
+    now = datetime.datetime.now(tz)
+    sign = "+" if utc_offset >= 0 else ""
+    return now.strftime(f"%Y-%m-%d %H:%M (UTC{sign}{utc_offset})")
 
 
 @tool
