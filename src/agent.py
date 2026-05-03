@@ -1,12 +1,10 @@
 import asyncio
-import os
 import re
 from typing import Optional
 
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_groq import ChatGroq
-from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentMiddleware
 
@@ -115,12 +113,11 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 
 ━━━ ИНСТРУМЕНТЫ ━━━
 Когда спрашивают об играх:
-- Используй search_games и get_game_details для фактов — не выдумывай
-- Для дат выхода, анонсов и свежих новостей — используй web_search, IGDB может быть устаревшим
-- Для любого вопроса о текущей дате, времени или годе — ВСЕГДА вызывай get_current_datetime, никогда не отвечай по памяти
-- Для кросплея: если IGDB не даёт точного ответа — честно скажи, не гадай
+- Используй web_search для фактов — не выдумывай
 - Для онлайна используй get_steam_player_count, но PS5-эксклюзивов в Steam нет
+- Для оценок критиков используй get_game_reviews
 - Подавай факты с иронией, но без издевательства
+- Для любого вопроса о текущей дате, времени или годе — ВСЕГДА вызывай get_current_datetime, никогда не отвечай по памяти
 
 Правило инструментов — СТРОГО:
 - Вызывай все нужные инструменты подряд, один за другим
@@ -129,23 +126,19 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 - НИКОГДА не упоминай названия инструментов в ответе
 
 ━━━ РЕКОМЕНДАЦИИ PS5-ИГР ━━━
-PS5 platform ID в IGDB = 167. Apicalypse syntax: fields ...; where ...; sort ... desc; limit N; offset N;
-
 Когда просят посоветовать мультиплеерную, кооп или онлайн PS5-игру:
-1) custom_query(endpoint="games", query="fields name,summary,rating,multiplayer_modes.*,genres.name; where multiplayer_modes.onlinecoopmax >= 2 & platforms = (167); sort rating desc; limit 8; offset <случайное из 0, 8, 16, 24>;") — выбери одну игру
-2) get_game_details для выбранной игры — для определения кросплея с PC по наличию PC в платформах
-3) get_ps_store_price_tr для выбранной игры
+1) web_search("лучшие кооп онлайн игры PS5 2024 2025") — выбери одну игру из результатов
+2) get_ps_store_price_tr для выбранной игры
 Ответ строго в таком формате, только plain text, никаких заголовков:
 🎮 Название игры
 Жанр: ...
-Игроков онлайн: до N
 Кросплей с PC: Да / Нет / нет данных
 Цена в TRY: ... или нет данных
 Краткое описание на русском (1-2 предложения).
 🛒 https://store.playstation.com/tr-tr/...
 
 Когда просят посоветовать одиночную PS5-игру:
-1) custom_query(endpoint="games", query="fields name,summary,rating,genres.name,first_release_date; where platforms = (167) & multiplayer_modes = null & rating >= 75; sort rating desc; limit 8; offset <случайное из 0, 8, 16, 24>;") — выбери одну игру
+1) web_search("лучшие одиночные игры PS5 2024 2025") — выбери одну игру из результатов
 2) get_ps_store_price_tr для выбранной игры
 Ответ строго в таком формате, только plain text, никаких заголовков:
 🎮 Название игры
@@ -165,7 +158,6 @@ PS5 platform ID в IGDB = 167. Apicalypse syntax: fields ...; where ...; sort ..
 
 class Agent:
     def __init__(self) -> None:
-        self.__mcp_client: Optional[MultiServerMCPClient] = None
         self.__tools: Optional[list] = None
         self.__executor = None
         self.__model_index: int = 0
@@ -175,35 +167,9 @@ class Agent:
         if reset_model:
             self.__model_index = 0
 
-        if self.__mcp_client is not None:
-            try:
-                await self.__mcp_client.__aexit__(None, None, None)
-            except Exception as err:
-                logger.warning(f"Failed to close previous MCP client: {err}")
-
-        self.__mcp_client = MultiServerMCPClient(
-            {
-                "igdb": {
-                    "transport": "stdio",
-                    "command": "igdb-mcp-server",
-                    "args": [],
-                    "env": {
-                        **os.environ,
-                        "IGDB_CLIENT_ID": config.TWITCH_CLIENT_ID,
-                        "IGDB_CLIENT_SECRET": config.TWITCH_CLIENT_SECRET,
-                    },
-                },
-                "time": {
-                    "transport": "stdio",
-                    "command": "python",
-                    "args": ["-m", "mcp_server_time"],
-                },
-            }
-        )
-        mcp_tools = await self.__mcp_client.get_tools()
-        self.__tools = mcp_tools + PYTHON_TOOLS
+        self.__tools = PYTHON_TOOLS
         await self.__rebuild_executor()
-        logger.info(f"Agent initialized with {len(self.__tools)} tools ({len(mcp_tools)} MCP, {len(PYTHON_TOOLS)} Python)")
+        logger.info(f"Agent initialized with {len(self.__tools)} tools")
 
     def get_pipeline(self):
         """Return the compiled LangGraph pipeline, building it on first call."""
@@ -236,40 +202,30 @@ class Agent:
 
         run_config = {"callbacks": callbacks} if callbacks else None
 
-        for reinit_attempt in range(2):
+        for _ in range(len(AGENT_MODEL_FALLBACKS)):
             try:
-                for _ in range(len(AGENT_MODEL_FALLBACKS)):
-                    try:
-                        result = await self.__invoke_with_retry(
-                            self.__executor,
-                            {"messages": input_messages},
-                            config=run_config,
-                        )
-                        ai_message = result["messages"][-1]
-                        ai_message = await self.__apply_language_correction(
-                            ai_message, input_messages, run_config
-                        )
+                result = await self.__invoke_with_retry(
+                    self.__executor,
+                    {"messages": input_messages},
+                    config=run_config,
+                )
+                ai_message = result["messages"][-1]
+                ai_message = await self.__apply_language_correction(
+                    ai_message, input_messages, run_config
+                )
 
-                        if ai_message.content and ai_message.content.strip():
-                            def save_to_history() -> None:
-                                history.add_user_message(prefixed_input)
-                                history.add_message(ai_message)
+                if ai_message.content and ai_message.content.strip():
+                    def save_to_history() -> None:
+                        history.add_user_message(prefixed_input)
+                        history.add_message(ai_message)
 
-                            await asyncio.to_thread(save_to_history)
-                            await Agent.__trim_db_history(history)
-                        return ai_message.content
-                    except DailyLimitError:
-                        if not await self.__advance_model():
-                            raise
-                raise DailyLimitError("All fallback models exhausted their daily quota")
-            except (BrokenPipeError, EOFError, ConnectionResetError) as err:
-                if reinit_attempt == 0:
-                    logger.warning(f"MCP subprocess crashed, reinitializing: {err}")
-                    await self.init(reset_model=False)
-                else:
-                    raise RuntimeError(f"MCP subprocess failed after reinit: {err}") from err
-
-        raise RuntimeError("run: unreachable")
+                    await asyncio.to_thread(save_to_history)
+                    await Agent.__trim_db_history(history)
+                return ai_message.content
+            except DailyLimitError:
+                if not await self.__advance_model():
+                    raise
+        raise DailyLimitError("All fallback models exhausted their daily quota")
 
     async def __rebuild_executor(self) -> None:
         assert self.__tools is not None, "init() must be called before __rebuild_executor()"
