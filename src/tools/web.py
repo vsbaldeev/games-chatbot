@@ -10,17 +10,18 @@ from langchain_core.tools import tool
 from src import config
 
 @tool
-def get_current_date(utc_offset: int = 3) -> str:
+def get_current_date(utc_offset: str = "3") -> str:
     """Return the current date and time for a given UTC offset.
 
     Args:
-        utc_offset: Hours offset from UTC, e.g. 3 for Moscow, 0 for London, -5 for New York EST.
-                    Defaults to 3 (Moscow / UTC+3).
+        utc_offset: Hours offset from UTC as a string, e.g. "3" for Moscow, "0" for London, "-5" for New York EST.
+                    Defaults to "3" (Moscow / UTC+3).
     """
-    tz = datetime.timezone(datetime.timedelta(hours=utc_offset))
+    offset = int(utc_offset)
+    tz = datetime.timezone(datetime.timedelta(hours=offset))
     now = datetime.datetime.now(tz)
-    sign = "+" if utc_offset >= 0 else ""
-    return now.strftime(f"%Y-%m-%d %H:%M (UTC{sign}{utc_offset})")
+    sign = "+" if offset >= 0 else ""
+    return now.strftime(f"%Y-%m-%d %H:%M (UTC{sign}{offset})")
 
 
 @tool
