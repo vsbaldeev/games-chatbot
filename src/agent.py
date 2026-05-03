@@ -4,10 +4,11 @@ import re
 from typing import Optional
 
 from langchain_community.chat_message_histories import SQLChatMessageHistory
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
+from langchain.agents.middleware.types import AgentMiddleware
 
 from src import config, log
 from src.tools import PYTHON_TOOLS
@@ -32,6 +33,29 @@ class RateLimitError(Exception):
 
 class DailyLimitError(Exception):
     pass
+
+
+class ToolMessageSanitizer(AgentMiddleware):
+    """Replace empty ToolMessage content with a placeholder before each model call.
+
+    Groq rejects tool messages with empty or missing content (HTTP 400).
+    This can happen when an MCP tool returns no output.
+    """
+
+    async def abefore_model(self, state, runtime):
+        sanitized = [
+            ToolMessage(
+                content="(no output)",
+                tool_call_id=msg.tool_call_id,
+                name=getattr(msg, "name", None),
+            )
+            if isinstance(msg, ToolMessage) and not (msg.content or "").strip()
+            else msg
+            for msg in state.messages
+        ]
+        if sanitized == state.messages:
+            return None
+        return {"messages": sanitized}
 
 
 AGENT_MODEL_FALLBACKS = [
@@ -248,7 +272,12 @@ class Agent:
             temperature=0.7,
             max_tokens=512,
         )
-        self.__executor = create_agent(llm, self.__tools, system_prompt=SYSTEM_PROMPT)
+        self.__executor = create_agent(
+            llm,
+            self.__tools,
+            system_prompt=SYSTEM_PROMPT,
+            middleware=[ToolMessageSanitizer()],
+        )
         logger.info(f"Agent executor using model: {model}")
 
     @staticmethod
