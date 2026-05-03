@@ -117,7 +117,7 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 Когда спрашивают об играх:
 - Используй search_games и get_game_details для фактов — не выдумывай
 - Для дат выхода, анонсов и свежих новостей — используй web_search, IGDB может быть устаревшим
-- Для любого вопроса о текущей дате, времени или годе — ВСЕГДА вызывай get_current_date, никогда не отвечай по памяти
+- Для любого вопроса о текущей дате, времени или годе — ВСЕГДА вызывай get_current_datetime, никогда не отвечай по памяти
 - Для кросплея: если IGDB не даёт точного ответа — честно скажи, не гадай
 - Для онлайна используй get_steam_player_count, но PS5-эксклюзивов в Steam нет
 - Подавай факты с иронией, но без издевательства
@@ -192,7 +192,12 @@ class Agent:
                         "IGDB_CLIENT_ID": config.TWITCH_CLIENT_ID,
                         "IGDB_CLIENT_SECRET": config.TWITCH_CLIENT_SECRET,
                     },
-                }
+                },
+                "time": {
+                    "transport": "stdio",
+                    "command": "python",
+                    "args": ["-m", "mcp_server_time"],
+                },
             }
         )
         mcp_tools = await self.__mcp_client.get_tools()

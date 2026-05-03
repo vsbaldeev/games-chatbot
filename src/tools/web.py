@@ -10,18 +10,44 @@ from langchain_core.tools import tool
 from src import config
 
 @tool
-def get_current_date(utc_offset: str = "3") -> str:
-    """Return the current date and time for a given UTC offset.
+def get_current_datetime(part: str = "full", utc_offset: str = "0") -> str:
+    """Return the current date/time or a specific part of it.
 
     Args:
-        utc_offset: Hours offset from UTC as a string, e.g. "3" for Moscow, "0" for London, "-5" for New York EST.
-                    Defaults to "3" (Moscow / UTC+3).
+        part: What to return. One of:
+              "full"    — full datetime in the given timezone, e.g. "2026-05-03 15:42 (UTC+3)"
+              "year"    — current year, e.g. "2026"
+              "month"   — current month name and number, e.g. "May (5)"
+              "weekday" — day of the week, e.g. "Saturday"
+              "time"    — current time HH:MM in the given timezone, e.g. "15:42 (UTC+3)"
+              "utc"     — full datetime in UTC, e.g. "2026-05-03 12:42 UTC"
+        utc_offset: Timezone as hours offset from UTC, e.g. "3" for Moscow, "-5" for New York EST.
+                    Only used for "full" and "time" parts. Defaults to "0" (UTC).
     """
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+
+    if part == "year":
+        return str(utc_now.year)
+
+    if part == "month":
+        return f"{utc_now.strftime('%B')} ({utc_now.month})"
+
+    if part == "weekday":
+        return utc_now.strftime("%A")
+
+    if part == "utc":
+        return utc_now.strftime("%Y-%m-%d %H:%M UTC")
+
     offset = int(utc_offset)
     tz = datetime.timezone(datetime.timedelta(hours=offset))
-    now = datetime.datetime.now(tz)
+    local_now = utc_now.astimezone(tz)
     sign = "+" if offset >= 0 else ""
-    return now.strftime(f"%Y-%m-%d %H:%M (UTC{sign}{offset})")
+    label = f"UTC{sign}{offset}"
+
+    if part == "time":
+        return local_now.strftime(f"%H:%M ({label})")
+
+    return local_now.strftime(f"%Y-%m-%d %H:%M ({label})")
 
 
 @tool
@@ -103,4 +129,4 @@ async def __search_duckduckgo(query: str) -> str:
         return json.dumps({"error": f"DuckDuckGo search failed: {error}"})
 
 
-ALL_TOOLS = [get_current_date, web_search, fetch_article]
+ALL_TOOLS = [get_current_datetime, web_search, fetch_article]
