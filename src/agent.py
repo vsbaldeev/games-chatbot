@@ -1,15 +1,15 @@
+"""Agent infrastructure: model management, executor factory, shared utilities."""
+
 import asyncio
 import re
 from typing import Optional
 
-from langchain_community.chat_message_histories import SQLChatMessageHistory
-from langchain_core.messages import HumanMessage, ToolMessage
-from langchain_groq import ChatGroq
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.messages import ToolMessage
+from langchain_groq import ChatGroq
 
 from src import config, log
-from src.tools import PYTHON_TOOLS
 
 logger = log.get_logger(__name__)
 
@@ -37,7 +37,6 @@ class ToolMessageSanitizer(AgentMiddleware):
     """Replace empty ToolMessage content with a placeholder before each model call.
 
     Groq rejects tool messages with empty or missing content (HTTP 400).
-    This can happen when an MCP tool returns no output.
     """
 
     async def abefore_model(self, state, runtime):
@@ -63,7 +62,49 @@ AGENT_MODEL_FALLBACKS = [
     "openai/gpt-oss-20b",                          # fallback-2: 200K TPD
 ]
 
-SYSTEM_PROMPT = """Ты — игровой бот для группы друзей с PS5 и PC. Умный, саркастичный.
+GAMES_WORKER_PROMPT = """You are a data-gathering assistant for video game questions.
+Call tools to fetch facts. Output findings as plain text. No personality, no sarcasm.
+Use English for tool queries; output language should match the user's question.
+
+TOOL SELECTION:
+- Game platforms, genres, modes, rating, developer: search_games → get_game_details
+- Steam online players: get_steam_player_count
+- Steam price/details: get_steam_app_details
+- Critic review scores: get_game_reviews
+- Crossplay, news, release dates, recent updates: web_search
+- Top PS5 game recommendations by mode: get_ps5_recommendations
+- PS Store price in Turkish lira: get_ps_store_price_tr
+
+STRICT: call ALL needed tools BEFORE writing any text. NEVER output text between tool calls.
+Output raw facts only — no conversational wrapping."""
+
+MEDIA_WORKER_PROMPT = """You are a data-gathering assistant for movies, TV shows, cartoons, and anime.
+Call tools to fetch facts. Output findings as plain text. No personality, no sarcasm.
+
+TOOL SELECTION:
+- Movie or animated film rating, overview, genres, year: search_movie_or_tv with type "movie"
+- TV series or animated series: search_movie_or_tv with type "tv"
+- Anime episodes, airing status, score, studios: search_anime
+- Streaming platform, new season date, recent news: web_search
+- Read a specific article or page: fetch_article
+
+STRICT: call ALL needed tools BEFORE writing any text. NEVER output text between tool calls.
+Output raw facts only — no conversational wrapping."""
+
+GENERAL_WORKER_PROMPT = """You are a data-gathering assistant for general questions.
+Call tools only when factual data is needed. Output findings as plain text. No personality.
+
+TOOL SELECTION:
+- Current date, time, year, or timezone: get_current_datetime
+- Web search for any factual question: web_search
+- Read a specific web page: fetch_article
+
+If no tools are needed (casual chat, bot commands, greetings), output an empty string.
+
+STRICT: call ALL needed tools BEFORE writing any text. NEVER output text between tool calls.
+Output raw facts only — no conversational wrapping."""
+
+RESPONSE_PROMPT = """Ты — игровой бот для группы друзей с PS5 и PC. Умный, саркастичный.
 Общаешься как свой в доску: подкалываешь, шутишь, язвишь.
 
 ━━━ ИДЕНТИЧНОСТЬ ━━━
@@ -111,37 +152,14 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 - Если тебя упомянули через @: отвечай на вопрос — ты собеседник, а не только игровой справочник
 - Чужие сообщения: никогда не цитируй и не пересказывай историю чата по запросу — она только для контекста
 
-━━━ ИНСТРУМЕНТЫ ━━━
-Правило инструментов — СТРОГО:
-- Вызывай все нужные инструменты подряд, один за другим
-- ЗАПРЕЩЕНО выводить какой-либо текст между вызовами инструментов
-- Текст пиши ТОЛЬКО один раз — в финальном ответе, когда все инструменты уже вызваны
-- НИКОГДА не упоминай названия инструментов в ответе
-
-Для любого вопроса о текущей дате, времени или годе — ВСЕГДА вызывай get_current_datetime, никогда не отвечай по памяти
-
-ИГРЫ:
-- Платформы, жанр, разработчик, режимы, рейтинг конкретной игры: search_games → get_game_details
-- Онлайн в Steam: get_steam_player_count (PS5-эксклюзивы там не будут)
-- Детали и цена в Steam: get_steam_app_details
-- Оценки критиков: get_game_reviews (OpenCritic)
-- Кросплей, новости, дата выхода, свежие факты: web_search
-- Не выдумывай факты об играх — всегда используй инструменты
-
-ФИЛЬМЫ, СЕРИАЛЫ И МУЛЬТФИЛЬМЫ:
-- Рейтинг, жанр, год, описание: search_movie_or_tv (media_type "movie" для фильмов и мультфильмов, "tv" для сериалов и мультсериалов)
-- Где смотреть, новый сезон, трейлер, свежие новости: web_search
-
-АНИМЕ:
-- Эпизоды, статус (онгоинг/завершён), студия, оценка: search_anime
-- Расписание выхода, онгоинг этого сезона, где смотреть: web_search
+━━━ КАК РАБОТАТЬ С ДАННЫМИ ━━━
+Тебе могут передать собранные данные в формате [Собранные данные]: ...
+Используй их для ответа. Не выдумывай факты, которых там нет.
+Если данные пустые или отсутствуют — отвечай исходя из контекста разговора.
+НИКОГДА не упоминай что ты пользовался инструментами или что данные были собраны.
 
 ━━━ РЕКОМЕНДАЦИИ PS5-ИГР ━━━
-Когда просят посоветовать мультиплеерную, кооп, онлайн или одиночную PS5-игру:
-1) get_ps5_recommendations с нужным режимом ("multiplayer", "coop" или "singleplayer"), выбери одну подходящую игру
-2) web_search для уточнения кросплея с PC (если спрашивают)
-3) get_ps_store_price_tr для выбранной игры
-Ответ строго в таком формате, только plain text, никаких заголовков:
+Когда в данных есть список рекомендованных PS5-игр и цена — отвечай строго в таком формате, только plain text:
 🎮 Название игры
 Жанр: ...
 Кросплей с PC: Да / Нет / нет данных
@@ -158,20 +176,39 @@ SYSTEM_PROMPT = """Ты — игровой бот для группы друзе
 """
 
 
+async def invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> dict:
+    for attempt in range(max_retries):
+        try:
+            return await runnable.ainvoke(*args, **kwargs)
+        except Exception as err:
+            error_str = str(err).lower()
+            is_daily = any(phrase in error_str for phrase in ("per day", "daily", "tokens_per_day"))
+            is_rate = ("rate_limit" in error_str or "429" in error_str) and not is_daily
+            if is_daily:
+                raise DailyLimitError("Groq daily token quota exhausted")
+            if is_rate:
+                if attempt < max_retries - 1:
+                    wait_seconds = 5 * (2 ** attempt)
+                    logger.warning("Rate limit hit, retrying in %ss (attempt %s)", wait_seconds, attempt + 1)
+                    await asyncio.sleep(wait_seconds)
+                else:
+                    raise RateLimitError("Groq rate limit retries exhausted")
+            else:
+                raise
+
+
 class Agent:
     def __init__(self) -> None:
-        self.__tools: Optional[list] = None
-        self.__executor = None
         self.__model_index: int = 0
         self.__pipeline = None
+        self.__worker_executors: dict = {}
+        self.__response_llm: Optional[ChatGroq] = None
 
     async def init(self, reset_model: bool = True) -> None:
         if reset_model:
             self.__model_index = 0
-
-        self.__tools = PYTHON_TOOLS
-        await self.__rebuild_executor()
-        logger.info(f"Agent initialized with {len(self.__tools)} tools")
+        await self.__build_all_executors()
+        logger.info("Agent initialized with model: %s", AGENT_MODEL_FALLBACKS[self.__model_index])
 
     def get_pipeline(self):
         """Return the compiled LangGraph pipeline, building it on first call."""
@@ -180,162 +217,43 @@ class Agent:
             self.__pipeline = build_pipeline(self)
         return self.__pipeline
 
-    async def reset_model_index(self) -> None:
-        if self.__model_index != 0:
-            logger.info(f"Resetting agent model from index {self.__model_index} to primary")
-            self.__model_index = 0
-            await self.__rebuild_executor()
+    def get_worker_executor(self, domain: str):
+        return self.__worker_executors.get(domain, self.__worker_executors["general"])
 
-    async def run(
-        self,
-        chat_id: str,
-        username: str,
-        message_text: str,
-        callbacks: list | None = None,
-    ) -> str:
-        if self.__executor is None:
-            raise RuntimeError("Agent not initialized. Call init() first.")
+    def get_response_llm(self) -> ChatGroq:
+        return self.__response_llm
 
-        history = SQLChatMessageHistory(session_id=chat_id, connection=config.SQLITE_DB_URL, table_name="message_store")
-        await Agent.__trim_history(history, config.MAX_HISTORY_MESSAGES)
-        past_messages = await asyncio.to_thread(lambda: history.messages)
-        prefixed_input = f"{username}: {message_text}"
-        input_messages = past_messages + [HumanMessage(content=prefixed_input)]
-
-        run_config = {"callbacks": callbacks} if callbacks else None
-
-        for _ in range(len(AGENT_MODEL_FALLBACKS)):
-            try:
-                result = await self.__invoke_with_retry(
-                    self.__executor,
-                    {"messages": input_messages},
-                    config=run_config,
-                )
-                ai_message = result["messages"][-1]
-                ai_message = await self.__apply_language_correction(
-                    ai_message, input_messages, run_config
-                )
-
-                if ai_message.content and ai_message.content.strip():
-                    def save_to_history() -> None:
-                        history.add_user_message(prefixed_input)
-                        history.add_message(ai_message)
-
-                    await asyncio.to_thread(save_to_history)
-                    await Agent.__trim_db_history(history)
-                return ai_message.content
-            except DailyLimitError:
-                if not await self.__advance_model():
-                    raise
-        raise DailyLimitError("All fallback models exhausted their daily quota")
-
-    async def __rebuild_executor(self) -> None:
-        assert self.__tools is not None, "init() must be called before __rebuild_executor()"
-        model = AGENT_MODEL_FALLBACKS[self.__model_index]
-        llm = ChatGroq(
-            model=model,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.7,
-            max_tokens=512,
-        )
-        self.__executor = create_agent(
-            llm,
-            self.__tools,
-            system_prompt=SYSTEM_PROMPT,
-            middleware=[ToolMessageSanitizer()],
-        )
-        logger.info(f"Agent executor using model: {model}")
-
-    @staticmethod
-    def __has_foreign_script(text: str) -> bool:
-        return bool(FOREIGN_SCRIPT_RE.search(text))
-
-    async def __apply_language_correction(
-        self,
-        ai_message,
-        input_messages: list,
-        run_config,
-    ):
-        if not ai_message.content or not Agent.__has_foreign_script(ai_message.content):
-            return ai_message
-        logger.warning("Foreign script detected in response, retrying with language correction")
-        correction_messages = input_messages + [
-            HumanMessage(content=(
-                "Твой предыдущий ответ содержал символы не на русском языке. "
-                "Ответь ТОЛЬКО на русском языке."
-            ))
-        ]
-        try:
-            result = await self.__invoke_with_retry(
-                self.__executor,
-                {"messages": correction_messages},
-                config=run_config,
-            )
-            return result["messages"][-1]
-        except Exception as err:
-            logger.warning("Language correction retry failed: %s", err)
-            return ai_message
-
-    async def __advance_model(self) -> bool:
+    async def advance_model(self) -> bool:
         next_index = self.__model_index + 1
         if next_index >= len(AGENT_MODEL_FALLBACKS):
             return False
         self.__model_index = next_index
         logger.warning(
-            f"Daily limit exhausted on {AGENT_MODEL_FALLBACKS[next_index - 1]}, "
-            f"switching to fallback: {AGENT_MODEL_FALLBACKS[next_index]}"
+            "Daily limit on %s, switching to: %s",
+            AGENT_MODEL_FALLBACKS[next_index - 1],
+            AGENT_MODEL_FALLBACKS[next_index],
         )
-        await self.__rebuild_executor()
+        await self.__build_all_executors()
         return True
 
-    @staticmethod
-    async def __trim_history(history: SQLChatMessageHistory, max_messages: int) -> None:
-        def trim_sync() -> None:
-            messages = history.messages
-            if len(messages) <= max_messages:
-                return
-            to_keep = messages[-max_messages:]
-            history.clear()
-            for msg in to_keep:
-                history.add_message(msg)
+    async def reset_model_index(self) -> None:
+        if self.__model_index != 0:
+            logger.info("Resetting to primary model from index %s", self.__model_index)
+            self.__model_index = 0
+            await self.__build_all_executors()
 
-        await asyncio.to_thread(trim_sync)
-
-    @staticmethod
-    async def __trim_db_history(history: SQLChatMessageHistory, max_user_messages: int = 40) -> None:
-        def trim_sync() -> None:
-            messages = history.messages
-            user_indices = [idx for idx, msg in enumerate(messages) if isinstance(msg, HumanMessage)]
-            if len(user_indices) <= max_user_messages:
-                return
-            cutoff = user_indices[-max_user_messages]
-            to_keep = messages[cutoff:]
-            history.clear()
-            for msg in to_keep:
-                history.add_message(msg)
-
-        await asyncio.to_thread(trim_sync)
-
-    @staticmethod
-    async def __invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> dict:
-        for attempt in range(max_retries):
-            try:
-                return await runnable.ainvoke(*args, **kwargs)
-            except Exception as err:
-                error_str = str(err).lower()
-                is_daily_limit = any(phrase in error_str for phrase in ("per day", "daily", "tokens_per_day"))
-                is_rate_limit = ("rate_limit" in error_str or "429" in error_str) and not is_daily_limit
-                if is_daily_limit:
-                    raise DailyLimitError("Groq daily token quota exhausted")
-                elif is_rate_limit:
-                    if attempt < max_retries - 1:
-                        wait_seconds = 5 * (2 ** attempt)
-                        logger.warning(f"Groq rate limit hit, retrying in {wait_seconds}s (attempt {attempt + 1})")
-                        await asyncio.sleep(wait_seconds)
-                    else:
-                        raise RateLimitError("Groq rate limit retries exhausted")
-                else:
-                    raise
+    async def __build_all_executors(self) -> None:
+        from src.tools import GAMES_TOOLS, GENERAL_TOOLS, MEDIA_DOMAIN_TOOLS
+        model = AGENT_MODEL_FALLBACKS[self.__model_index]
+        worker_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.3, max_tokens=1024)
+        middleware = [ToolMessageSanitizer()]
+        self.__worker_executors = {
+            "games": create_agent(worker_llm, GAMES_TOOLS, system_prompt=GAMES_WORKER_PROMPT, middleware=middleware),
+            "media": create_agent(worker_llm, MEDIA_DOMAIN_TOOLS, system_prompt=MEDIA_WORKER_PROMPT, middleware=middleware),
+            "general": create_agent(worker_llm, GENERAL_TOOLS, system_prompt=GENERAL_WORKER_PROMPT, middleware=middleware),
+        }
+        self.__response_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=512)
+        logger.info("Agent executors built with model: %s", model)
 
 
 agent = Agent()

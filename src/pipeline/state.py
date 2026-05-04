@@ -7,7 +7,7 @@ BotState flows through every node:
 
 from typing import Any
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 
 class IncomingMessage(TypedDict):
@@ -43,3 +43,5 @@ class BotState(TypedDict):
     context: AssembledContext | None
     response: str | None
     context_types: Any            # telegram.ext.ContextTypes instance for sending replies
+    intent: NotRequired[str | None]        # "games" | "media" | "general"
+    worker_output: NotRequired[str | None] # raw facts gathered by the specialist worker
