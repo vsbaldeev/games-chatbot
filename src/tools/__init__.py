@@ -22,6 +22,7 @@ GAMES_TOOLS = [
     get_steam_reviews_summary,
     get_game_reviews,
     web_search,
+    get_current_datetime,
 ]
 
 MEDIA_DOMAIN_TOOLS = [
@@ -29,6 +30,7 @@ MEDIA_DOMAIN_TOOLS = [
     search_anime,
     web_search,
     fetch_article,
+    get_current_datetime,
 ]
 
 GENERAL_TOOLS = [
