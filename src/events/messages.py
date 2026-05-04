@@ -1,13 +1,9 @@
 """Message handlers — text, voice, photo, sticker, video."""
 
-import base64
 import datetime
-import io
 import re
 from src import log
 
-from langchain_core.messages import HumanMessage
-from langchain_groq import ChatGroq
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -163,45 +159,6 @@ async def track_text_stats(
     await notify_unlocks(context, chat_id, user_id, username)
 
 
-async def is_real_photo(file_id: str, bot) -> bool:
-    """Return True if the image appears to be a real photograph taken with a camera."""
-    try:
-        tg_file = await bot.get_file(file_id)
-        buffer = io.BytesIO()
-        await tg_file.download_to_memory(buffer)
-        raw_bytes = buffer.getvalue()
-
-        if raw_bytes[:4] == b'\x89PNG':
-            mime = "image/png"
-        elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
-            mime = "image/webp"
-        else:
-            mime = "image/jpeg"
-
-        b64_image = base64.b64encode(raw_bytes).decode()
-        image_url = f"data:{mime};base64,{b64_image}"
-
-        llm = ChatGroq(
-            model=VISION_MODEL,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.1,
-            max_tokens=5,
-        )
-        check = await llm.ainvoke([
-            HumanMessage(content=[
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": (
-                    "Is this a real photograph taken by a person with a camera "
-                    "(photo of real life, people, places, objects, setups)? "
-                    "Answer only YES or NO."
-                )},
-            ]),
-        ])
-        return check.content.strip().upper().startswith("YES")
-    except Exception as error:
-        logger.warning("Photo reality check failed for file %s: %s", file_id, error)
-        return False
-
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
@@ -294,12 +251,6 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await notify_unlocks(context, chat_id, user_id, username)
 
     photo = msg.photo[-1]
-
-    # Pre-filter: only respond to real photographs (not memes/screenshots/game art).
-    if not await is_real_photo(photo.file_id, context.bot):
-        logger.info("Photo skipped (not real photo) in chat %s", chat_id)
-        return
-
     await run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
 
 
