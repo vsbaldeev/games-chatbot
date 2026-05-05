@@ -63,7 +63,7 @@ class MeaninglessFilterNode:
         decision = await self.__classify(text)
         
         if decision == "MEANINGLESS":
-            logger.info("Filter: Dropping meaningless message: '%.80s'", text)
+            logger.info("Filter: Dropping meaningless message %s", state["incoming"]["message_id"])
             return {"should_respond": False}
 
         return {"should_respond": True}

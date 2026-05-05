@@ -29,7 +29,7 @@ class IntentClassifierNode:
     async def __call__(self, state: BotState) -> dict:
         text = state["incoming"]["processed_text"] or state["incoming"]["raw_text"] or ""
         intent = await self.__classify(text)
-        logger.info("Intent: '%s' for: %.80s", intent, text)
+        logger.info("Intent: '%s' for message %s", intent, state["incoming"]["message_id"])
         return {"intent": intent}
 
     async def __classify(self, text: str) -> str:
