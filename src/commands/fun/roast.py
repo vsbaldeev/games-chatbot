@@ -5,6 +5,7 @@ Roaster encapsulates LLM-based roast generation and the /roast command handler.
 Module-level wrappers preserve the public API that bot.py and handlers.py import.
 """
 
+import asyncio
 import random
 import re
 
@@ -123,7 +124,7 @@ class Roaster:
     async def __get_user_history_text(self, chat_id: int, username: str) -> str:
         """Return the last 40 meaningful messages from the given user as a newline-joined string."""
         history = SQLChatMessageHistory(session_id=str(chat_id), connection=config.SQLITE_DB_URL, table_name="message_store")
-        recent = (await history.aget_messages())[-40:]
+        recent = await asyncio.to_thread(lambda: history.messages[-40:])
         user_prefix = f"{username}:"
         user_messages = [
             msg.content for msg in recent
