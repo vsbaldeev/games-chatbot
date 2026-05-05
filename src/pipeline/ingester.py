@@ -45,6 +45,35 @@ FRAME_DURATION_AUDIO_ONLY = 120
 FRAME_DURATION_SINGLE = 15
 
 
+async def describe_photo(file_id: str, bot) -> str:
+    """Download a Telegram photo and return a one-sentence Russian description via vision LLM."""
+    try:
+        tg_file = await bot.get_file(file_id)
+        buffer = io.BytesIO()
+        await tg_file.download_to_memory(buffer)
+        raw_bytes = buffer.getvalue()
+
+        if raw_bytes[:4] == b'\x89PNG':
+            mime = "image/png"
+        elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
+            mime = "image/webp"
+        else:
+            mime = "image/jpeg"
+
+        b64_image = base64.b64encode(raw_bytes).decode()
+        llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100)
+        response = await llm.ainvoke([
+            HumanMessage(content=[
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
+                {"type": "text", "text": VISION_PROMPT},
+            ]),
+        ])
+        return response.content.strip()
+    except Exception as err:
+        logger.error("Photo description failed for file %s: %s", file_id, err)
+        return ""
+
+
 class MessageIngester:
     """Converts media messages to text and updates the unified_messages store."""
 
@@ -166,38 +195,7 @@ class MessageIngester:
         return response.content.strip()
 
     async def __describe_photo(self, file_id: str, bot) -> str:
-        try:
-            tg_file = await bot.get_file(file_id)
-            buffer = io.BytesIO()
-            await tg_file.download_to_memory(buffer)
-            raw_bytes = buffer.getvalue()
-
-            if raw_bytes[:4] == b'\x89PNG':
-                mime = "image/png"
-            elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
-                mime = "image/webp"
-            else:
-                mime = "image/jpeg"
-
-            b64_image = base64.b64encode(raw_bytes).decode()
-            image_url = f"data:{mime};base64,{b64_image}"
-
-            llm = ChatGroq(
-                model=VISION_MODEL,
-                api_key=config.GROQ_API_KEY,
-                temperature=0.1,
-                max_tokens=100,
-            )
-            response = await llm.ainvoke([
-                HumanMessage(content=[
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                    {"type": "text", "text": VISION_PROMPT},
-                ]),
-            ])
-            return response.content.strip()
-        except Exception as err:
-            logger.error("Photo description failed for file %s: %s", file_id, err)
-            return ""
+        return await describe_photo(file_id, bot)
 
 
 def extract_frames_sync(video_bytes: bytes) -> list[bytes]:

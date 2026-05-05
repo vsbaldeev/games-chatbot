@@ -3,8 +3,7 @@ LangGraph StateGraph wiring for the bot pipeline.
 
 Graph edges:
   START → router
-    ├─ photo (any) → ingester          ← photos always ingested so description
-    ├─ should_respond=True → ingester    is stored for future reply-chain context
+    ├─ should_respond=True → ingester
     └─ should_respond=False → END
                 ingester
                     ├─ should_respond=True → guard
@@ -36,11 +35,6 @@ logger = log.get_logger(__name__)
 
 
 def route_after_router(state: BotState) -> str:
-    # Photos always reach the ingester so the vision description is stored
-    # in unified_messages even when the bot won't reply — this lets the bot
-    # describe a photo later if someone replies to it and @mentions the bot.
-    if state["incoming"]["media_type"] == "photo":
-        return "ingester"
     return "ingester" if state["should_respond"] else END
 
 

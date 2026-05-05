@@ -9,8 +9,10 @@ Assembles everything the Agent node needs for an enriched prompt:
 
 from src import log
 
+from src.pipeline.ingester import describe_photo
 from src.pipeline.state import AssembledContext, BotState
 from src.store import unified_messages, user_memories
+from src.store.unified_messages import PHOTO_PLACEHOLDER
 
 logger = log.get_logger(__name__)
 
@@ -55,9 +57,28 @@ class ContextBuilder:
 
         return chain, user_facts
 
+    async def __enrich_chain_photos(
+        self, chain: list[dict], chat_id: int, bot
+    ) -> list[dict]:
+        """Lazily describe any photo placeholders found in the reply chain."""
+        enriched = []
+        for row in chain:
+            if row["content"] == PHOTO_PLACEHOLDER and row.get("file_id"):
+                description = await describe_photo(row["file_id"], bot)
+                if description:
+                    await unified_messages.update_content(
+                        chat_id=chat_id,
+                        message_id=row["message_id"],
+                        content=description,
+                    )
+                    row = {**row, "content": description}
+            enriched.append(row)
+        return enriched
+
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
         chat_id = msg["chat_id"]
+        bot = state["context_types"].bot
 
         chain, user_facts = await self.__load_chain_facts(
             chat_id,
@@ -65,6 +86,7 @@ class ContextBuilder:
             msg["user_id"],
             msg["username"],
         )
+        chain = await self.__enrich_chain_photos(chain, chat_id, bot)
 
         recent = await unified_messages.get_recent(
             chat_id=chat_id,

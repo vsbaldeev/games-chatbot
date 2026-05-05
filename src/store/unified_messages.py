@@ -100,7 +100,7 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
             break
         cursor = await db.execute(
             """
-            SELECT message_id, user_id, username, content, media_type, reply_to_msg_id
+            SELECT message_id, user_id, username, content, media_type, reply_to_msg_id, file_id
             FROM unified_messages
             WHERE chat_id = ? AND message_id = ?
             """,
