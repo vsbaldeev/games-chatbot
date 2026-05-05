@@ -1,6 +1,5 @@
-"""Fun commands — /roast and /roulette."""
+"""Fun commands — /roast."""
 
 from src.commands.fun.roast import cmd_roast
-from src.commands.fun.roulette import cmd_roulette, russian_roulette
 
-__all__ = ["cmd_roast", "cmd_roulette", "russian_roulette"]
+__all__ = ["cmd_roast"]

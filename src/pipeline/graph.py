@@ -22,6 +22,7 @@ from langgraph.graph import END, START, StateGraph
 
 from src import config, log
 from src.pipeline.context_builder import ContextBuilder
+from src.pipeline.filter_node import MeaninglessFilterNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
 from src.pipeline.intent_node import IntentClassifierNode
@@ -44,6 +45,10 @@ def route_after_router(state: BotState) -> str:
 
 
 def route_after_ingester(state: BotState) -> str:
+    return "filter" if state["should_respond"] else END
+
+
+def route_after_filter(state: BotState) -> str:
     return "guard" if state["should_respond"] else END
 
 
@@ -66,6 +71,7 @@ def build_pipeline(agent) -> StateGraph:
 
     graph.add_node("router", MessageRouter(bot_username=config.BOT_USERNAME))
     graph.add_node("ingester", MessageIngester())
+    graph.add_node("filter", MeaninglessFilterNode())
     graph.add_node("guard", GuardNode())
     graph.add_node("context_builder", ContextBuilder())
     graph.add_node("intent_classifier", IntentClassifierNode())
@@ -77,7 +83,8 @@ def build_pipeline(agent) -> StateGraph:
 
     graph.add_edge(START, "router")
     graph.add_conditional_edges("router", route_after_router, {"ingester": "ingester", END: END})
-    graph.add_conditional_edges("ingester", route_after_ingester, {"guard": "guard", END: END})
+    graph.add_conditional_edges("ingester", route_after_ingester, {"filter": "filter", END: END})
+    graph.add_conditional_edges("filter", route_after_filter, {"guard": "guard", END: END})
     graph.add_conditional_edges("guard", route_by_guard, {"context_builder": "context_builder", END: END})
     graph.add_edge("context_builder", "intent_classifier")
     graph.add_conditional_edges(

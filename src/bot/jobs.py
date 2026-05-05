@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 
 from telegram.ext import Application
 
-from src.commands.fun import russian_roulette
 from src.jobs.achievements import silence_sweep_job
 from src.jobs.agent import reset_model_job
+from src.jobs.roast import weekly_roast_job
 
 
 class JobManagerInterface(ABC):
@@ -15,11 +15,11 @@ class JobManagerInterface(ABC):
     def add_jobs(self, app: Application) -> None: ...
 
 
-class RouletteJobManager(JobManagerInterface):
+class RoastJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
         app.job_queue.run_daily(
-            russian_roulette,
-            time=datetime.time(hour=18, minute=0, tzinfo=datetime.timezone.utc),
+            weekly_roast_job,
+            time=datetime.time(hour=12, minute=0, tzinfo=datetime.timezone.utc),
         )
 
 
