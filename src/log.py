@@ -12,7 +12,7 @@ def setup() -> None:
     logging.getLogger("aiosqlite").setLevel(aiosqlite_level)
     tg_app_level = logging.getLevelName(os.getenv("TELEGRAM_APP_LOG_LEVEL", "WARNING").upper())
     logging.getLogger("telegram.ext.Application").setLevel(tg_app_level)
-    tg_updater_level = logging.getLevelName(os.getenv("TELEGRAM_UPDATER_LOG_LEVEL", "WARNING").upper())
+    tg_updater_level = logging.getLevelName(os.getenv("TELEGRAM_UPDATER_LOG_LEVEL", "INFO").upper())
     logging.getLogger("telegram.ext.Updater").setLevel(tg_updater_level)
 
 
