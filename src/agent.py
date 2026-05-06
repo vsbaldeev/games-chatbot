@@ -6,7 +6,7 @@ from typing import Optional
 
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentMiddleware
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_groq import ChatGroq
 
 from src import config, log
@@ -27,6 +27,22 @@ FOREIGN_SCRIPT_RE = re.compile(
 
 class RateLimitError(Exception):
     pass
+
+
+async def apply_language_correction(llm, ai_message, messages: list):
+    """Retry the LLM call in Russian if the response contains foreign script."""
+    if not ai_message.content or not FOREIGN_SCRIPT_RE.search(ai_message.content):
+        return ai_message
+    logger.warning("Foreign script detected, retrying in Russian")
+    correction = messages + [HumanMessage(content=(
+        "Твой предыдущий ответ содержал символы не на русском языке. "
+        "Ответь ТОЛЬКО на русском языке."
+    ))]
+    try:
+        return await llm.ainvoke(correction)
+    except Exception as err:
+        logger.warning("Language correction failed: %s", err)
+        return ai_message
 
 
 class DailyLimitError(Exception):

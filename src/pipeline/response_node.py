@@ -7,7 +7,7 @@ from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src import config, log
-from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, FOREIGN_SCRIPT_RE, RESPONSE_PROMPT
+from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, RESPONSE_PROMPT, apply_language_correction
 from src.pipeline.state import BotState
 
 logger = log.get_logger(__name__)
@@ -77,21 +77,6 @@ def build_response_input(username: str, user_input: str, worker_output: str, con
         parts.append(f"[Собранные данные]:\n{worker_output}\n")
     parts.append(f"@{username}: {user_input}")
     return "\n".join(parts)
-
-
-async def apply_language_correction(llm, ai_message, messages: list):
-    if not ai_message.content or not FOREIGN_SCRIPT_RE.search(ai_message.content):
-        return ai_message
-    logger.warning("Foreign script detected, retrying in Russian")
-    correction = messages + [HumanMessage(content=(
-        "Твой предыдущий ответ содержал символы не на русском языке. "
-        "Ответь ТОЛЬКО на русском языке."
-    ))]
-    try:
-        return await llm.ainvoke(correction)
-    except Exception as err:
-        logger.warning("Language correction failed: %s", err)
-        return ai_message
 
 
 class ResponseNode:

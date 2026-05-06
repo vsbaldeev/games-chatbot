@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config, log
 from src.achievements import notify_unlocks
+from src.agent import apply_language_correction
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
@@ -84,10 +85,9 @@ class Roaster:
         system_prompt, user_prompt = self.__build_roast_prompts(
             target_username, history_text, is_supportive
         )
-        response = await llm.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ])
+        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+        response = await llm.ainvoke(messages)
+        response = await apply_language_correction(llm, response, messages)
         return response.content
 
     async def cmd_roast(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
