@@ -5,7 +5,6 @@ Roaster encapsulates LLM-based roast generation and the /roast command handler.
 Module-level wrappers preserve the public API that bot.py and handlers.py import.
 """
 
-import asyncio
 import random
 import re
 
@@ -16,7 +15,7 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config, log
 from src.achievements import notify_unlocks
-from src.store import unified_messages, user_memories
+from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -33,7 +32,7 @@ class Roaster:
     """Generates LLM-powered roasts and handles the /roast Telegram command."""
 
     def __build_roast_prompts(
-        self, target_username: str, history_text: str, facts: list[str], is_supportive: bool
+        self, target_username: str, history_text: str, is_supportive: bool
     ) -> tuple[str, str]:
         """Return (system_prompt, user_prompt) for the LLM call."""
         if is_supportive:
@@ -55,9 +54,7 @@ class Roaster:
                 "Можно использовать мат и крепкие выражения. "
                 "Только русский язык."
             )
-            facts_block = f"Факты о @{target_username}: {'; '.join(facts)}\n\n" if facts else ""
             user_prompt = (
-                f"{facts_block}"
                 f"Последние сообщения @{target_username} в чате:\n{history_text}\n\n{style_instruction}"
             )
         else:
@@ -82,13 +79,10 @@ class Roaster:
             temperature=0.95,
             max_tokens=180,
         )
-        history_text, facts = await asyncio.gather(
-            self.__get_user_history_text(chat_id, target_username),
-            user_memories.get_facts(chat_id=chat_id, user_id=user_id),
-        )
+        history_text = await self.__get_user_history_text(chat_id, target_username)
         is_supportive = random.random() < 0.1
         system_prompt, user_prompt = self.__build_roast_prompts(
-            target_username, history_text, facts, is_supportive
+            target_username, history_text, is_supportive
         )
         response = await llm.ainvoke([
             SystemMessage(content=system_prompt),
