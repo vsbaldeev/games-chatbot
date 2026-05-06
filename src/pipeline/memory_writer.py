@@ -1,13 +1,11 @@
 """
-MemoryWriter — final node in the LangGraph pipeline.
+MemoryWriter — fires fact extraction and persist in the background.
 
-Extracts new or updated facts about the users in the conversation and persists
-them to user_memories.  The actual DB work is fired as an asyncio background
-task so it never adds latency to the bot reply.
+Runs in two modes:
+  - Active (bot replied): fed the full exchange (user message + bot reply).
+  - Passive (no reply): fed the user message alone — the bot "overheard" it.
 
-Fact extraction uses a lightweight model (llama-3.1-8b-instant) fed:
-  - Existing facts for the user (so duplicates are avoided).
-  - The latest exchange (the message that triggered this pipeline run + bot reply).
+Extraction uses llama-3.1-8b-instant and never blocks the pipeline.
 """
 
 import asyncio
@@ -25,6 +23,7 @@ logger = log.get_logger(__name__)
 
 MEMORY_MODEL = "llama-3.1-8b-instant"
 MAX_NEW_FACTS = 3
+MIN_PASSIVE_LENGTH = 20
 
 EXTRACTION_SYSTEM = (
     "You extract concise facts about a person from a single chat exchange. "
@@ -40,8 +39,10 @@ class MemoryWriter:
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
         response = state.get("response") or ""
+        user_message = msg["processed_text"] or msg["raw_text"] or ""
 
-        if not response.strip():
+        passive = not response.strip()
+        if passive and len(user_message.strip()) < MIN_PASSIVE_LENGTH:
             return {}
 
         asyncio.create_task(
@@ -49,7 +50,7 @@ class MemoryWriter:
                 chat_id=msg["chat_id"],
                 user_id=msg["user_id"],
                 username=msg["username"],
-                user_message=msg["processed_text"] or msg["raw_text"] or "",
+                user_message=user_message,
                 bot_reply=response,
             )
         )
@@ -65,10 +66,14 @@ class MemoryWriter:
     ) -> list[str]:
         existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
         existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
+        if bot_reply:
+            exchange = f"Exchange:\n@{username}: {user_message}\nBot: {bot_reply}"
+        else:
+            exchange = f"Message (bot was not addressed):\n@{username}: {user_message}"
         prompt = (
             f"User: @{username}\n"
             f"Existing facts:\n{existing_block}\n\n"
-            f"Exchange:\n@{username}: {user_message}\nBot: {bot_reply}\n\n"
+            f"{exchange}\n\n"
             f"New facts to add (JSON array):"
         )
         llm = ChatGroq(

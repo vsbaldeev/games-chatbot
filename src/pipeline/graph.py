@@ -4,7 +4,8 @@ LangGraph StateGraph wiring for the bot pipeline.
 Graph edges:
   START → router
     ├─ should_respond=True → ingester
-    └─ should_respond=False → END
+    ├─ should_respond=False + text (≥20 chars) → memory_writer  (passive learning)
+    └─ should_respond=False + other → END
                 ingester
                     ├─ should_respond=True → guard
                     └─ should_respond=False → END  (photo described+stored, no reply)
@@ -25,7 +26,7 @@ from src.pipeline.filter_node import MeaninglessFilterNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
 from src.pipeline.intent_node import IntentClassifierNode
-from src.pipeline.memory_writer import MemoryWriter
+from src.pipeline.memory_writer import MemoryWriter, MIN_PASSIVE_LENGTH
 from src.pipeline.response_node import ResponseNode
 from src.pipeline.router import MessageRouter
 from src.pipeline.state import BotState
@@ -35,7 +36,12 @@ logger = log.get_logger(__name__)
 
 
 def route_after_router(state: BotState) -> str:
-    return "ingester" if state["should_respond"] else END
+    if state["should_respond"]:
+        return "ingester"
+    msg = state["incoming"]
+    if msg["media_type"] == "text" and len((msg.get("raw_text") or "").strip()) >= MIN_PASSIVE_LENGTH:
+        return "memory_writer"
+    return END
 
 
 def route_after_ingester(state: BotState) -> str:
@@ -76,7 +82,11 @@ def build_pipeline(agent) -> StateGraph:
     graph.add_node("memory_writer", MemoryWriter())
 
     graph.add_edge(START, "router")
-    graph.add_conditional_edges("router", route_after_router, {"ingester": "ingester", END: END})
+    graph.add_conditional_edges(
+        "router",
+        route_after_router,
+        {"ingester": "ingester", "memory_writer": "memory_writer", END: END},
+    )
     graph.add_conditional_edges("ingester", route_after_ingester, {"filter": "filter", END: END})
     graph.add_conditional_edges("filter", route_after_filter, {"guard": "guard", END: END})
     graph.add_conditional_edges("guard", route_by_guard, {"context_builder": "context_builder", END: END})

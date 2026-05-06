@@ -22,7 +22,9 @@ router
     │
     └─ other media (sticker, animation, …)  → should_respond=False
     │
-    ├─ should_respond=False ──────────────────────────────────────────────────────► END
+    ├─ should_respond=False
+    │     ├─ text message (raw_text ≥ 20 chars) ────────────────────────────► memory_writer (passive)
+    │     └─ other / short text ────────────────────────────────────────────► END
     │
     └─ should_respond=True
           │
