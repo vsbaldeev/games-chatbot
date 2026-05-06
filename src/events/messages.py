@@ -186,7 +186,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             counts[user_id] = 0
             await update.message.chat.send_action("typing")
             try:
-                roast_text = await generate_roast_text(chat_id, username)
+                roast_text = await generate_roast_text(chat_id, user_id, username)
                 await update.message.reply_text(
                     f"🔥 Прожарка @{username}:\n\n{strip_markdown(roast_text)}"
                 )
