@@ -9,7 +9,7 @@ from src.tools.store import (
     get_steam_player_count,
     get_steam_reviews_summary,
 )
-from src.tools.web import fetch_article, get_current_datetime, web_search
+from src.tools.web import fetch_article, web_search
 
 GAMES_TOOLS = [
     search_games,
@@ -22,7 +22,6 @@ GAMES_TOOLS = [
     get_steam_reviews_summary,
     get_game_reviews,
     web_search,
-    get_current_datetime,
 ]
 
 MEDIA_DOMAIN_TOOLS = [
@@ -30,13 +29,11 @@ MEDIA_DOMAIN_TOOLS = [
     search_anime,
     web_search,
     fetch_article,
-    get_current_datetime,
 ]
 
 GENERAL_TOOLS = [
     web_search,
     fetch_article,
-    get_current_datetime,
 ]
 
 PYTHON_TOOLS = list({tool.name: tool for tool in GAMES_TOOLS + MEDIA_DOMAIN_TOOLS + GENERAL_TOOLS}.values())

@@ -1,5 +1,6 @@
 """WorkerNode — domain-specific agent that gathers facts using tools."""
 
+import datetime
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import HumanMessage
 
@@ -70,7 +71,8 @@ class WorkerNode:
     def __build_worker_input(self, msg: dict, context) -> str:
         user_input = msg["processed_text"] or msg["raw_text"] or ""
         username = msg["username"]
-        parts: list[str] = []
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        parts: list[str] = [f"Current datetime: {now}", ""]
         reply_chain = (context or {}).get("reply_chain") or []
         if reply_chain:
             parts.append("Context (reply chain):")

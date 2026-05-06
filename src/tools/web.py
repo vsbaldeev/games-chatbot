@@ -1,6 +1,5 @@
 """Web search and article extraction tools."""
 
-import datetime
 import json
 
 import httpx
@@ -8,51 +7,6 @@ import trafilatura
 from langchain_core.tools import tool
 
 from src import config
-
-@tool
-def get_current_datetime(request: str = "full") -> str:
-    """Return the current date/time or a specific part of it.
-
-    Args:
-        request: What to return. Examples:
-                 "year"     — current year, e.g. "2026"
-                 "month"    — current month, e.g. "May (5)"
-                 "weekday"  — day of the week, e.g. "Saturday"
-                 "utc"      — full datetime in UTC, e.g. "2026-05-03 12:42 UTC"
-                 "full"     — full datetime in UTC+0 (default)
-                 "full UTC+3"  — full datetime in UTC+3 (Moscow)
-                 "time UTC+8"  — time only in UTC+8
-                 "full UTC-5"  — full datetime in UTC-5 (New York EST)
-    """
-    utc_now = datetime.datetime.now(datetime.timezone.utc)
-    parts = request.strip().split()
-    part = parts[0].lower()
-
-    if part == "year":
-        return str(utc_now.year)
-    if part == "month":
-        return f"{utc_now.strftime('%B')} ({utc_now.month})"
-    if part == "weekday":
-        return utc_now.strftime("%A")
-    if part == "utc":
-        return utc_now.strftime("%Y-%m-%d %H:%M UTC")
-
-    offset = 0
-    if len(parts) > 1:
-        tz_str = parts[1].upper().replace("UTC", "").replace("+", "")
-        try:
-            offset = int(tz_str)
-        except ValueError:
-            offset = 0
-
-    tz = datetime.timezone(datetime.timedelta(hours=offset))
-    local_now = utc_now.astimezone(tz)
-    sign = "+" if offset >= 0 else ""
-    label = f"UTC{sign}{offset}"
-
-    if part == "time":
-        return local_now.strftime(f"%H:%M ({label})")
-    return local_now.strftime(f"%Y-%m-%d %H:%M ({label})")
 
 
 @tool
@@ -134,4 +88,4 @@ async def __search_duckduckgo(query: str) -> str:
         return json.dumps({"error": f"DuckDuckGo search failed: {error}"})
 
 
-ALL_TOOLS = [get_current_datetime, web_search, fetch_article]
+ALL_TOOLS = [web_search, fetch_article]

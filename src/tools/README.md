@@ -29,7 +29,6 @@ media.py  (intent: media)
 web.py    (intent: general)
     web_search(query)                   — Tavily search (falls back to DuckDuckGo)
     fetch_article(url)                  — trafilatura text extraction + summarisation
-    get_current_datetime()              — current UTC datetime string
 ```
 
 ## Auth

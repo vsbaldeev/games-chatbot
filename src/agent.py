@@ -95,7 +95,6 @@ GENERAL_WORKER_PROMPT = """You are a data-gathering assistant for general questi
 Call tools only when factual data is needed. Output findings as plain text. No personality.
 
 TOOL SELECTION:
-- Current date, time, year, or timezone: get_current_datetime
 - Web search for any factual question: web_search
 - Read a specific web page: fetch_article
 
