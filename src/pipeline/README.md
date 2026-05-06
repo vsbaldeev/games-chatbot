@@ -117,6 +117,10 @@ router
                             └─ asyncio.create_task() — does NOT block reply
                                   → llama-3.1-8b-instant extracts new facts
                                   → upsert up to 3 facts into user_memories (cap: 10 per user)
+                            note: only runs when the bot actually replied — memory extraction
+                                  needs both sides of the exchange (user message + bot response)
+                                  to derive meaningful facts. messages the bot ignored are still
+                                  stored in unified_messages for reply-chain context.
                           │
                           ▼
                          END
