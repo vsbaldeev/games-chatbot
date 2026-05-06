@@ -39,18 +39,14 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 ## What information the roast reads
 
 ```
-message_store (SQLChatMessageHistory)
-    Source:  LangChain conversation history table, keyed by chat_id
-    Content: HumanMessage rows in format "<username>: <text>"
-    Window:  last 40 rows across all users in the chat
-    Filter:  only rows whose prefix matches the target username
-             lines containing only URLs or emojis are stripped
+unified_messages
+    Source:  pipeline message store, keyed by (chat_id, username)
+    Content: raw message text; voice/video_note/video entries contain the Whisper
+             transcript once ingested (placeholder rows are excluded)
+    Window:  last 40 rows for the target user specifically (SQL-level filter)
+    Filter:  lines containing only URLs or emojis are stripped
     Usage:   injected verbatim as "Последние сообщения @username в чате:"
              — the LLM reads actual things the target said to write a personalised roast
-
-    Note: message_store holds only text the bot processed through the pipeline.
-          Voice transcripts and video descriptions are stored here too when the
-          bot responded to them, so roasts can reference what was said in voice messages.
 ```
 
 ## Auto-roast detection

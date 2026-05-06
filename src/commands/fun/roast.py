@@ -5,7 +5,6 @@ Roaster encapsulates LLM-based roast generation and the /roast command handler.
 Module-level wrappers preserve the public API that bot.py and handlers.py import.
 """
 
-import asyncio
 import random
 import re
 
@@ -14,9 +13,9 @@ from langchain_groq import ChatGroq
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from langchain_community.chat_message_histories import SQLChatMessageHistory
 from src import achievements, config, log
 from src.achievements import notify_unlocks
+from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -123,17 +122,9 @@ class Roaster:
 
     async def __get_user_history_text(self, chat_id: int, username: str) -> str:
         """Return the last 40 meaningful messages from the given user as a newline-joined string."""
-        history = SQLChatMessageHistory(session_id=str(chat_id), connection=config.SQLITE_DB_URL, table_name="message_store")
-        recent = await asyncio.to_thread(lambda: history.messages[-40:])
-        user_prefix = f"{username}:"
-        user_messages = [
-            msg.content for msg in recent
-            if hasattr(msg, "content")
-            and isinstance(msg.content, str)
-            and msg.content.startswith(user_prefix)
-            and self.__is_meaningful(msg.content[len(user_prefix):])
-        ]
-        return "\n".join(user_messages)
+        messages = await unified_messages.get_user_messages(chat_id=chat_id, username=username, limit=40)
+        meaningful = [msg for msg in messages if self.__is_meaningful(msg)]
+        return "\n".join(meaningful)
 
     @staticmethod
     def __is_meaningful(text: str) -> bool:

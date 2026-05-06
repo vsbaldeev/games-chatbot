@@ -118,6 +118,25 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
     return chain
 
 
+async def get_user_messages(*, chat_id: int, username: str, limit: int = 40) -> list[str]:
+    """Return up to `limit` recent non-placeholder messages from a specific user, newest-first."""
+    db = await database.get()
+    rows = await db.execute_fetchall(
+        """
+        SELECT content FROM unified_messages
+        WHERE chat_id = ?
+          AND username = ?
+          AND media_type IN ('text', 'voice', 'video_note', 'video')
+          AND content NOT LIKE '[%]'
+          AND content != ''
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (chat_id, username, limit),
+    )
+    return [row["content"] for row in rows]
+
+
 async def cleanup_old(*, days: int = MESSAGE_RETENTION_DAYS) -> int:
     """Delete rows older than `days` days. Returns the number of deleted rows."""
     cutoff = time.time() - days * 86400
