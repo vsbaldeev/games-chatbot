@@ -1,6 +1,7 @@
 """ResponseNode — personality LLM that turns worker facts into a chat reply."""
 
 import asyncio
+import datetime
 
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -49,7 +50,8 @@ async def trim_db_history(history: SQLChatMessageHistory, max_user_messages: int
 
 
 def build_response_input(username: str, user_input: str, worker_output: str, context) -> str:
-    parts: list[str] = []
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    parts: list[str] = [f"Текущая дата и время: {now}", ""]
     user_facts = (context or {}).get("user_facts") or {}
     if user_facts:
         parts.append("Что я знаю об участниках чата:")
