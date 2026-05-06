@@ -44,11 +44,13 @@ router
         filter                 (text messages only — media skips LLM classification)
             ├─ media_type != "text"
             │     ├─ processed_text is empty → should_respond=False  (logs warning)
+            │     │                             asyncio.create_task(react with random emoji)
             │     └─ processed_text non-empty → pass through unchanged
             │
             └─ media_type == "text"
                   ├─ raw_text empty           → should_respond=False  (silent)
-                  ├─ LLM says MEANINGLESS     → should_respond=False  (logs info)
+                  ├─ LLM says MEANINGLESS     → should_respond=False
+                  │                              asyncio.create_task(react with random emoji)
                   ├─ LLM says MEANINGFUL      → should_respond=True
                   └─ LLM error               → should_respond=True   (fails open)
           │
