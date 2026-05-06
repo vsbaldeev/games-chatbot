@@ -209,6 +209,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     username = get_username(update)
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    logger.info("Voice/video_note from @%s in chat %s", username, chat_id)
 
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")

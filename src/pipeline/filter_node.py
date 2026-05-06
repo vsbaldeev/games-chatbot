@@ -49,19 +49,29 @@ class MeaninglessFilterNode:
         )
 
     async def __call__(self, state: BotState) -> dict:
-        # We only filter if we were planning to respond anyway.
         if not state.get("should_respond"):
             return {}
 
-        text = state["incoming"]["processed_text"] or state["incoming"]["raw_text"] or ""
-        
-        # Extremely short messages or just punctuation/emojis can be handled by heuristics 
-        # to save LLM tokens, but let's trust the LLM for now unless it becomes too slow.
+        media_type = state["incoming"]["media_type"]
+        if media_type != "text":
+            # Voice/video/photo messages are already gated by the 25% random router chance.
+            # If transcription produced nothing, log and skip rather than silently dropping.
+            text = state["incoming"]["processed_text"] or ""
+            if not text.strip():
+                logger.warning(
+                    "Filter: no transcription for %s message %s, skipping",
+                    media_type,
+                    state["incoming"]["message_id"],
+                )
+                return {"should_respond": False}
+            return {}
+
+        text = state["incoming"]["raw_text"] or ""
         if not text.strip():
             return {"should_respond": False}
 
         decision = await self.__classify(text)
-        
+
         if decision == "MEANINGLESS":
             logger.info("Filter: Dropping meaningless message %s", state["incoming"]["message_id"])
             return {"should_respond": False}
