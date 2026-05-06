@@ -10,6 +10,8 @@ import time
 
 from src.store import db as database
 
+MESSAGE_RETENTION_DAYS = 60
+
 # Placeholder content stored immediately for media messages before the real
 # transcription/description is available.
 VOICE_PLACEHOLDER = "[voice]"
@@ -114,6 +116,18 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
 
     chain.reverse()
     return chain
+
+
+async def cleanup_old(*, days: int = MESSAGE_RETENTION_DAYS) -> int:
+    """Delete rows older than `days` days. Returns the number of deleted rows."""
+    cutoff = time.time() - days * 86400
+    db = await database.get()
+    cursor = await db.execute(
+        "DELETE FROM unified_messages WHERE created_at < ?",
+        (cutoff,),
+    )
+    await db.commit()
+    return cursor.rowcount
 
 
 async def get_recent(*, chat_id: int, limit: int = 20) -> list[dict]:

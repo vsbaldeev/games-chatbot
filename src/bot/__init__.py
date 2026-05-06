@@ -8,7 +8,7 @@ from telegram.ext import Application, ApplicationBuilder
 
 from src import achievements, log
 from src.agent import agent
-from src.bot.jobs import RoastJobManager, RolesJobManager, SilenceSweepJobManager, ResetModelJobManager
+from src.bot.jobs import RoastJobManager, RolesJobManager, SilenceSweepJobManager, ResetModelJobManager, MessageCleanupJobManager
 from src.store import db as database, unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
@@ -37,7 +37,7 @@ def main() -> None:
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
         manager.add_handlers(app)
 
-    for job_manager in [RoastJobManager(), RolesJobManager(), SilenceSweepJobManager(), ResetModelJobManager()]:
+    for job_manager in [RoastJobManager(), RolesJobManager(), SilenceSweepJobManager(), ResetModelJobManager(), MessageCleanupJobManager()]:
         job_manager.add_jobs(app)
 
     logger.info("Starting polling...")

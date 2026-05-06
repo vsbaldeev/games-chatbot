@@ -7,6 +7,7 @@ from telegram.ext import Application
 
 from src.jobs.achievements import silence_sweep_job
 from src.jobs.agent import reset_model_job
+from src.jobs.cleanup import cleanup_messages_job
 from src.jobs.roast import weekly_roast_job
 from src.jobs.roles import weekly_roles_job
 
@@ -45,4 +46,12 @@ class ResetModelJobManager(JobManagerInterface):
         app.job_queue.run_daily(
             reset_model_job,
             time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc),
+        )
+
+
+class MessageCleanupJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
+        app.job_queue.run_daily(
+            cleanup_messages_job,
+            time=datetime.time(hour=3, minute=0, tzinfo=datetime.timezone.utc),
         )
