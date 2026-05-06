@@ -7,8 +7,8 @@ Responsibilities:
 
 Respond when:
   - The bot is @mentioned in the text / caption.
-  - The message is a direct reply to a bot message.
-  - Random chance fires for voice (25%), video_note (25%), or photo (25%).
+  - The message is a direct reply to a bot message (text or any media type).
+  - Random chance fires for voice/video_note/video/photo (25%).
 """
 
 import random
@@ -20,8 +20,7 @@ from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
-VOICE_RESPONSE_CHANCE = 0.25
-PHOTO_RESPONSE_CHANCE = 0.25
+MEDIA_RESPONSE_CHANCE = 0.25
 
 
 class MessageRouter:
@@ -81,17 +80,11 @@ class MessageRouter:
                 return True, "explicit"
             return False, "random"
 
-        if media_type in ("voice", "video_note", "video"):
+        if media_type in ("voice", "video_note", "video", "photo"):
             caption = (getattr(telegram_message, "caption", None) or "").lower()
-            if self.__bot_username in caption:
+            if self.__bot_username in caption or self.__is_reply_to_bot(telegram_message):
                 return True, "explicit"
-            return random.random() < VOICE_RESPONSE_CHANCE, "random"
-
-        if media_type == "photo":
-            caption = (telegram_message.caption or "").lower()
-            if self.__bot_username in caption:
-                return True, "explicit"
-            return random.random() < PHOTO_RESPONSE_CHANCE, "random"
+            return random.random() < MEDIA_RESPONSE_CHANCE, "random"
 
         return False, "random"
 
