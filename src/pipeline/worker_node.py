@@ -27,9 +27,9 @@ class SearchNotificationCallback(AsyncCallbackHandler):
             return
         self.__notified = True
         if tool_name == "fetch_article":
-            text = "🔗 Читаю страницу, подождите..."
+            text = "🔗 Читаю страницу, подожди..."
         else:
-            text = "🔍 Ищу, подождите немного..."
+            text = "🔍 Ищу, подожди немного..."
         try:
             await self.__message.reply_text(text)
         except Exception as err:
