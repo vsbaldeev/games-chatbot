@@ -210,6 +210,8 @@ async def invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> 
                     await asyncio.sleep(wait_seconds)
                 else:
                     raise RateLimitError("Groq rate limit retries exhausted")
+            elif "tool_use_failed" in error_str and attempt < max_retries - 1:
+                logger.warning("tool_use_failed on attempt %s, retrying", attempt + 1)
             else:
                 raise
 
