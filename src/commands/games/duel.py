@@ -422,20 +422,17 @@ class DuelManager:
         if job:
             job.schedule_removal()
         await query.answer()
-        try:
-            await query.edit_message_text(
-                f"⚔️ @{caller_username} вызывает @{target_username} на дуэль!",
-                reply_markup=None,
-            )
-        except TelegramError:
-            pass
         started = await self.__send_challenge(
             context, chat_id, caller_id, caller_username, target_id, target_username,
+            edit_message_id=message_id,
         )
         if not started:
-            await context.bot.send_message(
-                chat_id, "В чате уже идёт дуэль. Дождитесь её завершения."
-            )
+            try:
+                await query.edit_message_text(
+                    "В чате уже идёт дуэль. Дождитесь её завершения.", reply_markup=None
+                )
+            except TelegramError:
+                pass
 
     async def __activate_duel(
         self,
@@ -544,9 +541,9 @@ class DuelManager:
         p1_username: str,
         p2_id: int,
         p2_username: str,
-        reply_to_message_id: int | None = None,
+        edit_message_id: int | None = None,
     ) -> bool:
-        """Send the challenge message. Returns False if a duel is already running in this chat."""
+        """Send (or edit) the challenge message. Returns False if a duel is already running."""
         if chat_id in self.__active_duel_chats:
             return False
         self.__active_duel_chats.add(chat_id)
@@ -561,20 +558,21 @@ class DuelManager:
             InlineKeyboardButton("❌ Отклонить", callback_data=DUEL_REJECT_CALLBACK),
         ]])
 
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text=challenge_text,
-            reply_markup=keyboard,
-            reply_to_message_id=reply_to_message_id,
-        )
+        if edit_message_id is not None:
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=edit_message_id,
+                text=challenge_text, reply_markup=keyboard,
+            )
+            msg_id = edit_message_id
+        else:
+            msg = await context.bot.send_message(
+                chat_id=chat_id, text=challenge_text, reply_markup=keyboard,
+            )
+            msg_id = msg.message_id
 
-        self.__pending_acceptance[msg.message_id] = (
-            chat_id, p1_id, p1_username, p2_id, p2_username
-        )
-        job = context.job_queue.run_once(
-            self.__acceptance_countdown_and_expire, 0, data=msg.message_id
-        )
-        self.__acceptance_jobs[msg.message_id] = job
+        self.__pending_acceptance[msg_id] = (chat_id, p1_id, p1_username, p2_id, p2_username)
+        job = context.job_queue.run_once(self.__acceptance_countdown_and_expire, 0, data=msg_id)
+        self.__acceptance_jobs[msg_id] = job
         return True
 
     async def __finish_duel(
