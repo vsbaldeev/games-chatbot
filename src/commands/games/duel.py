@@ -31,7 +31,8 @@ DUEL_PICK_CALLBACK = "duel_pick"
 DUEL_CALLBACK_PATTERN = r"^duel_"
 
 DUEL_PICK_TIMEOUT = 60
-DUEL_ACCEPTANCE_TIMEOUT = 30
+DUEL_ACCEPTANCE_TIMEOUT = 60
+DUEL_ACCEPTANCE_COUNTDOWN_STEP = 5
 DUEL_COUNTDOWN_SECONDS = 10
 DUEL_FIRE_TIMEOUT = 300
 
@@ -337,22 +338,44 @@ class DuelManager:
         except TelegramError as error:
             logger.warning("Pick expiry failed for msg %s: %s", message_id, error)
 
-    async def __expire_acceptance(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def __acceptance_countdown_and_expire(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         message_id = context.job.data
-        duel_data = self.__pending_acceptance.pop(message_id, None)
-        self.__acceptance_jobs.pop(message_id, None)
-        if not duel_data:
-            return
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Принять", callback_data=DUEL_ACCEPT_CALLBACK),
+            InlineKeyboardButton("❌ Отклонить", callback_data=DUEL_REJECT_CALLBACK),
+        ]])
+        steps = DUEL_ACCEPTANCE_TIMEOUT // DUEL_ACCEPTANCE_COUNTDOWN_STEP
+        for step in range(1, steps + 1):
+            await asyncio.sleep(DUEL_ACCEPTANCE_COUNTDOWN_STEP)
+            duel_data = self.__pending_acceptance.get(message_id)
+            if not duel_data:
+                return
+            chat_id, _, p1_username, _, p2_username = duel_data
+            seconds_left = DUEL_ACCEPTANCE_TIMEOUT - step * DUEL_ACCEPTANCE_COUNTDOWN_STEP
+            if seconds_left <= 0:
+                await self.__do_expire_acceptance(context, message_id, chat_id, p1_username, p2_username)
+                return
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=f"⚔️ @{p1_username} вызвал @{p2_username} на дуэль!\n\n⏱ Осталось {seconds_left} сек.",
+                    reply_markup=keyboard,
+                )
+            except TelegramError:
+                pass
 
-        chat_id, _, p1_username, _, p2_username = duel_data
+    async def __do_expire_acceptance(
+        self, context: ContextTypes.DEFAULT_TYPE, message_id: int, chat_id: int,
+        p1_username: str, p2_username: str,
+    ) -> None:
+        self.__pending_acceptance.pop(message_id, None)
+        self.__acceptance_jobs.pop(message_id, None)
         self.__active_duel_chats.discard(chat_id)
         text = self.__fmt(random.choice(DUEL_NO_ANSWER), p1=p1_username, p2=p2_username)
         try:
             await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                reply_markup=None,
+                chat_id=chat_id, message_id=message_id, text=text, reply_markup=None,
             )
         except TelegramError as error:
             logger.warning("Acceptance expiry failed for msg %s: %s", message_id, error)
@@ -549,7 +572,7 @@ class DuelManager:
             chat_id, p1_id, p1_username, p2_id, p2_username
         )
         job = context.job_queue.run_once(
-            self.__expire_acceptance, DUEL_ACCEPTANCE_TIMEOUT, data=msg.message_id
+            self.__acceptance_countdown_and_expire, 0, data=msg.message_id
         )
         self.__acceptance_jobs[msg.message_id] = job
         return True
