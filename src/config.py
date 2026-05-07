@@ -15,6 +15,7 @@ def __require(name: str) -> str:
 
 
 TELEGRAM_TOKEN: str = __require("TELEGRAM_TOKEN")
+BOT_ID: int = int(TELEGRAM_TOKEN.split(":")[0])
 GROQ_API_KEY: str = __require("GROQ_API_KEY")
 TWITCH_CLIENT_ID: str = __require("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET: str = __require("TWITCH_CLIENT_SECRET")

@@ -26,8 +26,9 @@ MEDIA_RESPONSE_CHANCE = 0.25
 class MessageRouter:
     """Determines whether the bot should respond and writes the message to the store."""
 
-    def __init__(self, bot_username: str) -> None:
+    def __init__(self, bot_username: str, bot_id: int) -> None:
         self.__bot_username = bot_username.lower()
+        self.__bot_id = bot_id
 
     async def __call__(self, state: BotState) -> dict:
         msg: IncomingMessage = state["incoming"]
@@ -88,10 +89,9 @@ class MessageRouter:
 
         return False, "random"
 
-    @staticmethod
-    def __is_reply_to_bot(telegram_message: Any) -> bool:
+    def __is_reply_to_bot(self, telegram_message: Any) -> bool:
         reply = getattr(telegram_message, "reply_to_message", None)
         if not reply:
             return False
         sender = getattr(reply, "from_user", None)
-        return sender is not None and getattr(sender, "is_bot", False)
+        return sender is not None and sender.id == self.__bot_id

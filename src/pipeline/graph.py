@@ -69,7 +69,7 @@ def build_pipeline(agent) -> StateGraph:
     """Build and compile the pipeline graph. Call once at startup."""
     graph = StateGraph(BotState)
 
-    graph.add_node("router", MessageRouter(bot_username=config.BOT_USERNAME))
+    graph.add_node("router", MessageRouter(bot_username=config.BOT_USERNAME, bot_id=config.BOT_ID))
     graph.add_node("ingester", MessageIngester())
     graph.add_node("filter", MeaninglessFilterNode())
     graph.add_node("guard", GuardNode())
