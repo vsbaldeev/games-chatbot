@@ -106,4 +106,4 @@ class MeaninglessFilterNode:
                 reaction=[ReactionTypeEmoji(emoji=emoji)],
             )
         except Exception as err:
-            logger.debug("Reaction failed for message %s: %s", state["incoming"]["message_id"], err)
+            logger.warning("Reaction failed for message %s: %s", state["incoming"]["message_id"], err)
