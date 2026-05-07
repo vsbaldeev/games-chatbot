@@ -15,11 +15,16 @@ RECENT_FILL_LIMIT = 10
 
 
 class SearchNotificationCallback(AsyncCallbackHandler):
-    """Sends a Telegram notification before web_search or fetch_article runs."""
+    """Sends a Telegram notification before web_search or fetch_article runs.
 
-    def __init__(self, message) -> None:
+    The sent Message object is appended to `holder` so the caller can later
+    edit it with the final response instead of sending a second message.
+    """
+
+    def __init__(self, message, holder: list) -> None:
         super().__init__()
         self.__message = message
+        self.__holder = holder
         self.__notified = False
 
     async def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
@@ -27,12 +32,10 @@ class SearchNotificationCallback(AsyncCallbackHandler):
         if tool_name not in SEARCH_TOOLS or self.__notified:
             return
         self.__notified = True
-        if tool_name == "fetch_article":
-            text = "🔗 Читаю страницу, подожди..."
-        else:
-            text = "🔍 Ищу, подожди немного..."
+        text = "🔗 Читаю страницу, подожди..." if tool_name == "fetch_article" else "🔍 Ищу, подожди немного..."
         try:
-            await self.__message.reply_text(text)
+            sent = await self.__message.reply_text(text)
+            self.__holder.append(sent)
         except Exception as err:
             logger.warning("Failed to send search notification: %s", err)
 
@@ -47,7 +50,8 @@ class WorkerNode:
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"))
-        callback = SearchNotificationCallback(msg["update"].message)
+        notification_holder: list = []
+        callback = SearchNotificationCallback(msg["update"].message, notification_holder)
         executor = self.__agent.get_worker_executor(self.__domain)
         run_config = {"callbacks": [callback]}
 
@@ -58,14 +62,16 @@ class WorkerNode:
                     {"messages": [HumanMessage(content=worker_input)]},
                     config=run_config,
                 )
-                return {"worker_output": result["messages"][-1].content or ""}
+                output = result["messages"][-1].content or ""
+                notification_msg = notification_holder[0] if notification_holder else None
+                return {"worker_output": output, "search_notification_msg": notification_msg}
             except DailyLimitError:
                 if not await self.__agent.advance_model():
                     raise
                 executor = self.__agent.get_worker_executor(self.__domain)
             except Exception as err:
                 logger.error("Worker failed (domain=%s): %s", self.__domain, err)
-                return {"worker_output": ""}
+                return {"worker_output": "", "search_notification_msg": None}
         raise DailyLimitError("All fallback models exhausted in worker")
 
     def __build_worker_input(self, msg: dict, context) -> str:

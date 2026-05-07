@@ -118,8 +118,12 @@ async def run_pipeline(
         final_state = await pipeline.ainvoke(initial_state)
         response = final_state.get("response") or ""
         if response.strip():
-            await msg.chat.send_action("typing")
-            await msg.reply_text(strip_markdown(response))
+            notification_msg = final_state.get("search_notification_msg")
+            if notification_msg:
+                await notification_msg.edit_text(strip_markdown(response))
+            else:
+                await msg.chat.send_action("typing")
+                await msg.reply_text(strip_markdown(response))
     except DailyLimitError:
         logger.warning("Daily token quota exhausted for chat %s", chat.id)
         await msg.reply_text(

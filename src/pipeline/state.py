@@ -45,3 +45,4 @@ class BotState(TypedDict):
     context_types: Any            # telegram.ext.ContextTypes instance for sending replies
     intent: NotRequired[str | None]        # "games" | "media" | "general"
     worker_output: NotRequired[str | None] # raw facts gathered by the specialist worker
+    search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator; edited with final reply
