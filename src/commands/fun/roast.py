@@ -107,7 +107,7 @@ class Roaster:
         try:
             roast_text = await self.generate(chat_id, target_id, target_username)
             await update.message.reply_text(
-                f"{roast_text}\n\n#прожарка"
+                f"🔥 #прожарка @{target_username}\n\n{roast_text}"
             )
             await achievements.increment_stat(target_id, chat_id, target_username, "roasted_count")
             await notify_unlocks(context, chat_id, target_id, target_username)
