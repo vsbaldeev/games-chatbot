@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from apscheduler.jobstores.base import JobLookupError
 from telegram.error import RetryAfter, TelegramError
 from telegram.ext import ContextTypes
 
@@ -211,7 +212,10 @@ class DuelManager:
 
         job = self.__acceptance_jobs.pop(message_id, None)
         if job:
-            job.schedule_removal()
+            try:
+                job.schedule_removal()
+            except JobLookupError:
+                pass
 
         await query.answer("Вызов принят! Готовься к бою!")
 
@@ -242,7 +246,10 @@ class DuelManager:
 
         job = self.__acceptance_jobs.pop(message_id, None)
         if job:
-            job.schedule_removal()
+            try:
+                job.schedule_removal()
+            except JobLookupError:
+                pass
 
         self.__active_duel_chats.discard(chat_id)
         await query.answer("Вызов отклонён.")
@@ -420,7 +427,10 @@ class DuelManager:
         self.__pending_picks.pop(message_id, None)
         job = self.__pick_jobs.pop(message_id, None)
         if job:
-            job.schedule_removal()
+            try:
+                job.schedule_removal()
+            except JobLookupError:
+                pass
         await query.answer()
         started = await self.__send_challenge(
             context, chat_id, caller_id, caller_username, target_id, target_username,
@@ -580,7 +590,10 @@ class DuelManager:
     ) -> None:
         job = self.__duel_timeout_jobs.pop(message_id, None)
         if job:
-            job.schedule_removal()
+            try:
+                job.schedule_removal()
+            except JobLookupError:
+                pass
         self.__active_duel_chats.discard(chat_id)
         try:
             await query.edit_message_text(text)
