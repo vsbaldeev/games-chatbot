@@ -551,7 +551,7 @@ class DuelManager:
         challenge_base = self.__fmt(
             random.choice(DUEL_CHALLENGE), p1=p1_username, p2=p2_username
         )
-        challenge_text = challenge_base + f"\n\n⏱ У @{p2_username} есть {DUEL_ACCEPTANCE_TIMEOUT} сек."
+        challenge_text = challenge_base + f"\n\n⏱ Осталось {DUEL_ACCEPTANCE_TIMEOUT} сек."
 
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Принять", callback_data=DUEL_ACCEPT_CALLBACK),

@@ -8,26 +8,66 @@ handle_duel_callback for registration in bot.py.
 
 ```
 /duel
-    └── challenger picks opponent from inline keyboard (duel_pick)
-            └── acceptance prompt sent to opponent (duel_accept / duel_reject)
-                    ├── rejected → cancelled message
-                    └── accepted → fire message with 🔫 button for both players
-                                        └── first tap wins → duel_wins incremented
-                                                              → check_new → notify_unlocks
+    │
+    ▼
+┌─────────────────────────────┐
+│ @caller, выбери соперника:  │
+│  [@vasya]  [@petya]         │  ← picker (60s timeout)
+└─────────────────────────────┘
+    │ caller picks @petya
+    ▼ (same message, edited in-place)
+┌──────────────────────────────────┐
+│ 🔫 @caller бросает вызов @petya! │
+│ @petya, ответишь?                │
+│                                  │
+│ ⏱ Осталось 60 сек.              │
+│  [✅ Принять]  [❌ Отклонить]    │  ← every 5s only the number updates
+└──────────────────────────────────┘
+    │
+    ├── @petya clicks ❌ / timeout
+    │       ▼
+    │   ┌──────────────────────────────┐
+    │   │ 🏳️ @petya отклонил вызов    │
+    │   │ @caller. Трус.               │
+    │   └──────────────────────────────┘
+    │
+    └── @petya clicks ✅
+            ▼ (same message, edited)
+        ┌──────────────────────┐
+        │ ⚔️ @caller vs @petya │
+        │                      │
+        │         [🔫]         │  ← both players can tap (5 min timeout)
+        └──────────────────────┘
+            │ first tap wins
+            ▼ (same message, edited)
+        ┌────────────────────────────────────────┐
+        │ ⚔️ @caller vs @petya                   │
+        │                                        │
+        │ 💥 @caller попал в @petya! (1.23 сек)  │
+        └────────────────────────────────────────┘
+```
+
+## Shot outcomes
+
+```
+60%  hit   — shooter wins
+20%  self  — shooter hits themselves, opponent wins
+20%  miss  — duel continues, opponent gets to shoot
 ```
 
 ## Timeouts
 
 ```
-5 minutes  — acceptance timeout (auto-cancel if opponent does not respond)
-5 minutes  — fire timeout (auto-cancel if neither player taps)
+60s  — picker: auto-cancel if challenger does not pick a target
+60s  — acceptance: countdown visible every 5s, auto-cancel if no response
+5m   — fire: auto-cancel if neither player taps
 ```
 
 ## Callbacks
 
 ```
-duel_pick_<user_id>    — challenger selects opponent
-duel_accept            — opponent accepts
-duel_reject            — opponent declines
-duel_fire              — first to tap wins
+duel_pick:<index>  — challenger selects opponent from inline keyboard
+duel_accept        — opponent accepts the challenge
+duel_reject        — opponent declines
+duel_fire          — first to tap wins
 ```
