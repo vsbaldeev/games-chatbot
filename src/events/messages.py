@@ -44,7 +44,7 @@ def is_reply_to_game_message(update: Update) -> bool:
 def strip_markdown(text: str) -> str:
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"_(.+?)_", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", text, flags=re.DOTALL)
     lines = [line for line in text.splitlines() if not TABLE_SEP_RE.match(line)]
     return "\n".join(lines)
 from src.pipeline.state import BotState, IncomingMessage
