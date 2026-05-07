@@ -33,7 +33,7 @@ async def _roast_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
         roast_text = await generate_roast_text(chat_id, target_id, target_username)
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"🔥 Еженедельная прожарка!\n\n@{target_username}:\n{roast_text}",
+            text=f"🔥 Еженедельная прожарка!\n\n{roast_text}\n\n#прожарка",
         )
         await achievements.increment_stat(target_id, chat_id, target_username, "roasted_count")
     except Exception as error:

@@ -192,7 +192,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 roast_text = await generate_roast_text(chat_id, user_id, username)
                 await update.message.reply_text(
-                    f"🔥 Прожарка @{username}:\n\n{strip_markdown(roast_text)}"
+                    f"{strip_markdown(roast_text)}\n\n#прожарка"
                 )
                 await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
                 await notify_unlocks(context, chat_id, user_id, username)
