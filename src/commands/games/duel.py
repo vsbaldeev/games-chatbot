@@ -199,7 +199,7 @@ class DuelManager:
             await query.answer("Вызов уже недействителен.", show_alert=True)
             return
 
-        chat_id, p1_id, p1_username, p2_id, p2_username = claimed
+        chat_id, p1_id, p1_username, p2_id, p2_username, *_ = claimed
 
         if clicker_id != p2_id:
             self.__pending_acceptance[message_id] = claimed
@@ -230,7 +230,7 @@ class DuelManager:
             await query.answer("Вызов уже недействителен.", show_alert=True)
             return
 
-        chat_id, p1_id, p1_username, p2_id, p2_username = claimed
+        chat_id, p1_id, p1_username, p2_id, p2_username, *_ = claimed
 
         if clicker_id != p2_id:
             self.__pending_acceptance[message_id] = claimed
@@ -350,7 +350,7 @@ class DuelManager:
             duel_data = self.__pending_acceptance.get(message_id)
             if not duel_data:
                 return
-            chat_id, _, p1_username, _, p2_username = duel_data
+            chat_id, _, p1_username, _, p2_username, challenge_base, *_ = duel_data
             seconds_left = DUEL_ACCEPTANCE_TIMEOUT - step * DUEL_ACCEPTANCE_COUNTDOWN_STEP
             if seconds_left <= 0:
                 await self.__do_expire_acceptance(context, message_id, chat_id, p1_username, p2_username)
@@ -359,7 +359,7 @@ class DuelManager:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text=f"⚔️ @{p1_username} вызвал @{p2_username} на дуэль!\n\n⏱ Осталось {seconds_left} сек.",
+                    text=f"{challenge_base}\n\n⏱ Осталось {seconds_left} сек.",
                     reply_markup=keyboard,
                 )
             except TelegramError:
@@ -548,10 +548,10 @@ class DuelManager:
             return False
         self.__active_duel_chats.add(chat_id)
 
-        challenge_text = self.__fmt(
+        challenge_base = self.__fmt(
             random.choice(DUEL_CHALLENGE), p1=p1_username, p2=p2_username
         )
-        challenge_text += f"\n\n⏱ У @{p2_username} есть {DUEL_ACCEPTANCE_TIMEOUT} сек."
+        challenge_text = challenge_base + f"\n\n⏱ У @{p2_username} есть {DUEL_ACCEPTANCE_TIMEOUT} сек."
 
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Принять", callback_data=DUEL_ACCEPT_CALLBACK),
@@ -570,7 +570,7 @@ class DuelManager:
             )
             msg_id = msg.message_id
 
-        self.__pending_acceptance[msg_id] = (chat_id, p1_id, p1_username, p2_id, p2_username)
+        self.__pending_acceptance[msg_id] = (chat_id, p1_id, p1_username, p2_id, p2_username, challenge_base)
         job = context.job_queue.run_once(self.__acceptance_countdown_and_expire, 0, data=msg_id)
         self.__acceptance_jobs[msg_id] = job
         return True
