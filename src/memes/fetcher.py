@@ -13,9 +13,9 @@ REQUEST_HEADERS = {"User-Agent": "games-chatbot/1.0"}
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif")
 
 SUBREDDIT_ENDPOINTS = {
-    "expectedrussians": "https://www.reddit.com/r/expectedrussians/.json?f=flair_name%3A%22мем%22&limit=100",
-    "ruAsska":         "https://www.reddit.com/r/ruAsska/.json?f=flair_name%3A%22Мем%22&limit=100",
-    "Pikabu":          "https://www.reddit.com/r/Pikabu/search.json?q=flair%3A%D0%9C%D0%B5%D0%BC&sort=hot&restrict_sr=1&limit=100",
+    "expectedrussians": "https://www.reddit.com/r/expectedrussians/.json?f=flair_name%3A%22мем%22&limit=100&t=year",
+    "ruAsska":         "https://www.reddit.com/r/ruAsska/.json?f=flair_name%3A%22Мем%22&limit=100&t=year",
+    "Pikabu":          "https://www.reddit.com/r/Pikabu/search.json?q=flair%3A%D0%9C%D0%B5%D0%BC&sort=hot&restrict_sr=1&limit=100&t=year",
 }
 
 
