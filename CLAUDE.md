@@ -93,6 +93,7 @@ Key tables:
 - `user_stats` — cumulative counters and max-value stats per user per chat
 - `announced_achievements` — deduplication log so each achievement notifies only once
 - `message_store` — LangChain conversation history (managed by `SQLChatMessageHistory`)
+- `sent_memes` — dedup log of meme URLs already sent per chat; primary key `(chat_id, url)`; initialized by `src/memes/store.py:init_table()`
 
 ### Bot wiring
 
@@ -102,3 +103,15 @@ Key tables:
 - `MessageHandlerManager` — text, voice, video_note, photo, sticker, video, animation
 
 Adding a new command requires: handler function → register in `CommandHandlerManager` → export from `src/commands/__init__.py` → mention in `cmd_help` and the agent system prompt in `src/agent.py`.
+
+### Meme feature (`/meme`)
+
+`src/memes/` — fetches a random image post from Reddit and sends it with its post title as caption.
+
+| File | Responsibility |
+|---|---|
+| `src/memes/fetcher.py` | Calls Reddit JSON API for each subreddit in `SUBREDDITS`, extracts `(url, title)` pairs, excludes already-seen URLs, picks a random candidate |
+| `src/memes/store.py` | `sent_memes` table — tracks which URLs have been sent per chat to prevent repeats |
+| `src/commands/fun/meme.py` | `cmd_meme` handler — calls the fetcher, sends `reply_photo` with caption |
+
+Subreddits scraped: `ru_memes`, `expectedrussians`, `ruAsska`, `Pikabu`. All use Reddit's public JSON endpoint (`/hot.json?limit=100`) — no API key required, only a `User-Agent` header. A subreddit failure is logged as a warning and skipped; the rest still proceed. The pool is per-chat and never resets automatically — once all fetched posts have been sent, the command replies with a text message.

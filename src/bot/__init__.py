@@ -9,6 +9,7 @@ from telegram.ext import Application, ApplicationBuilder
 from src import achievements, log
 from src.agent import agent
 from src.bot.jobs import RoastJobManager, RolesJobManager, SilenceSweepJobManager, ResetModelJobManager, MessageCleanupJobManager
+from src.memes import store as meme_store
 from src.store import db as database, unified_messages as msg_store, user_memories as memory_store
 
 log.setup()
@@ -21,6 +22,7 @@ async def __on_startup(application: Application) -> None:
     await achievements.init_tables()
     await msg_store.init_table()
     await memory_store.init_table()
+    await meme_store.init_table()
     logger.info("Bot started, all tables and jobs initialized")
 
 

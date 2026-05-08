@@ -22,6 +22,7 @@ CommandHandlerManager
     /dnd_coop       — D&D co-op adventure
     /dnd_heist      — D&D heist
     /roast          — on-demand прожарка
+    /meme           — random image meme from Reddit
     CallbackQueryHandler(duel_*)   — duel inline buttons
     CallbackQueryHandler(dnd_*)    — D&D lobby/action buttons
 

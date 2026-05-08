@@ -1,4 +1,4 @@
-Roast ("прожарка") feature: on-demand and automatic weekly roasts of a randomly chosen chat member.
+Fun commands: roast ("прожарка") and meme.
 
 ## Trigger modes
 
@@ -69,4 +69,48 @@ handle_message (src/events/messages.py)
 # Stateless — survives restarts, varies per ISO week, same day all day
 year, week, _ = datetime.date.today().isocalendar()
 roast_day = random.Random(year * 1000 + week).randint(0, 6)
+```
+
+---
+
+# /meme
+
+Sends a random Russian-language meme image with its post title as caption.
+
+## Source
+
+Reddit public JSON API — no credentials required. Four subreddits are queried on every call:
+
+```
+r/ru_memes
+r/expectedrussians
+r/ruAsska
+r/Pikabu
+```
+
+Each subreddit is fetched independently (`GET /hot.json?limit=100`). A subreddit failure is logged as a warning and skipped; the rest still proceed.
+
+## Post filtering
+
+```
+is_video  = true  → skip
+is_gallery = true → skip
+post_hint = "image"
+  OR url ends with .jpg / .jpeg / .png / .gif → keep
+```
+
+## Deduplication
+
+Sent meme URLs are recorded in the `sent_memes` table keyed by `(chat_id, url)`. Each chat has its own independent pool. Once all fetched posts for a chat have been sent, the command replies with a text message instead.
+
+## Flow
+
+```
+/meme
+  → fetch up to 400 posts across all subreddits
+  → filter: single image only (no video, no gallery)
+  → exclude URLs already in sent_memes for this chat
+  → pick random candidate
+  → INSERT into sent_memes
+  → reply_photo(url, caption=title)
 ```

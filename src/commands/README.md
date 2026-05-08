@@ -17,6 +17,7 @@ statistics.py
 
 fun/
     /roast          — see src/commands/fun/README.md
+    /meme           — see src/commands/fun/README.md
 
 games/
     /duel           — see src/commands/games/README.md
