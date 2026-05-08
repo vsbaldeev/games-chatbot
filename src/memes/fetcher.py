@@ -9,9 +9,14 @@ from src.memes.store import get_seen_urls, mark_seen
 
 logger = log.get_logger(__name__)
 
-SUBREDDITS = ("ru_memes", "expectedrussians", "ruAsska", "Pikabu")
 REQUEST_HEADERS = {"User-Agent": "games-chatbot/1.0"}
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif")
+
+SUBREDDIT_ENDPOINTS = {
+    "expectedrussians": "https://www.reddit.com/r/expectedrussians/.json?f=flair_name%3A%22мем%22&limit=100",
+    "ruAsska":         "https://www.reddit.com/r/ruAsska/.json?f=flair_name%3A%22Мем%22&limit=100",
+    "Pikabu":          "https://www.reddit.com/r/Pikabu/search.json?q=flair%3A%D0%9C%D0%B5%D0%BC&sort=hot&restrict_sr=1&limit=100",
+}
 
 
 def _extract_posts(posts: list) -> list[tuple[str, str]]:
@@ -31,9 +36,8 @@ def _extract_posts(posts: list) -> list[tuple[str, str]]:
 async def fetch_posts() -> list[tuple[str, str]]:
     async with httpx.AsyncClient(headers=REQUEST_HEADERS, follow_redirects=True) as client:
         all_posts = []
-        for subreddit in SUBREDDITS:
+        for subreddit, endpoint in SUBREDDIT_ENDPOINTS.items():
             try:
-                endpoint = f"https://www.reddit.com/r/{subreddit}/hot.json?limit=100"
                 response = await client.get(endpoint, timeout=10.0)
                 response.raise_for_status()
                 posts = response.json()["data"]["children"]
