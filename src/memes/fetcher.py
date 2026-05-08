@@ -29,7 +29,7 @@ def _extract_posts(posts: list) -> list[tuple[str, str]]:
         hint: str = post_data.get("post_hint", "")
         if hint == "image" or any(url.lower().endswith(ext) for ext in IMAGE_EXTENSIONS):
             title: str = post_data.get("title", "")
-            if title.rstrip().endswith("?"):
+            if "?" in title:
                 continue
             result.append((url, title))
     return result
