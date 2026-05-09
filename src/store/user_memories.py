@@ -18,6 +18,24 @@ from src.store import db as database
 
 MAX_FACTS_PER_USER = 20
 
+STAT_FACT_TEMPLATES: dict[str, str] = {
+    "photo_messages":     "Отправил {count} фото в чате",
+    "video_messages":     "Отправил {count} видео в чате",
+    "voice_messages":     "Отправил {count} войсовых сообщений",
+    "forwarded_messages": "Сделал {count} репостов в чате",
+}
+
+STAT_FACT_LIKE_PATTERNS: list[str] = [
+    t.replace("{count}", "%") for t in STAT_FACT_TEMPLATES.values()
+]
+
+STAT_FACT_RE = re.compile(
+    "^(" + "|".join(
+        re.escape(t).replace(r"\{count\}", r"\d+")
+        for t in STAT_FACT_TEMPLATES.values()
+    ) + ")$"
+)
+
 
 async def init_table() -> None:
     """Create the user_memories table and its lookup index if they do not exist."""
@@ -40,45 +58,52 @@ async def init_table() -> None:
 
 
 async def get_facts(*, chat_id: int, user_id: int) -> list[str]:
-    """Return all facts stored for the given user in this chat, newest first."""
+    """Return facts for the user, newest first. LLM-extracted only; falls back to stat facts if none exist."""
     async with database.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT fact FROM user_memories
-            WHERE chat_id = $1 AND user_id = $2
-            ORDER BY updated_at DESC
-            """,
+        llm_rows = await conn.fetch(
+            """SELECT fact FROM user_memories
+               WHERE chat_id = $1 AND user_id = $2
+                 AND NOT (fact LIKE ANY($3::text[]))
+               ORDER BY updated_at DESC""",
+            chat_id, user_id, STAT_FACT_LIKE_PATTERNS,
+        )
+        if llm_rows:
+            return [row["fact"] for row in llm_rows]
+        stat_rows = await conn.fetch(
+            """SELECT fact FROM user_memories
+               WHERE chat_id = $1 AND user_id = $2
+               ORDER BY updated_at DESC""",
             chat_id, user_id,
         )
-    return [row["fact"] for row in rows]
+    return [row["fact"] for row in stat_rows]
 
 
 async def get_facts_for_users(
     *, chat_id: int, user_ids: list[int]
 ) -> dict[int, list[str]]:
-    """
-    Batch-fetch facts for several users in a single DB round-trip.
-
-    Returns a mapping of user_id → list[fact]. Users with no stored facts
-    are not included in the result.
-    """
+    """Batch-fetch facts for several users. LLM-extracted only per user; falls back to stat facts if none exist."""
     if not user_ids:
         return {}
 
     async with database.acquire() as conn:
         rows = await conn.fetch(
-            """
-            SELECT user_id, fact FROM user_memories
-            WHERE chat_id = $1 AND user_id = ANY($2)
-            ORDER BY updated_at DESC
-            """,
+            """SELECT user_id, fact FROM user_memories
+               WHERE chat_id = $1 AND user_id = ANY($2)
+               ORDER BY updated_at DESC""",
             chat_id, user_ids,
         )
 
-    result: dict[int, list[str]] = {}
+    llm_facts: dict[int, list[str]] = {}
+    stat_facts: dict[int, list[str]] = {}
     for row in rows:
-        result.setdefault(row["user_id"], []).append(row["fact"])
-    return result
+        uid, fact = row["user_id"], row["fact"]
+        if STAT_FACT_RE.match(fact):
+            stat_facts.setdefault(uid, []).append(fact)
+        else:
+            llm_facts.setdefault(uid, []).append(fact)
+
+    all_user_ids = set(llm_facts) | set(stat_facts)
+    return {uid: llm_facts.get(uid) or stat_facts.get(uid, []) for uid in all_user_ids}
 
 
 def format_hack_fact(count: int) -> str:
@@ -121,6 +146,35 @@ async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> N
                     VALUES ($1, $2, $3, $4, $5)
                     """,
                     chat_id, user_id, username, format_hack_fact(1), now,
+                )
+
+
+async def upsert_stat_fact(
+    *, chat_id: int, user_id: int, username: str, stat: str, count: int
+) -> None:
+    """Upsert a single living fact derived from a stat counter (e.g. '47 войсовых сообщений')."""
+    template = STAT_FACT_TEMPLATES.get(stat)
+    if not template:
+        return
+    prefix = template.split("{")[0]
+    new_fact = template.format(count=count)
+    now = time.time()
+    async with database.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "SELECT id FROM user_memories WHERE chat_id = $1 AND user_id = $2 AND fact LIKE $3",
+                chat_id, user_id, f"{prefix}%",
+            )
+            if rows:
+                await conn.execute(
+                    "UPDATE user_memories SET fact = $1, updated_at = $2 WHERE id = $3",
+                    new_fact, now, rows[0]["id"],
+                )
+            else:
+                await conn.execute(
+                    """INSERT INTO user_memories (chat_id, user_id, username, fact, updated_at)
+                       VALUES ($1, $2, $3, $4, $5)""",
+                    chat_id, user_id, username, new_fact, now,
                 )
 
 

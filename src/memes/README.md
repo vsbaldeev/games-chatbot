@@ -11,8 +11,8 @@ store.py     — sent_memes table: tracks which URLs have been sent per chat
 
 ```sql
 CREATE TABLE sent_memes (
-    chat_id INTEGER NOT NULL,
-    url     TEXT    NOT NULL,
+    chat_id BIGINT NOT NULL,
+    url     TEXT   NOT NULL,
     PRIMARY KEY (chat_id, url)
 )
 ```
@@ -48,5 +48,5 @@ get_meme(chat_id) -> (url, title) | None
 ```
 init_table()              — CREATE TABLE IF NOT EXISTS sent_memes
 get_seen_urls(chat_id)    — SELECT url WHERE chat_id = ? → set[str]
-mark_seen(chat_id, url)   — INSERT OR IGNORE (chat_id, url)
+mark_seen(chat_id, url)   — INSERT ON CONFLICT DO NOTHING (chat_id, url)
 ```

@@ -9,7 +9,7 @@ routes every message through a typed LangGraph pipeline.
 ```
 src/pipeline/       LangGraph StateGraph — message processing nodes and graph wiring
 src/tools/          MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search
-src/store/          aiosqlite data access — unified_messages, user_memories, user_stats
+src/store/          asyncpg data access — unified_messages, user_memories, user_stats
 src/achievements/   Achievement system — stat rules, unlock checks, announcements
 src/events/         Telegram event handlers — member tracking, reactions, messages
 src/commands/       Command handlers — /duel, /dnd_*, /roast, /top, /achievements
@@ -20,12 +20,12 @@ src/bot/            Application wiring — handler registration, job setup, star
 ## Tech stack
 
 ```
-Language     Python 3.11
+Language     Python 3.13
 Telegram     python-telegram-bot v22 (JobQueue, native async)
 Pipeline     LangGraph StateGraph
 Tools        MCP (stdio) via langchain-mcp-adapters
 LLM (agent)  Groq llama-4-scout-17b-16e-instruct → qwen3-32b → gpt-oss-20b (fallback chain)
-LLM (memory) Groq llama-3.1-8b-instant
+LLM (memory) Groq meta-llama/llama-4-scout-17b-16e-instruct
 LLM (roast)  Groq llama-3.3-70b-versatile
 LLM (roles)  Groq llama-3.1-8b-instant
 STT          Groq whisper-large-v3
@@ -35,8 +35,8 @@ Video frames PyAV (in-process, no subprocess)
 Game data    IGDB (Twitch OAuth), Steam public API, psdeals.net RSS
 Media data   TMDB, AniList GraphQL, OpenCritic
 Web search   Tavily (falls back to DuckDuckGo)
-Storage      SQLite + aiosqlite (WAL mode, single shared connection)
-Hosting      VPS / Docker (800 MB mem_limit)
+Storage      PostgreSQL + asyncpg (connection pool, min 2 / max 10)
+Hosting      VPS / Docker Compose (bot + postgres containers)
 ```
 
 ## Running
@@ -50,8 +50,8 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Required env vars: `TELEGRAM_TOKEN`, `GROQ_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BOT_USERNAME`.
-Optional: `TAVILY_API_KEY`, `TMDB_API_KEY`.
+Required env vars: `TELEGRAM_TOKEN`, `GROQ_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BOT_USERNAME`, `POSTGRES_PASSWORD`.
+Optional: `DATABASE_URL` (defaults to `postgresql://chatbot:changeme@localhost:5432/chatbot`), `TAVILY_API_KEY`, `TMDB_API_KEY`.
 
 ## Deploy
 

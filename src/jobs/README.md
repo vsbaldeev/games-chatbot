@@ -25,7 +25,7 @@ roast_day = random.Random(year * 1000 + week).randint(0, 6)
 1. Fetch all chat members from chat_members table
 2. Load user_memories facts for each member
 3. Anonymise: user_0, user_1, … (real usernames never sent to LLM)
-4. LLM (llama-3.1-8b-instant) generates short role tag per anonymised key
+4. LLM (llama-3.3-70b-versatile) identifies most defining trait, generates short role tag per anonymised key
 5. Remap anon keys back to real user_ids
 6. bot.set_chat_member_tag(chat_id, user_id, tag)   — requires can_manage_tags right
 7. Announce assigned tags in chat

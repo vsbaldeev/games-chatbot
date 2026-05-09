@@ -23,8 +23,8 @@ router
     └─ other media (sticker, animation, …)  → should_respond=False
     │
     ├─ should_respond=False
-    │     ├─ text message (raw_text ≥ 20 chars) ────────────────────────────► memory_writer (passive)
-    │     └─ other / short text ────────────────────────────────────────────► END
+    │     ├─ text message (raw_text ≥ 20 chars) ─────────────────────────► extract_and_save (passive, background)
+    │     └─ other / short text ──────────────────────────────────────────► END
     │
     └─ should_respond=True
           │
@@ -117,12 +117,13 @@ router
                           ▼
                         memory_writer
                             └─ asyncio.create_task() — does NOT block reply
-                                  → llama-3.1-8b-instant extracts new facts
-                                  → upsert up to 3 facts into user_memories (cap: 10 per user)
-                            note: only runs when the bot actually replied — memory extraction
-                                  needs both sides of the exchange (user message + bot response)
-                                  to derive meaningful facts. messages the bot ignored are still
-                                  stored in unified_messages for reply-chain context.
+                                  → llama-4-scout-17b-16e-instruct extracts new facts
+                                  → upsert up to 3 facts into user_memories (cap: 20 per user)
+                                  → facts are written in the same language the user wrote in
+                                  → also extracts cross-user facts for any @mentioned users
+                            note: passive extraction also runs in router for long text messages
+                                  (≥ 20 chars) that the bot chose not to respond to — every
+                                  message contributes to memory, not just bot-addressed ones.
                           │
                           ▼
                          END

@@ -40,11 +40,21 @@ EXTRACTION_SYSTEM = (
 def _parse_facts(raw: str) -> list[str]:
     try:
         data = json.loads(raw)
-        if isinstance(data, list):
-            return [str(item).strip() for item in data if str(item).strip()]
+        if not isinstance(data, list):
+            return []
+        facts = []
+        for item in data:
+            if isinstance(item, str):
+                fact = item.strip()
+            elif isinstance(item, dict):
+                fact = next((str(value).strip() for value in item.values() if value), "")
+            else:
+                fact = str(item).strip()
+            if fact:
+                facts.append(fact)
+        return facts
     except json.JSONDecodeError:
-        pass
-    return []
+        return []
 
 
 async def extract_and_save(

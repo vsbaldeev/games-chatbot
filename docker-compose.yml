@@ -11,6 +11,8 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql
+    mem_limit: 1g
+    memswap_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chatbot -d chatbot"]
       interval: 5s

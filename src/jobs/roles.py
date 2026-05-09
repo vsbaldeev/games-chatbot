@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import json
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -13,14 +14,15 @@ from src.store.user_memories import get_facts_for_users
 
 logger = log.get_logger(__name__)
 
-TAG_MODEL = "llama-3.1-8b-instant"
+TAG_MODEL = "llama-3.3-70b-versatile"
 TAG_MAX_CHARS = 16
 
 SYSTEM_PROMPT = (
     "Ты назначаешь короткие роли участникам чата на основе фактов об их поведении. "
-    "Для каждого участника придумай короткую остроумную роль на русском языке "
-    f"(строго не длиннее {TAG_MAX_CHARS} символов включая пробелы). "
-    "Роль должна отражать личность или привычки из фактов — саркастично, но метко. "
+    "Для каждого участника найди самую характерную черту или привычку из фактов — "
+    "ту, которая лучше всего его определяет, — и придумай короткую остроумную роль "
+    f"на русском языке (строго не длиннее {TAG_MAX_CHARS} символов включая пробелы). "
+    "Роль должна быть конкретной и меткой, а не общей. "
     "Ответь строго в формате JSON: {\"user_0\": \"роль\", \"user_1\": \"роль\", ...} "
     "используя те же ключи, что и во входных данных. Без какого-либо другого текста."
 )
@@ -38,18 +40,22 @@ async def _generate_tags(username_facts: dict[str, list[str]]) -> dict[str, str]
     llm = ChatGroq(
         model=TAG_MODEL,
         api_key=config.GROQ_API_KEY,
-        temperature=0.85,
-        max_tokens=512,
+        temperature=0.5,
+        top_p=0.9,
+        max_tokens=max(512, len(username_facts) * 30),
     )
     response = await llm.ainvoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content="\n".join(user_lines)),
     ])
     try:
-        anon_tags: dict[str, str] = json.loads(response.content)
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.content.strip(), flags=re.DOTALL)
+        anon_tags = json.loads(raw)
+        if not isinstance(anon_tags, dict):
+            raise ValueError(f"Expected dict, got {type(anon_tags).__name__}")
         return {anon_to_username[anon]: tag for anon, tag in anon_tags.items() if anon in anon_to_username}
-    except Exception:
-        logger.warning("Tag generation returned non-JSON: %s", response.content[:200])
+    except Exception as error:
+        logger.warning("Tag generation returned non-JSON: %s — %s", error, response.content[:200])
         return {}
 
 
@@ -111,7 +117,7 @@ async def _run_for_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> Non
 
 
 async def weekly_roles_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    if datetime.date.today().weekday() != 6:  # 6 = Sunday
+    if datetime.datetime.now(datetime.timezone.utc).weekday() != 6:  # 6 = Sunday
         return
     chat_ids = await achievements.get_all_chat_ids()
     await asyncio.gather(

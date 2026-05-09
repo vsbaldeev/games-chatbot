@@ -16,37 +16,29 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
        auto-roast            → the offending user
 
 2. Load context
-       SQLChatMessageHistory  — last 40 messages from message_store for this chat
-       Filter to target only  — keep lines starting with "<username>:"
-       Strip noise            — drop lines that are only URLs or emojis (no real words)
-       Result: up to 40 meaningful text messages from the target, oldest first
+       user_memories — all extracted facts for the target in this chat, newest first
 
-3. Roll supportive chance
-       10% → warm supportive message ("как лучший друг")
-       90% → sarcastic roast ("стендап-комик")
-
-4. LLM call
+3. LLM call
        model:       llama-3.3-70b-versatile
-       temperature: 0.95  (high — different roast every time)
-       max_tokens:  180
-       constraint:  ≤ 2 sentences, Russian only, must mention @username
+       temperature: 0.5   (controlled — specificity beats randomness for humor)
+       top_p:       0.9
+       max_tokens:  100
+       constraint:  ≤ 2 sentences, Russian only, no joke explanation
 
-5. Fallback (no history)
-       If the target has never written a meaningful message:
-       → friendly invite message instead of a roast
+4. Fallback (no facts)
+       If the target has no stored facts:
+       → mock them for never writing anything ("@username вообще ничего не пишет в чате")
 ```
 
 ## What information the roast reads
 
 ```
-unified_messages
-    Source:  pipeline message store, keyed by (chat_id, username)
-    Content: raw message text; voice/video_note/video entries contain the Whisper
-             transcript once ingested (placeholder rows are excluded)
-    Window:  last 40 rows for the target user specifically (SQL-level filter)
-    Filter:  lines containing only URLs or emojis are stripped
-    Usage:   injected verbatim as "Последние сообщения @username в чате:"
-             — the LLM reads actual things the target said to write a personalised roast
+user_memories
+    Source:  LLM-extracted facts accumulated over time from all chat messages
+    Content: short plain-language sentences about the user, in the user's language
+    Window:  all facts for the target (max 20 stored per user per chat)
+    Usage:   injected as a bulleted list; the LLM picks the most embarrassing one
+             and crafts a single targeted joke around it
 ```
 
 ## Auto-roast detection

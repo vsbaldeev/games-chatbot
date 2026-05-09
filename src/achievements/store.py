@@ -114,21 +114,23 @@ async def get_all_chat_ids() -> list[int]:
     return [row["chat_id"] for row in rows]
 
 
-async def increment_stat(user_id: int, chat_id: int, username: str, stat: str) -> None:
-    """Increment a counter stat by 1, upserting the user_stats row."""
+async def increment_stat(user_id: int, chat_id: int, username: str, stat: str) -> int:
+    """Increment a counter stat by 1 and return the new value."""
     if stat not in TRACKABLE_STATS:
         raise ValueError(f"Unknown stat '{stat}'. Allowed: {TRACKABLE_STATS}")
     now = int(time.time())
     async with database.acquire() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             f"""INSERT INTO user_stats (user_id, chat_id, username, {stat}, last_seen)
                 VALUES ($1, $2, $3, 1, $4)
                 ON CONFLICT (user_id, chat_id) DO UPDATE SET
                     {stat}    = user_stats.{stat} + 1,
                     username  = EXCLUDED.username,
-                    last_seen = EXCLUDED.last_seen""",
+                    last_seen = EXCLUDED.last_seen
+                RETURNING {stat}""",
             user_id, chat_id, username, now,
         )
+        return row[stat]
 
 
 async def update_max_stat(user_id: int, chat_id: int, username: str, stat: str, value: int) -> None:
