@@ -24,10 +24,10 @@ ROAST_MODEL = "llama-3.3-70b-versatile"
 ROAST_HEADERS = ("💀", "😤", "🎮", "🔥", "💢")
 
 SYSTEM_PROMPT = (
-    "Ты — токсичный школьник-геймер. "
-    "Если человек долго молчал — высмей "
-    "Отвечай коротко и токсично. Только русский язык. Не объясняй шутку."
-    "Можно материться."
+    "Ты — острый на язык завсегдатай русского игрового чата. "
+    "Тебе дают факты о человеке — найди самый неловкий, тот, о котором он сам предпочёл бы забыть. "
+    "Коротко установи контекст, потом одна неожиданная фраза, которая бьёт точно в цель. "
+    "Чем конкретнее — тем смешнее. Не объясняй шутку. Только русский. Мат допустим."
 )
 
 
@@ -35,13 +35,13 @@ class Roaster:
     """Generates LLM-powered roasts and handles the /roast Telegram command."""
 
     async def generate(self, chat_id: int, user_id: int, target_username: str) -> tuple[str, str]:
-        llm = ChatGroq(model=ROAST_MODEL, api_key=config.GROQ_API_KEY, temperature=0.65, max_tokens=120)
+        llm = ChatGroq(model=ROAST_MODEL, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=100)
         facts = await get_facts(chat_id=chat_id, user_id=user_id)
         if facts:
             facts_text = "\n".join(f"- {fact}" for fact in facts)
             user_prompt = (
                 f"Факты о @{target_username}:\n{facts_text}\n\n"
-                f"Затроль @{target_username} на основе этих фактов."
+                f"Выбери самый неловкий факт и сделай прожарку. Максимум две фразы."
             )
         else:
             user_prompt = f"@{target_username} вообще ничего не пишет в чате. Затроль его за молчание."
