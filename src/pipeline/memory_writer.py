@@ -30,10 +30,21 @@ MIN_PASSIVE_LENGTH = 20
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
 EXTRACTION_SYSTEM = (
-    "You extract concise facts about a person from a single chat exchange. "
-    "Return a JSON array of short strings in the same language the user wrote in (max 15 words each). "
-    "Only include facts that are new or update existing ones. "
-    "Return [] if nothing new was learned. No explanation, no markdown — raw JSON only."
+    "Ты извлекаешь краткие факты о человеке из одного обмена сообщениями в чате. "
+    "Возвращай JSON-массив коротких строк на русском языке (не более 15 слов каждая). "
+    "Включай только факты, которых ещё нет или которые обновляют уже известные. "
+    "Если ничего нового не узнано — верни []. Без пояснений, без markdown — только сырой JSON."
+)
+
+DEDUP_SYSTEM = (
+    "Ты дедуплицируешь факты об одном человеке. "
+    "Из списка новых кандидатов оставь только те, которые добавляют действительно новую информацию, "
+    "не отражённую в уже известных фактах. "
+    "Пропускай кандидата, если он семантически эквивалентен любому из существующих фактов, "
+    "даже если сформулирован иначе. "
+    "Также убирай дубликаты внутри самих кандидатов — оставляй наиболее информативный вариант. "
+    "Возвращай принятые кандидаты как JSON-массив, сохраняя их точную исходную формулировку. "
+    "Если ничего нового нет — верни []. Без пояснений, без markdown — только сырой JSON."
 )
 
 
@@ -57,6 +68,26 @@ def _parse_facts(raw: str) -> list[str]:
         return []
 
 
+async def dedup_facts(new_facts: list[str], existing: list[str]) -> list[str]:
+    """Filter new_facts to those not semantically covered by existing facts."""
+    if not new_facts:
+        return []
+    if len(new_facts) == 1 and not existing:
+        return new_facts
+    existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
+    candidates_block = "\n".join(f"- {fact}" for fact in new_facts)
+    prompt = (
+        f"Известные факты:\n{existing_block}\n\n"
+        f"Новые кандидаты:\n{candidates_block}\n\n"
+        f"Верни только действительно новые кандидаты (JSON-массив):"
+    )
+    llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0, max_tokens=256)
+    result = await llm.ainvoke([SystemMessage(content=DEDUP_SYSTEM), HumanMessage(content=prompt)])
+    accepted = _parse_facts(result.content.strip())
+    new_facts_set = set(new_facts)
+    return [fact for fact in accepted if fact in new_facts_set]
+
+
 async def extract_and_save(
     *, chat_id: int, user_id: int, username: str, user_message: str, bot_reply: str = ""
 ) -> None:
@@ -76,6 +107,7 @@ async def extract_and_save(
         llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
         result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
         new_facts = _parse_facts(result.content.strip())
+        new_facts = await dedup_facts(new_facts, existing)
         if new_facts:
             await user_memories.upsert_facts(
                 chat_id=chat_id, user_id=user_id, username=username,
@@ -95,13 +127,14 @@ async def _extract_facts_about(
         existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
         existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
         prompt = (
-            f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
-            f"Observation by @{observer_username}: {observation}\n\n"
-            f"What does this tell us about @{username}? New facts (JSON array):"
+            f"Пользователь: @{username}\nИзвестные факты:\n{existing_block}\n\n"
+            f"Наблюдение от @{observer_username}: {observation}\n\n"
+            f"Что это говорит нам о @{username}? Новые факты (JSON-массив):"
         )
         llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
         result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
         new_facts = _parse_facts(result.content.strip())
+        new_facts = await dedup_facts(new_facts, existing)
         if new_facts:
             await user_memories.upsert_facts(
                 chat_id=chat_id, user_id=user_id, username=username,

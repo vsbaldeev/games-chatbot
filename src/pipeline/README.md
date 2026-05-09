@@ -119,7 +119,7 @@ router
                             └─ asyncio.create_task() — does NOT block reply
                                   → llama-4-scout-17b-16e-instruct extracts new facts
                                   → upsert up to 3 facts into user_memories (cap: 20 per user)
-                                  → facts are written in the same language the user wrote in
+                                  → facts are always written in Russian
                                   → also extracts cross-user facts for any @mentioned users
                             note: passive extraction also runs in router for long text messages
                                   (≥ 20 chars) that the bot chose not to respond to — every

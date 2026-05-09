@@ -48,6 +48,43 @@ WHISPER_TIMEOUT = 60.0   # seconds; Groq Whisper usually responds in 2–15 s
 WHISPER_RETRIES = 2
 
 
+async def transcribe_bytes(audio_bytes: bytes, media_type: str, filename: str = "") -> str:
+    """Transcribe raw audio bytes via Groq Whisper with retries."""
+    if not filename:
+        filename = "voice.ogg" if media_type == "voice" else "video_note.mp4"
+    client = AsyncGroq(api_key=config.GROQ_API_KEY, timeout=WHISPER_TIMEOUT)
+    last_err: Exception | None = None
+    for attempt in range(WHISPER_RETRIES + 1):
+        try:
+            result = await client.audio.transcriptions.create(
+                file=(filename, audio_bytes),
+                model=WHISPER_MODEL,
+            )
+            return result.text.strip()
+        except Exception as err:
+            last_err = err
+            if attempt < WHISPER_RETRIES:
+                logger.warning("Transcription attempt %d failed, retrying: %s", attempt + 1, err)
+                await asyncio.sleep(2 ** attempt)
+    logger.error("Transcription failed after %d attempts: %s", WHISPER_RETRIES + 1, last_err)
+    return ""
+
+
+async def transcribe_voice(file_id: str, media_type: str, bot) -> str:
+    """Download a voice or video_note file and return its Whisper transcript."""
+    try:
+        filename = "voice.ogg" if media_type == "voice" else "video_note.mp4"
+        tg_file = await bot.get_file(file_id)
+        buffer = io.BytesIO()
+        await tg_file.download_to_memory(buffer)
+        buffer.seek(0)
+        audio_bytes = buffer.read()
+    except Exception as err:
+        logger.error("Transcription download failed for %s: %s", file_id, err)
+        return ""
+    return await transcribe_bytes(audio_bytes, media_type, filename)
+
+
 async def describe_photo(file_id: str, bot) -> str:
     """Download a Telegram photo and return a one-sentence Russian description via vision LLM."""
     try:
@@ -111,18 +148,7 @@ class MessageIngester:
         return {"incoming": incoming_update}
 
     async def __transcribe(self, file_id: str, media_type: str, bot) -> str:
-        try:
-            filename = "voice.ogg" if media_type == "voice" else "video.mp4"
-            tg_file = await bot.get_file(file_id)
-            buffer = io.BytesIO()
-            await tg_file.download_to_memory(buffer)
-            buffer.seek(0)
-            audio_bytes = buffer.read()
-        except Exception as err:
-            logger.error("Transcription download failed for file %s: %s", file_id, err)
-            return ""
-
-        return await self.__transcribe_bytes(audio_bytes, media_type, filename)
+        return await transcribe_voice(file_id, media_type, bot)
 
     async def __transcribe_with_frames(self, file_id: str, media_type: str, bot) -> str:
         try:
@@ -135,7 +161,7 @@ class MessageIngester:
             return ""
 
         transcript, frame_descriptions = await asyncio.gather(
-            self.__transcribe_bytes(video_bytes, media_type),
+            transcribe_bytes(video_bytes, media_type),
             self.__extract_and_describe_frames(video_bytes),
         )
 
@@ -147,26 +173,6 @@ class MessageIngester:
             parts.append(f"[Видео {index}/{total}]: {description}")
 
         return "\n".join(parts)
-
-    async def __transcribe_bytes(self, audio_bytes: bytes, media_type: str, filename: str = "") -> str:
-        if not filename:
-            filename = "video_note.mp4" if media_type == "video_note" else "video.mp4"
-        client = AsyncGroq(api_key=config.GROQ_API_KEY, timeout=WHISPER_TIMEOUT)
-        last_err: Exception | None = None
-        for attempt in range(WHISPER_RETRIES + 1):
-            try:
-                transcription = await client.audio.transcriptions.create(
-                    file=(filename, audio_bytes),
-                    model=WHISPER_MODEL,
-                )
-                return transcription.text.strip()
-            except Exception as err:
-                last_err = err
-                if attempt < WHISPER_RETRIES:
-                    logger.warning("Transcription attempt %d failed, retrying: %s", attempt + 1, err)
-                    await asyncio.sleep(2 ** attempt)
-        logger.error("Transcription failed after %d attempts: %s", WHISPER_RETRIES + 1, last_err)
-        return ""
 
     async def __extract_and_describe_frames(self, video_bytes: bytes) -> list[str]:
         loop = asyncio.get_event_loop()

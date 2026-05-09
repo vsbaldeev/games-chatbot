@@ -7,10 +7,14 @@ from src import log
 from telegram import Update
 from telegram.ext import ContextTypes
 
+import asyncio
+
 from src import achievements, config
 from src.agent import agent, DailyLimitError, RateLimitError
 from src.achievements import notify_unlocks
 from src.events.members import get_username
+from src.pipeline.ingester import transcribe_voice
+from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.store.user_memories import upsert_stat_fact
 
 OFFENSE_RE = re.compile(
@@ -109,7 +113,8 @@ async def run_pipeline(
     context: ContextTypes.DEFAULT_TYPE,
     media_type: str,
     file_id: str | None = None,
-) -> None:
+) -> bool:
+    """Run the LangGraph pipeline and return True if the bot sent a response."""
     msg = update.message
     chat = update.effective_chat
     initial_state = build_pipeline_state(update, context, media_type, file_id)
@@ -125,6 +130,7 @@ async def run_pipeline(
             else:
                 await msg.chat.send_action("typing")
                 await msg.reply_text(strip_markdown(response))
+            return True
     except DailyLimitError:
         logger.warning("Daily token quota exhausted for chat %s", chat.id)
         await msg.reply_text(
@@ -141,6 +147,19 @@ async def run_pipeline(
         logger.error("Pipeline error for chat %s: %s", chat.id, error)
         await msg.reply_text(
             "Что-то сломалось. Скорее всего, Groq опять тупит. Попробуй позже."
+        )
+    return False
+
+
+async def passive_voice_extract(
+    *, file_id: str, media_type: str, bot,
+    chat_id: int, user_id: int, username: str,
+) -> None:
+    transcript = await transcribe_voice(file_id, media_type, bot)
+    if transcript and len(transcript.strip()) >= MIN_PASSIVE_LENGTH:
+        await extract_and_save(
+            chat_id=chat_id, user_id=user_id, username=username,
+            user_message=transcript,
         )
 
 
@@ -237,7 +256,12 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await notify_unlocks(context, chat_id, user_id, username)
-    await run_pipeline(update, context, media_type=media_type, file_id=file_id)
+    responded = await run_pipeline(update, context, media_type=media_type, file_id=file_id)
+    if not responded:
+        asyncio.create_task(passive_voice_extract(
+            file_id=file_id, media_type=media_type, bot=context.bot,
+            chat_id=chat_id, user_id=user_id, username=username,
+        ))
 
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
