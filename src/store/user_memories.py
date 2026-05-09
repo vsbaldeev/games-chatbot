@@ -16,7 +16,7 @@ import time
 
 from src.store import db as database
 
-MAX_FACTS_PER_USER = 20
+MAX_FACTS_PER_USER = 30
 
 STAT_FACT_TEMPLATES: dict[str, str] = {
     "photo_messages":     "Отправил {count} фото в чате",
