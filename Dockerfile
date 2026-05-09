@@ -11,6 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Non-root user for the process; /data will be the volume mount for SQLite
 RUN useradd --no-create-home --shell /bin/false botuser \
