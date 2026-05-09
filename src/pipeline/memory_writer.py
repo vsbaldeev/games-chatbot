@@ -23,7 +23,7 @@ from src.store import user_memories
 
 logger = log.get_logger(__name__)
 
-MEMORY_MODEL = "llama-3.1-8b-instant"
+MEMORY_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 MAX_NEW_FACTS = 3
 MIN_PASSIVE_LENGTH = 20
 
