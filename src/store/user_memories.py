@@ -16,7 +16,7 @@ import time
 
 from src.store import db as database
 
-MAX_FACTS_PER_USER = 10
+MAX_FACTS_PER_USER = 20
 
 
 async def init_table() -> None:

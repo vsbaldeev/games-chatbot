@@ -6,7 +6,6 @@ Module-level wrappers preserve the public API that bot.py and handlers.py import
 """
 
 import random
-import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -16,7 +15,7 @@ from telegram.ext import ContextTypes
 from src import achievements, config, log
 from src.achievements import notify_unlocks
 from src.agent import apply_language_correction
-from src.store import unified_messages
+from src.store.user_memories import get_facts
 
 logger = log.get_logger(__name__)
 
@@ -31,26 +30,21 @@ SYSTEM_PROMPT = (
     "Можно материться."
 )
 
-URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-EMOJI_RE = re.compile(
-    "[\U0001F300-\U0001F9FF\U00002600-\U000027FF\U0001FA00-\U0001FAFF]",
-    re.UNICODE,
-)
-
 
 class Roaster:
     """Generates LLM-powered roasts and handles the /roast Telegram command."""
 
     async def generate(self, chat_id: int, user_id: int, target_username: str) -> tuple[str, str]:
-        llm = ChatGroq(model=ROAST_MODEL, api_key=config.GROQ_API_KEY, temperature=0.95, max_tokens=120)
-        history_text = await self.__get_user_history_text(chat_id, target_username)
-        if history_text:
+        llm = ChatGroq(model=ROAST_MODEL, api_key=config.GROQ_API_KEY, temperature=0.65, max_tokens=120)
+        facts = await get_facts(chat_id=chat_id, user_id=user_id)
+        if facts:
+            facts_text = "\n".join(f"- {fact}" for fact in facts)
             user_prompt = (
-                f"Сообщения @{target_username} в чате:\n{history_text}\n\n"
-                f"Затролли @{target_username} по его же сообщениям."
+                f"Факты о @{target_username}:\n{facts_text}\n\n"
+                f"Затроль @{target_username} на основе этих фактов."
             )
         else:
-            user_prompt = f"@{target_username} вообще ничего не пишет в чате. Затролли его за молчание."
+            user_prompt = f"@{target_username} вообще ничего не пишет в чате. Затроль его за молчание."
         header = random.choice(ROAST_HEADERS)
         response = await self.__invoke(llm, SYSTEM_PROMPT, user_prompt)
         return header, response.content
@@ -80,17 +74,6 @@ class Roaster:
             await update.message.reply_text(
                 "Прожарка не задалась. Groq на перекуре — попробуй позже."
             )
-
-    async def __get_user_history_text(self, chat_id: int, username: str) -> str:
-        messages = await unified_messages.get_user_messages(chat_id=chat_id, username=username, limit=40)
-        meaningful = [msg for msg in messages if self.__is_meaningful(msg)]
-        return "\n".join(meaningful)
-
-    @staticmethod
-    def __is_meaningful(text: str) -> bool:
-        stripped = URL_RE.sub("", text)
-        stripped = EMOJI_RE.sub("", stripped).strip()
-        return bool(stripped)
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ MessageRouter — first node in the LangGraph pipeline.
 Responsibilities:
   1. Persist every incoming message to unified_messages (as text or placeholder).
   2. Decide whether the bot should respond (sets should_respond).
+  3. Fire passive memory extraction for long plain-text messages that won't get a response.
 
 Respond when:
   - The bot is @mentioned in the text / caption.
@@ -11,10 +12,12 @@ Respond when:
   - Random chance fires for voice/video_note/video/photo (25%).
 """
 
+import asyncio
 import random
-from src import log
 from typing import Any
 
+from src import log
+from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
 
@@ -38,6 +41,17 @@ class MessageRouter:
         await self.__store_message(msg)
 
         should_respond, response_trigger = self.__decide(msg, message)
+
+        if not should_respond and msg["media_type"] == "text":
+            text = msg["raw_text"] or ""
+            if len(text.strip()) >= MIN_PASSIVE_LENGTH:
+                asyncio.create_task(extract_and_save(
+                    chat_id=msg["chat_id"],
+                    user_id=msg["user_id"],
+                    username=msg["username"],
+                    user_message=text,
+                ))
+
         return {"should_respond": should_respond, "response_trigger": response_trigger}
 
     async def __store_message(self, msg: IncomingMessage) -> None:
