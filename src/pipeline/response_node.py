@@ -18,7 +18,7 @@ RECENT_FILL_LIMIT = 10
 def build_history(chat_id: str) -> SQLChatMessageHistory:
     return SQLChatMessageHistory(
         session_id=chat_id,
-        connection=config.SQLITE_DB_URL,
+        connection=config.SQLALCHEMY_DB_URL,
         table_name="message_store",
     )
 

@@ -8,8 +8,8 @@ def setup() -> None:
     logging.basicConfig(level=level, format=fmt)
     for noisy in ("httpx", "httpcore", "telegram.ext.ExtBot"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    aiosqlite_level = logging.getLevelName(os.getenv("AIOSQLITE_LOG_LEVEL", "WARNING").upper())
-    logging.getLogger("aiosqlite").setLevel(aiosqlite_level)
+    asyncpg_level = logging.getLevelName(os.getenv("ASYNCPG_LOG_LEVEL", "WARNING").upper())
+    logging.getLogger("asyncpg").setLevel(asyncpg_level)
     tg_app_level = logging.getLevelName(os.getenv("TELEGRAM_APP_LOG_LEVEL", "WARNING").upper())
     logging.getLogger("telegram.ext.Application").setLevel(tg_app_level)
     tg_updater_level = logging.getLevelName(os.getenv("TELEGRAM_UPDATER_LOG_LEVEL", "INFO").upper())

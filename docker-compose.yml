@@ -1,18 +1,34 @@
 services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: chatbot
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbot -d chatbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   bot:
     build: .
     image: games-chatbot
     restart: unless-stopped
     env_file: .env
     environment:
-      # Override the default relative path so the DB lands on the named volume
-      SQLITE_DB_PATH: /data/chat_history.db
+      DATABASE_URL: postgresql://chatbot:${POSTGRES_PASSWORD}@postgres:5432/chatbot
       LOG_LEVEL: INFO
-      AIOSQLITE_LOG_LEVEL: WARNING
+      ASYNCPG_LOG_LEVEL: WARNING
       TELEGRAM_APP_LOG_LEVEL: WARNING
       TELEGRAM_UPDATER_LOG_LEVEL: WARNING
-    volumes:
-      - db-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     mem_limit: 800m
     memswap_limit: 800m
     logging:
@@ -22,4 +38,4 @@ services:
         max-file: "3"
 
 volumes:
-  db-data:
+  pg-data:

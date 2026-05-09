@@ -21,8 +21,14 @@ TWITCH_CLIENT_ID: str = __require("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET: str = __require("TWITCH_CLIENT_SECRET")
 BOT_USERNAME: str = __require("BOT_USERNAME")
 
-SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "data/chat_history.db")
-SQLITE_DB_URL: str = f"sqlite:///{SQLITE_DB_PATH}"
+DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://chatbot:changeme@localhost:5432/chatbot")
+# SQLAlchemy sync URL for LangChain (psycopg2 driver)
+SQLALCHEMY_DB_URL: str = (
+    DATABASE_URL
+    .replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    .replace("postgresql://", "postgresql+psycopg2://")
+    .replace("postgres://", "postgresql+psycopg2://")
+)
 MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 
 # Optional — leave empty to disable the respective service
