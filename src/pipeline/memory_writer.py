@@ -190,6 +190,9 @@ class MemoryWriter:
         response = state.get("response") or ""
         user_message = msg["processed_text"] or msg["raw_text"] or ""
 
+        if msg.get("is_forwarded"):
+            return {}
+
         passive = not response.strip()
         if passive and len(user_message.strip()) < MIN_PASSIVE_LENGTH:
             return {}

@@ -23,6 +23,7 @@ class IncomingMessage(TypedDict):
     message_id: int
     reply_to_msg_id: int | None
     file_id: str | None           # Telegram file_id for voice / photo messages
+    is_forwarded: bool
 
 
 class AssembledContext(TypedDict):

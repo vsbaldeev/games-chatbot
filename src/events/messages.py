@@ -95,6 +95,7 @@ def build_pipeline_state(
         "message_id": msg.message_id,
         "reply_to_msg_id": reply_to_msg_id,
         "file_id": file_id,
+        "is_forwarded": msg.forward_origin is not None,
     }
     return {
         "incoming": incoming,
