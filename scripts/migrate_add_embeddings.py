@@ -60,6 +60,7 @@ async def run() -> None:
         print("ERROR: DATABASE_URL not set.", file=sys.stderr)
         sys.exit(1)
     conn = await asyncpg.connect(database_url)
+    await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     await register_vector(conn)
     model = TextEmbedding(MODEL_NAME, cache_dir=CACHE_DIR)
     await apply_schema(conn)
