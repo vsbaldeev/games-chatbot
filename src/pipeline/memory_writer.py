@@ -17,6 +17,7 @@ of inserting a new row.
 import asyncio
 import json
 import re
+from collections import defaultdict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -28,6 +29,10 @@ from src.store import embedder, user_memories
 logger = log.get_logger(__name__)
 
 MEMORY_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+# Serialises concurrent _dedup_and_save calls for the same user so that the
+# check-then-insert window cannot be observed by a second concurrent task.
+user_dedup_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
 MAX_NEW_FACTS = 3
 MIN_PASSIVE_LENGTH = 20
 SIMILARITY_THRESHOLD = 0.85
@@ -89,6 +94,13 @@ async def _dedup_and_save(
 ) -> None:
     if not new_facts:
         return
+    async with user_dedup_locks[(chat_id, user_id)]:
+        await _check_and_insert(chat_id=chat_id, user_id=user_id, username=username, new_facts=new_facts)
+
+
+async def _check_and_insert(
+    *, chat_id: int, user_id: int, username: str, new_facts: list[str]
+) -> None:
     to_insert_facts: list[str] = []
     to_insert_embeddings: list[list[float]] = []
     for fact in new_facts[:MAX_NEW_FACTS]:
