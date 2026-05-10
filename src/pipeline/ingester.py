@@ -114,6 +114,55 @@ async def describe_photo(file_id: str, bot) -> str:
         return ""
 
 
+async def describe_frame(frame_bytes: bytes) -> str:
+    b64_image = base64.b64encode(frame_bytes).decode()
+    llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100)
+    response = await llm.ainvoke([
+        HumanMessage(content=[
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
+            {"type": "text", "text": VISION_PROMPT},
+        ]),
+    ])
+    return response.content.strip()
+
+
+async def extract_and_describe_frames(video_bytes: bytes) -> list[str]:
+    loop = asyncio.get_event_loop()
+    try:
+        frames = await loop.run_in_executor(None, extract_frames_sync, video_bytes)
+    except Exception as err:
+        logger.warning("Frame extraction failed: %s", err)
+        return []
+    descriptions = await asyncio.gather(
+        *[describe_frame(frame) for frame in frames],
+        return_exceptions=True,
+    )
+    return [desc for desc in descriptions if isinstance(desc, str) and desc]
+
+
+async def transcribe_video(file_id: str, media_type: str, bot) -> str:
+    """Download a video/video_note, transcribe audio and describe frames."""
+    try:
+        tg_file = await bot.get_file(file_id)
+        buffer = io.BytesIO()
+        await tg_file.download_to_memory(buffer)
+        video_bytes = buffer.getvalue()
+    except Exception as err:
+        logger.error("Video download failed for file %s: %s", file_id, err)
+        return ""
+    transcript, frame_descriptions = await asyncio.gather(
+        transcribe_bytes(video_bytes, media_type),
+        extract_and_describe_frames(video_bytes),
+    )
+    parts = []
+    if transcript:
+        parts.append(f"[Аудио]: {transcript}")
+    total = len(frame_descriptions)
+    for index, description in enumerate(frame_descriptions, start=1):
+        parts.append(f"[Видео {index}/{total}]: {description}")
+    return "\n".join(parts)
+
+
 class MessageIngester:
     """Converts media messages to text and updates the unified_messages store."""
 
@@ -125,11 +174,11 @@ class MessageIngester:
         if media_type == "text":
             processed = msg["raw_text"] or ""
         elif media_type == "voice":
-            processed = await self.__transcribe(msg["file_id"], "voice", bot)
+            processed = await transcribe_voice(msg["file_id"], "voice", bot)
         elif media_type in ("video_note", "video"):
-            processed = await self.__transcribe_with_frames(msg["file_id"], media_type, bot)
+            processed = await transcribe_video(msg["file_id"], media_type, bot)
         elif media_type == "photo":
-            processed = await self.__describe_photo(msg["file_id"], bot)
+            processed = await describe_photo(msg["file_id"], bot)
         else:
             processed = msg["raw_text"] or ""
 
@@ -146,67 +195,6 @@ class MessageIngester:
         incoming_update = dict(state["incoming"])
         incoming_update["processed_text"] = processed
         return {"incoming": incoming_update}
-
-    async def __transcribe(self, file_id: str, media_type: str, bot) -> str:
-        return await transcribe_voice(file_id, media_type, bot)
-
-    async def __transcribe_with_frames(self, file_id: str, media_type: str, bot) -> str:
-        try:
-            tg_file = await bot.get_file(file_id)
-            buffer = io.BytesIO()
-            await tg_file.download_to_memory(buffer)
-            video_bytes = buffer.getvalue()
-        except Exception as err:
-            logger.error("Video download failed for file %s: %s", file_id, err)
-            return ""
-
-        transcript, frame_descriptions = await asyncio.gather(
-            transcribe_bytes(video_bytes, media_type),
-            self.__extract_and_describe_frames(video_bytes),
-        )
-
-        parts = []
-        if transcript:
-            parts.append(f"[Аудио]: {transcript}")
-        total = len(frame_descriptions)
-        for index, description in enumerate(frame_descriptions, start=1):
-            parts.append(f"[Видео {index}/{total}]: {description}")
-
-        return "\n".join(parts)
-
-    async def __extract_and_describe_frames(self, video_bytes: bytes) -> list[str]:
-        loop = asyncio.get_event_loop()
-        try:
-            frames = await loop.run_in_executor(None, extract_frames_sync, video_bytes)
-        except Exception as err:
-            logger.warning("Frame extraction failed: %s", err)
-            return []
-
-        descriptions = await asyncio.gather(
-            *[self.__describe_frame(frame) for frame in frames],
-            return_exceptions=True,
-        )
-        return [desc for desc in descriptions if isinstance(desc, str) and desc]
-
-    async def __describe_frame(self, frame_bytes: bytes) -> str:
-        b64_image = base64.b64encode(frame_bytes).decode()
-        image_url = f"data:image/jpeg;base64,{b64_image}"
-        llm = ChatGroq(
-            model=VISION_MODEL,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.1,
-            max_tokens=100,
-        )
-        response = await llm.ainvoke([
-            HumanMessage(content=[
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": VISION_PROMPT},
-            ]),
-        ])
-        return response.content.strip()
-
-    async def __describe_photo(self, file_id: str, bot) -> str:
-        return await describe_photo(file_id, bot)
 
 
 def extract_frames_sync(video_bytes: bytes) -> list[bytes]:

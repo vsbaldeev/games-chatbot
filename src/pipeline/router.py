@@ -42,7 +42,7 @@ class MessageRouter:
 
         should_respond, response_trigger = self.__decide(msg, message)
 
-        if not should_respond and msg["media_type"] == "text":
+        if not should_respond and not msg.get("is_forwarded") and msg["media_type"] == "text":
             text = msg["raw_text"] or ""
             if len(text.strip()) >= MIN_PASSIVE_LENGTH:
                 asyncio.create_task(extract_and_save(
@@ -66,7 +66,7 @@ class MessageRouter:
         elif media_type == "video":
             content = unified_messages.VIDEO_PLACEHOLDER
         elif media_type == "photo":
-            content = unified_messages.PHOTO_PLACEHOLDER
+            content = msg["raw_text"] or unified_messages.PHOTO_PLACEHOLDER
         else:
             content = ""
 

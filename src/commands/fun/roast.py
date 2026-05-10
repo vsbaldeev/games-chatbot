@@ -55,6 +55,8 @@ class Roaster:
         return await apply_language_correction(llm, response, messages)
 
     async def cmd_roast(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message:
+            return
         chat_id = update.effective_chat.id
         members = await achievements.get_chat_members(chat_id)
         if not members:

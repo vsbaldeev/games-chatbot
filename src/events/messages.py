@@ -238,6 +238,10 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
+        if msg.voice:
+            await run_pipeline(update, context, media_type="voice", file_id=msg.voice.file_id)
+        elif msg.video_note:
+            await run_pipeline(update, context, media_type="video_note", file_id=msg.video_note.file_id)
         return
 
     if msg.voice:
@@ -272,15 +276,15 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
+    photo = msg.photo[-1]
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
         return
 
     await achievements.increment_stat(user_id, chat_id, username, "photo_messages")
     await notify_unlocks(context, chat_id, user_id, username)
-
-    photo = msg.photo[-1]
     await run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
 
 
@@ -334,6 +338,7 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)
         return
     await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await notify_unlocks(context, chat_id, user_id, username)

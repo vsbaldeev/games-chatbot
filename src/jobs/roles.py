@@ -7,6 +7,7 @@ import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
@@ -89,10 +90,13 @@ async def _assign_tags_for_chat(
                 chat_id=chat_id, user_id=user_id, tag=tag
             )
             assigned[username] = tag
+        except BadRequest as error:
+            if "Chat_creator_required" in str(error):
+                logger.debug("set_chat_member_tag skipped for chat %s: bot is not creator", chat_id)
+            else:
+                logger.warning("Failed to set tag for %s in chat %s: %s", username, chat_id, error)
         except Exception as error:
-            logger.warning(
-                "Failed to set tag for %s in chat %s: %s", username, chat_id, error
-            )
+            logger.warning("Failed to set tag for %s in chat %s: %s", username, chat_id, error)
 
     return assigned
 

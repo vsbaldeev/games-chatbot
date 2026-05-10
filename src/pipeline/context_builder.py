@@ -9,10 +9,15 @@ Assembles everything the Agent node needs for an enriched prompt:
 
 from src import log
 
-from src.pipeline.ingester import describe_photo
+from src.pipeline.ingester import describe_photo, transcribe_voice, transcribe_video
 from src.pipeline.state import AssembledContext, BotState
 from src.store import unified_messages, user_memories
-from src.store.unified_messages import PHOTO_PLACEHOLDER
+from src.store.unified_messages import (
+    PHOTO_PLACEHOLDER,
+    VOICE_PLACEHOLDER,
+    VIDEO_NOTE_PLACEHOLDER,
+    VIDEO_PLACEHOLDER,
+)
 
 logger = log.get_logger(__name__)
 
@@ -57,21 +62,37 @@ class ContextBuilder:
 
         return chain, user_facts
 
-    async def __enrich_chain_photos(
+    async def __enrich_row(self, row: dict, bot) -> str:
+        content = row["content"]
+        file_id = row.get("file_id")
+        if not file_id:
+            return content
+        try:
+            if content == PHOTO_PLACEHOLDER:
+                return await describe_photo(file_id, bot) or content
+            if content == VOICE_PLACEHOLDER:
+                return await transcribe_voice(file_id, "voice", bot) or content
+            if content == VIDEO_NOTE_PLACEHOLDER:
+                return await transcribe_video(file_id, "video_note", bot) or content
+            if content == VIDEO_PLACEHOLDER:
+                return await transcribe_video(file_id, "video", bot) or content
+        except Exception as err:
+            logger.warning("Media enrichment failed for message %s: %s", row["message_id"], err)
+        return content
+
+    async def __enrich_chain_media(
         self, chain: list[dict], chat_id: int, bot
     ) -> list[dict]:
-        """Lazily describe any photo placeholders found in the reply chain."""
         enriched = []
         for row in chain:
-            if row["content"] == PHOTO_PLACEHOLDER and row.get("file_id"):
-                description = await describe_photo(row["file_id"], bot)
-                if description:
-                    await unified_messages.update_content(
-                        chat_id=chat_id,
-                        message_id=row["message_id"],
-                        content=description,
-                    )
-                    row = {**row, "content": description}
+            new_content = await self.__enrich_row(row, bot)
+            if new_content != row["content"]:
+                await unified_messages.update_content(
+                    chat_id=chat_id,
+                    message_id=row["message_id"],
+                    content=new_content,
+                )
+                row = {**row, "content": new_content}
             enriched.append(row)
         return enriched
 
@@ -86,7 +107,7 @@ class ContextBuilder:
             msg["user_id"],
             msg["username"],
         )
-        chain = await self.__enrich_chain_photos(chain, chat_id, bot)
+        chain = await self.__enrich_chain_media(chain, chat_id, bot)
 
         recent = await unified_messages.get_recent(
             chat_id=chat_id,

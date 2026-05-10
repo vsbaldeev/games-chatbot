@@ -10,6 +10,8 @@ logger = log.get_logger(__name__)
 
 
 async def cmd_meme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
     chat_id = update.effective_chat.id
     await update.message.chat.send_action("upload_photo")
     result = await get_meme(chat_id)
