@@ -15,7 +15,6 @@ from src.achievements import notify_unlocks
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
-from src.store.user_memories import upsert_stat_fact
 
 OFFENSE_RE = re.compile(
     r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
@@ -178,8 +177,7 @@ async def track_text_stats(
     if URL_RE.search(text):
         await achievements.increment_stat(user_id, chat_id, username, "link_messages")
     if update.message.forward_origin is not None:
-        count = await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="forwarded_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
     await achievements.update_max_stat(user_id, chat_id, username, "long_message_max", len(text))
     await notify_unlocks(context, chat_id, user_id, username)
 
@@ -237,16 +235,14 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     logger.info("Voice/video_note from @%s in chat %s", username, chat_id)
 
     if msg.forward_origin is not None:
-        count = await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="forwarded_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
         return
 
     if msg.voice:
         media_type = "voice"
         file_id = msg.voice.file_id
-        count = await achievements.increment_stat(user_id, chat_id, username, "voice_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="voice_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "voice_messages")
         await achievements.update_max_stat(user_id, chat_id, username, "voice_max_duration", msg.voice.duration)
     elif msg.video_note:
         media_type = "video_note"
@@ -276,13 +272,11 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     chat_id = update.effective_chat.id
 
     if msg.forward_origin is not None:
-        count = await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="forwarded_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
         return
 
-    count = await achievements.increment_stat(user_id, chat_id, username, "photo_messages")
-    await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="photo_messages", count=count)
+    await achievements.increment_stat(user_id, chat_id, username, "photo_messages")
     await notify_unlocks(context, chat_id, user_id, username)
 
     photo = msg.photo[-1]
@@ -299,8 +293,7 @@ async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     if msg.forward_origin is not None:
-        count = await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="forwarded_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
         return
     await achievements.increment_stat(user_id, chat_id, username, "sticker_messages")
@@ -317,8 +310,7 @@ async def handle_animation_message(update: Update, context: ContextTypes.DEFAULT
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     if msg.forward_origin is not None:
-        count = await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="forwarded_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
         return
     await achievements.increment_stat(user_id, chat_id, username, "animation_messages")
@@ -339,11 +331,9 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     if msg.forward_origin is not None:
-        count = await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="forwarded_messages", count=count)
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
         return
-    count = await achievements.increment_stat(user_id, chat_id, username, "video_messages")
-    await upsert_stat_fact(chat_id=chat_id, user_id=user_id, username=username, stat="video_messages", count=count)
+    await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await notify_unlocks(context, chat_id, user_id, username)
     await run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)
