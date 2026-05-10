@@ -47,16 +47,15 @@ async def check_new_achievements(user_id: int, chat_id: int, username: str) -> l
 
 async def check_silence_achievements(user_id: int, chat_id: int, username: str) -> list[Achievement]:
     """Return the next unawarded silence achievement (at most one per call) and mark it announced."""
-    db = await database.get()
-    cursor = await db.execute(
-        "SELECT last_seen FROM user_stats WHERE user_id = ? AND chat_id = ?",
-        (user_id, chat_id),
-    )
-    row = await cursor.fetchone()
-    if not row or row[0] == 0:
+    async with database.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT last_seen FROM user_stats WHERE user_id = $1 AND chat_id = $2",
+            user_id, chat_id,
+        )
+    if not row or row["last_seen"] == 0:
         return []
 
-    elapsed_days = (time.time() - row[0]) / 86400
+    elapsed_days = (time.time() - row["last_seen"]) / 86400
     for days, key in SILENCE_THRESHOLDS:
         if elapsed_days < days:
             break
