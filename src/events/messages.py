@@ -313,9 +313,11 @@ async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_T
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="sticker", file_id=msg.sticker.file_id)
         return
     await achievements.increment_stat(user_id, chat_id, username, "sticker_messages")
     await notify_unlocks(context, chat_id, user_id, username)
+    await run_pipeline(update, context, media_type="sticker", file_id=msg.sticker.file_id)
 
 
 async def handle_animation_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -330,13 +332,28 @@ async def handle_animation_message(update: Update, context: ContextTypes.DEFAULT
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
         await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="animation", file_id=msg.animation.file_id)
         return
     await achievements.increment_stat(user_id, chat_id, username, "animation_messages")
     await notify_unlocks(context, chat_id, user_id, username)
+    await run_pipeline(update, context, media_type="animation", file_id=msg.animation.file_id)
 
 
 async def handle_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    pass
+    msg = update.message
+    if not msg or not msg.audio:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
+        return
+    await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
 
 
 async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

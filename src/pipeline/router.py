@@ -67,6 +67,12 @@ class MessageRouter:
             content = unified_messages.VIDEO_PLACEHOLDER
         elif media_type == "photo":
             content = msg["raw_text"] or unified_messages.PHOTO_PLACEHOLDER
+        elif media_type == "sticker":
+            content = unified_messages.STICKER_PLACEHOLDER
+        elif media_type == "animation":
+            content = unified_messages.ANIMATION_PLACEHOLDER
+        elif media_type == "audio":
+            content = unified_messages.AUDIO_PLACEHOLDER
         else:
             content = ""
 

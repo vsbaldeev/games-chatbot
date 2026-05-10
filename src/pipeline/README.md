@@ -42,7 +42,7 @@ incoming message
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
     │     └─ otherwise               → random.random() < 0.25
     │
-    └─ other (sticker, animation, …) → should_respond=False
+    └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
     │
     ├─ should_respond=False + non-forwarded text (≥ 20 chars)
     │       → asyncio.create_task(extract_and_save)   [passive memory, background]
