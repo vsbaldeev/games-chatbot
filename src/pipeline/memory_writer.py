@@ -8,6 +8,10 @@ Runs in two modes:
 The module-level extract_and_save is also called directly from the router
 for plain text messages that don't trigger a bot response.
 Cross-user facts are extracted automatically when @mentions are present.
+
+Deduplication uses cosine similarity between fastembed vectors rather than
+LLM judgement. A duplicate refreshes the existing fact's updated_at instead
+of inserting a new row.
 """
 
 import asyncio
@@ -19,13 +23,14 @@ from langchain_groq import ChatGroq
 
 from src import achievements, config, log
 from src.pipeline.state import BotState
-from src.store import user_memories
+from src.store import embedder, user_memories
 
 logger = log.get_logger(__name__)
 
 MEMORY_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 MAX_NEW_FACTS = 3
 MIN_PASSIVE_LENGTH = 20
+SIMILARITY_THRESHOLD = 0.85
 
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
@@ -33,18 +38,11 @@ EXTRACTION_SYSTEM = (
     "Ты извлекаешь краткие факты о человеке из одного обмена сообщениями в чате. "
     "Возвращай JSON-массив коротких строк на русском языке (не более 15 слов каждая). "
     "Включай только факты, которых ещё нет или которые обновляют уже известные. "
-    "Если ничего нового не узнано — верни []. Без пояснений, без markdown — только сырой JSON."
-)
-
-DEDUP_SYSTEM = (
-    "Ты дедуплицируешь факты об одном человеке. "
-    "Из списка новых кандидатов оставь только те, которые добавляют действительно новую информацию, "
-    "не отражённую в уже известных фактах. "
-    "Пропускай кандидата, если он семантически эквивалентен любому из существующих фактов, "
-    "даже если сформулирован иначе. "
-    "Также убирай дубликаты внутри самих кандидатов — оставляй наиболее информативный вариант. "
-    "Возвращай принятые кандидаты как JSON-массив, сохраняя их точную исходную формулировку. "
-    "Если ничего нового нет — верни []. Без пояснений, без markdown — только сырой JSON."
+    "Извлекай только отличительные факты — то, что выделяет этого человека среди других: "
+    "игровые предпочтения, привычки, мнения, события, достижения, странности. "
+    "Пропускай очевидное и универсальное: язык общения, использование эмодзи, наличие телефона, "
+    "написание сообщений — это справедливо для всех участников чата и бесполезно. "
+    "Если ничего отличительного не узнано — верни []. Без пояснений, без markdown — только сырой JSON."
 )
 
 
@@ -68,24 +66,48 @@ def _parse_facts(raw: str) -> list[str]:
         return []
 
 
-async def dedup_facts(new_facts: list[str], existing: list[str]) -> list[str]:
-    """Filter new_facts to those not semantically covered by existing facts."""
-    if not new_facts:
-        return []
-    if len(new_facts) == 1 and not existing:
-        return new_facts
+async def _extract_facts(
+    *, username: str, user_message: str, bot_reply: str, existing: list[str]
+) -> list[str]:
     existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
-    candidates_block = "\n".join(f"- {fact}" for fact in new_facts)
-    prompt = (
-        f"Известные факты:\n{existing_block}\n\n"
-        f"Новые кандидаты:\n{candidates_block}\n\n"
-        f"Верни только действительно новые кандидаты (JSON-массив):"
+    exchange = (
+        f"Exchange:\n@{username}: {user_message}\nBot: {bot_reply}"
+        if bot_reply
+        else f"Message (bot was not addressed):\n@{username}: {user_message}"
     )
-    llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0, max_tokens=256)
-    result = await llm.ainvoke([SystemMessage(content=DEDUP_SYSTEM), HumanMessage(content=prompt)])
-    accepted = _parse_facts(result.content.strip())
-    new_facts_set = set(new_facts)
-    return [fact for fact in accepted if fact in new_facts_set]
+    prompt = (
+        f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
+        f"{exchange}\n\nNew facts to add (JSON array):"
+    )
+    llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
+    result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
+    return _parse_facts(result.content.strip())
+
+
+async def _dedup_and_save(
+    *, chat_id: int, user_id: int, username: str, new_facts: list[str]
+) -> None:
+    if not new_facts:
+        return
+    to_insert_facts: list[str] = []
+    to_insert_embeddings: list[list[float]] = []
+    for fact in new_facts[:MAX_NEW_FACTS]:
+        fact_embedding = await embedder.embed(fact)
+        matched_id = await user_memories.find_similar_fact(
+            chat_id=chat_id, user_id=user_id,
+            embedding=fact_embedding, threshold=SIMILARITY_THRESHOLD,
+        )
+        if matched_id is not None:
+            await user_memories.refresh_updated_at(matched_id)
+        else:
+            to_insert_facts.append(fact)
+            to_insert_embeddings.append(fact_embedding)
+    if to_insert_facts:
+        await user_memories.upsert_facts(
+            chat_id=chat_id, user_id=user_id, username=username,
+            facts=to_insert_facts, embeddings=to_insert_embeddings,
+        )
+        logger.debug("Saved %d facts for @%s in chat %s", len(to_insert_facts), username, chat_id)
 
 
 async def extract_and_save(
@@ -94,26 +116,13 @@ async def extract_and_save(
     """Extract facts about the sender and any @mentioned users. Safe to use with create_task."""
     try:
         existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
-        existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
-        exchange = (
-            f"Exchange:\n@{username}: {user_message}\nBot: {bot_reply}"
-            if bot_reply
-            else f"Message (bot was not addressed):\n@{username}: {user_message}"
+        new_facts = await _extract_facts(
+            username=username, user_message=user_message,
+            bot_reply=bot_reply, existing=existing,
         )
-        prompt = (
-            f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
-            f"{exchange}\n\nNew facts to add (JSON array):"
+        await _dedup_and_save(
+            chat_id=chat_id, user_id=user_id, username=username, new_facts=new_facts,
         )
-        llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
-        result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
-        new_facts = _parse_facts(result.content.strip())
-        new_facts = await dedup_facts(new_facts, existing)
-        if new_facts:
-            await user_memories.upsert_facts(
-                chat_id=chat_id, user_id=user_id, username=username,
-                facts=new_facts[:MAX_NEW_FACTS],
-            )
-            logger.debug("Saved %d facts for @%s in chat %s", len(new_facts), username, chat_id)
     except Exception as err:
         logger.warning("Memory extraction failed for @%s: %s", username, err)
     await _extract_for_mentions(chat_id=chat_id, sender_username=username, user_message=user_message)
@@ -134,16 +143,9 @@ async def _extract_facts_about(
         llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
         result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
         new_facts = _parse_facts(result.content.strip())
-        new_facts = await dedup_facts(new_facts, existing)
-        if new_facts:
-            await user_memories.upsert_facts(
-                chat_id=chat_id, user_id=user_id, username=username,
-                facts=new_facts[:MAX_NEW_FACTS],
-            )
-            logger.debug(
-                "Saved %d cross-user facts for @%s (observed by @%s)",
-                len(new_facts), username, observer_username,
-            )
+        await _dedup_and_save(
+            chat_id=chat_id, user_id=user_id, username=username, new_facts=new_facts,
+        )
     except Exception as err:
         logger.warning("Cross-user extraction failed for @%s: %s", username, err)
 

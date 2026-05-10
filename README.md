@@ -26,6 +26,7 @@ Pipeline     LangGraph StateGraph
 Tools        MCP (stdio) via langchain-mcp-adapters
 LLM (agent)  Groq llama-4-scout-17b-16e-instruct → qwen3-32b → gpt-oss-20b (fallback chain)
 LLM (memory) Groq meta-llama/llama-4-scout-17b-16e-instruct
+Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, local)
 LLM (roast)  Groq llama-3.3-70b-versatile
 LLM (roles)  Groq llama-3.1-8b-instant
 STT          Groq whisper-large-v3
@@ -35,7 +36,7 @@ Video frames PyAV (in-process, no subprocess)
 Game data    IGDB (Twitch OAuth), Steam public API, psdeals.net RSS
 Media data   TMDB, AniList GraphQL, OpenCritic
 Web search   Tavily (falls back to DuckDuckGo)
-Storage      PostgreSQL + asyncpg (connection pool, min 2 / max 10)
+Storage      PostgreSQL + pgvector + asyncpg (connection pool, min 2 / max 10)
 Hosting      VPS / Docker Compose (bot + postgres containers)
 ```
 

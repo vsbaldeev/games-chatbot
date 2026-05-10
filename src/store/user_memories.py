@@ -14,6 +14,8 @@ in different group chats.
 import re
 import time
 
+import numpy as np
+
 from src.store import db as database
 
 MAX_FACTS_PER_USER = 30
@@ -38,8 +40,9 @@ STAT_FACT_RE = re.compile(
 
 
 async def init_table() -> None:
-    """Create the user_memories table and its lookup index if they do not exist."""
+    """Create the user_memories table, indexes, and embedding column if they do not exist."""
     async with database.acquire() as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
         async with conn.transaction():
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_memories (
@@ -54,6 +57,15 @@ async def init_table() -> None:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_memories_lookup
                 ON user_memories (chat_id, user_id)
+            """)
+            await conn.execute("""
+                ALTER TABLE user_memories
+                    ADD COLUMN IF NOT EXISTS embedding vector(384)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_memories_hnsw
+                ON user_memories USING hnsw (embedding vector_cosine_ops)
+                WHERE embedding IS NOT NULL
             """)
 
 
@@ -104,6 +116,38 @@ async def get_facts_for_users(
 
     all_user_ids = set(llm_facts) | set(stat_facts)
     return {uid: llm_facts.get(uid) or stat_facts.get(uid, []) for uid in all_user_ids}
+
+
+async def find_similar_fact(
+    *, chat_id: int, user_id: int, embedding: list[float], threshold: float
+) -> int | None:
+    """Return the id of the most similar existing fact if similarity >= threshold, else None."""
+    vector = np.array(embedding)
+    async with database.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, 1 - (embedding <=> $1) AS similarity
+            FROM user_memories
+            WHERE chat_id = $2 AND user_id = $3
+              AND embedding IS NOT NULL
+              AND NOT (fact LIKE ANY($4::text[]))
+            ORDER BY embedding <=> $1
+            LIMIT 1
+            """,
+            vector, chat_id, user_id, STAT_FACT_LIKE_PATTERNS,
+        )
+    if row is None:
+        return None
+    return row["id"] if row["similarity"] >= threshold else None
+
+
+async def refresh_updated_at(fact_id: int) -> None:
+    """Bump updated_at on an existing fact to mark it as recently reinforced."""
+    async with database.acquire() as conn:
+        await conn.execute(
+            "UPDATE user_memories SET updated_at = $1 WHERE id = $2",
+            time.time(), fact_id,
+        )
 
 
 def format_hack_fact(count: int) -> str:
@@ -179,24 +223,24 @@ async def upsert_stat_fact(
 
 
 async def upsert_facts(
-    *, chat_id: int, user_id: int, username: str, facts: list[str]
+    *, chat_id: int, user_id: int, username: str,
+    facts: list[str], embeddings: list[list[float]]
 ) -> None:
-    """
-    Insert new facts for a user and prune the oldest rows so the total stays
-    within MAX_FACTS_PER_USER.
-    """
+    """Insert new facts with embeddings and prune oldest rows to stay within MAX_FACTS_PER_USER."""
     if not facts:
         return
 
     now = time.time()
+    vectors = [np.array(emb) for emb in embeddings]
     async with database.acquire() as conn:
         async with conn.transaction():
             await conn.executemany(
                 """
-                INSERT INTO user_memories (chat_id, user_id, username, fact, updated_at)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO user_memories (chat_id, user_id, username, fact, embedding, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                [(chat_id, user_id, username, fact, now) for fact in facts],
+                [(chat_id, user_id, username, fact, vector, now)
+                 for fact, vector in zip(facts, vectors)],
             )
             await conn.execute(
                 """

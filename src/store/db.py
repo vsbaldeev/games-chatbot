@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import asyncpg
+from pgvector.asyncpg import register_vector
 
 from src import config
 
@@ -12,7 +13,9 @@ pool: asyncpg.Pool | None = None
 
 async def init() -> None:
     global pool
-    pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=2, max_size=10)
+    pool = await asyncpg.create_pool(
+        config.DATABASE_URL, min_size=2, max_size=10, init=register_vector
+    )
 
 
 @asynccontextmanager
