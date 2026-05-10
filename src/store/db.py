@@ -13,6 +13,9 @@ pool: asyncpg.Pool | None = None
 
 async def init() -> None:
     global pool
+    bootstrap = await asyncpg.connect(config.DATABASE_URL)
+    await bootstrap.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    await bootstrap.close()
     pool = await asyncpg.create_pool(
         config.DATABASE_URL, min_size=2, max_size=10, init=register_vector
     )
