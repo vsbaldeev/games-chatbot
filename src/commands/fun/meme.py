@@ -3,8 +3,10 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src import log
+from src import config, log
 from src.memes.fetcher import get_meme
+from src.store import unified_messages
+from src.store.unified_messages import PHOTO_PLACEHOLDER
 
 logger = log.get_logger(__name__)
 
@@ -20,7 +22,18 @@ async def cmd_meme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     url, caption = result
     try:
-        await update.message.reply_photo(url, caption=caption or None)
+        sent = await update.message.reply_photo(url, caption=caption or None)
+        file_id = sent.photo[-1].file_id if sent.photo else None
+        await unified_messages.insert(
+            chat_id=chat_id,
+            message_id=sent.message_id,
+            user_id=context.bot.id,
+            username=config.BOT_USERNAME,
+            content=caption or PHOTO_PLACEHOLDER,
+            media_type="photo",
+            reply_to_msg_id=update.message.message_id,
+            file_id=file_id,
+        )
     except Exception as error:
         logger.error("Failed to send meme %s in chat %s: %s", url, chat_id, error)
         await update.message.reply_text("Не смог отправить мем — попробуй ещё раз.")

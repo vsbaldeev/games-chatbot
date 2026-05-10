@@ -15,6 +15,7 @@ from src.achievements import notify_unlocks
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
+from src.store import unified_messages
 
 OFFENSE_RE = re.compile(
     r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
@@ -124,12 +125,24 @@ async def run_pipeline(
         final_state = await pipeline.ainvoke(initial_state)
         response = final_state.get("response") or ""
         if response.strip():
+            clean = strip_markdown(response)
             notification_msg = final_state.get("search_notification_msg")
             if notification_msg:
-                await notification_msg.edit_text(strip_markdown(response))
+                await notification_msg.edit_text(clean)
+                sent_id = notification_msg.message_id
             else:
                 await msg.chat.send_action("typing")
-                await msg.reply_text(strip_markdown(response))
+                sent = await msg.reply_text(clean)
+                sent_id = sent.message_id
+            await unified_messages.insert(
+                chat_id=chat.id,
+                message_id=sent_id,
+                user_id=context.bot.id,
+                username=config.BOT_USERNAME,
+                content=clean,
+                media_type="text",
+                reply_to_msg_id=msg.message_id,
+            )
             return True
     except DailyLimitError:
         logger.warning("Daily token quota exhausted for chat %s", chat.id)
