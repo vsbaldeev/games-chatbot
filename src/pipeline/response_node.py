@@ -90,14 +90,15 @@ class ResponseNode:
         history = build_history(str(msg["chat_id"]))
         await trim_history(history, config.MAX_HISTORY_MESSAGES)
         past_messages = await asyncio.to_thread(lambda: history.messages)
+        user_input = msg["processed_text"] or msg["raw_text"] or ""
         enriched = build_response_input(
             msg["username"],
-            msg["processed_text"] or msg["raw_text"] or "",
+            user_input,
             state.get("worker_output") or "",
             state.get("context"),
         )
         ai_message = await self.__generate(past_messages, enriched)
-        await self.__save(history, enriched, ai_message)
+        await self.__save(history, msg["username"], user_input, ai_message)
         return {"response": ai_message.content if ai_message else ""}
 
     async def __generate(self, past_messages: list, enriched: str):
@@ -116,11 +117,11 @@ class ResponseNode:
                 raise
         raise DailyLimitError("All fallback models exhausted in response node")
 
-    async def __save(self, history, enriched: str, ai_message) -> None:
+    async def __save(self, history, username: str, user_input: str, ai_message) -> None:
         if not (ai_message and ai_message.content and ai_message.content.strip()):
             return
         def save_sync() -> None:
-            history.add_user_message(enriched)
+            history.add_user_message(f"@{username}: {user_input}")
             history.add_message(ai_message)
         await asyncio.to_thread(save_sync)
         await trim_db_history(history)
