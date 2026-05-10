@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg18-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     restart: unless-stopped
     env_file: .env
     environment:
