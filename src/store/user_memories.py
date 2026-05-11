@@ -82,6 +82,18 @@ async def get_facts_for_users(
     return result
 
 
+async def get_facts_with_embeddings(*, chat_id: int, user_id: int) -> list[tuple[str, np.ndarray]]:
+    """Return (fact, embedding) pairs for all facts that have embeddings stored, newest first."""
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT fact, embedding FROM user_memories
+               WHERE chat_id = $1 AND user_id = $2 AND embedding IS NOT NULL
+               ORDER BY updated_at DESC""",
+            chat_id, user_id,
+        )
+    return [(row["fact"], np.array(row["embedding"])) for row in rows]
+
+
 async def find_similar_fact(
     *, chat_id: int, user_id: int, embedding: list[float], threshold: float
 ) -> int | None:
