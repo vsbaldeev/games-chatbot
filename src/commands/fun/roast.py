@@ -58,7 +58,10 @@ class Roaster:
         if not update.message:
             return
         chat_id = update.effective_chat.id
-        members = await achievements.get_chat_members(chat_id)
+        members = [
+            member for member in await achievements.get_chat_members(chat_id)
+            if member[0] != context.bot.id
+        ]
         if not members:
             await update.message.reply_text(
                 "В базе нет участников. Пусть сначала кто-нибудь напишет в чат."
