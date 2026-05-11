@@ -224,9 +224,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             counts[user_id] = 0
             await update.message.chat.send_action("typing")
             try:
-                roast_text = await generate_roast_text(chat_id, user_id, username)
-                await update.message.reply_text(
-                    f"🔥 #прожарка @{username}\n\n{strip_markdown(roast_text)}"
+                header, roast_text = await generate_roast_text(chat_id, user_id, username)
+                full_text = f"{header} #прожарка @{username}\n\n{strip_markdown(roast_text)}"
+                sent = await update.message.reply_text(full_text)
+                await unified_messages.insert(
+                    chat_id=chat_id,
+                    message_id=sent.message_id,
+                    user_id=context.bot.id,
+                    username=config.BOT_USERNAME,
+                    content=full_text,
+                    media_type="text",
+                    reply_to_msg_id=update.message.message_id,
                 )
                 await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
                 await notify_unlocks(context, chat_id, user_id, username)

@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 from src import achievements, config, log
 from src.achievements import notify_unlocks
 from src.agent import apply_language_correction
+from src.store import unified_messages
 from src.store.user_memories import get_facts
 
 logger = log.get_logger(__name__)
@@ -71,7 +72,17 @@ class Roaster:
         await update.message.chat.send_action("typing")
         try:
             header, roast_text = await self.generate(chat_id, target_id, target_username)
-            await update.message.reply_text(f"{header} #прожарка @{target_username}\n\n{roast_text}")
+            full_text = f"{header} #прожарка @{target_username}\n\n{roast_text}"
+            sent = await update.message.reply_text(full_text)
+            await unified_messages.insert(
+                chat_id=chat_id,
+                message_id=sent.message_id,
+                user_id=context.bot.id,
+                username=config.BOT_USERNAME,
+                content=full_text,
+                media_type="text",
+                reply_to_msg_id=update.message.message_id,
+            )
             await achievements.increment_stat(target_id, chat_id, target_username, "roasted_count")
             await notify_unlocks(context, chat_id, target_id, target_username)
         except Exception as error:
