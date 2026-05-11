@@ -23,6 +23,45 @@ AUDIO_PLACEHOLDER = "[audio]"
 CHAIN_DEPTH_LIMIT = 10
 
 
+def format_photo_content(caption: str | None) -> str:
+    """Initial content for a photo: placeholder alone, or placeholder + caption on the next line.
+
+    The placeholder prefix marks the row as still needing a vision description; the chain
+    enricher uses needs_photo_description() to detect this state.
+    """
+    if caption:
+        return f"{PHOTO_PLACEHOLDER}\n{caption}"
+    return PHOTO_PLACEHOLDER
+
+
+def needs_photo_description(content: str) -> bool:
+    """True while the photo content is still in placeholder form (with or without a caption)."""
+    return content == PHOTO_PLACEHOLDER or content.startswith(PHOTO_PLACEHOLDER + "\n")
+
+
+def extract_photo_caption(content: str) -> str:
+    """Pull the caption out of placeholder photo content. Returns empty string when none."""
+    if content.startswith(PHOTO_PLACEHOLDER + "\n"):
+        return content[len(PHOTO_PLACEHOLDER) + 1:]
+    return ""
+
+
+def combine_description_and_caption(description: str, caption: str) -> str:
+    """Final enriched form: vision description, optionally suffixed with the original caption."""
+    if caption:
+        return f"{description}\n(подпись: {caption})"
+    return description
+
+
+def display_photo_content(content: str) -> str:
+    """Strip placeholder prefix for prompt display when a row was never enriched."""
+    if content.startswith(PHOTO_PLACEHOLDER + "\n"):
+        return content[len(PHOTO_PLACEHOLDER) + 1:]
+    if content == PHOTO_PLACEHOLDER:
+        return ""
+    return content
+
+
 async def init_table() -> None:
     """Create the unified_messages table and its index if they do not exist."""
     async with database.acquire() as conn:

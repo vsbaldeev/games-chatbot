@@ -13,7 +13,6 @@ from src.pipeline.ingester import describe_photo, transcribe_voice, transcribe_v
 from src.pipeline.state import AssembledContext, BotState
 from src.store import unified_messages, user_memories
 from src.store.unified_messages import (
-    PHOTO_PLACEHOLDER,
     VOICE_PLACEHOLDER,
     VIDEO_NOTE_PLACEHOLDER,
     VIDEO_PLACEHOLDER,
@@ -65,11 +64,16 @@ class ContextBuilder:
     async def __enrich_row(self, row: dict, bot) -> str:
         content = row["content"]
         file_id = row.get("file_id")
+        media_type = row["media_type"]
         if not file_id:
             return content
         try:
-            if content == PHOTO_PLACEHOLDER:
-                return await describe_photo(file_id, bot) or content
+            if media_type == "photo" and unified_messages.needs_photo_description(content):
+                description = await describe_photo(file_id, bot)
+                if not description:
+                    return content
+                caption = unified_messages.extract_photo_caption(content)
+                return unified_messages.combine_description_and_caption(description, caption)
             if content == VOICE_PLACEHOLDER:
                 return await transcribe_voice(file_id, "voice", bot) or content
             if content == VIDEO_NOTE_PLACEHOLDER:

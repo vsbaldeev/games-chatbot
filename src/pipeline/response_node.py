@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src import config, log
 from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, RESPONSE_PROMPT, apply_language_correction
 from src.pipeline.state import BotState
+from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -49,6 +50,15 @@ async def trim_db_history(history: SQLChatMessageHistory, max_user_messages: int
     await asyncio.to_thread(trim_sync)
 
 
+def render_row(row: dict) -> str:
+    media_type = row["media_type"]
+    content = row["content"]
+    if media_type == "photo":
+        content = unified_messages.display_photo_content(content)
+    media_label = f" [{media_type}]" if media_type != "text" else ""
+    return f"@{row['username']}{media_label}: {content}"
+
+
 def build_response_input(username: str, user_input: str, worker_output: str, context) -> str:
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
@@ -62,16 +72,14 @@ def build_response_input(username: str, user_input: str, worker_output: str, con
     if reply_chain:
         parts.append("Цепочка ответов (от старого к новому):")
         for row in reply_chain:
-            media_label = f" [{row['media_type']}]" if row["media_type"] != "text" else ""
-            parts.append(f"@{row['username']}{media_label}: {row['content']}")
+            parts.append(render_row(row))
         parts.append("")
     else:
         recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
         if recent:
             parts.append("Недавние сообщения чата:")
             for row in reversed(recent):
-                media_label = f" [{row['media_type']}]" if row["media_type"] != "text" else ""
-                parts.append(f"@{row['username']}{media_label}: {row['content']}")
+                parts.append(render_row(row))
             parts.append("")
     if worker_output:
         parts.append(f"[Собранные данные]:\n{worker_output}\n")

@@ -28,8 +28,9 @@ Stores every message and decides whether the bot should respond.
 incoming message
     │
     ├─ always: insert into unified_messages
-    │              text   → content = raw_text (or caption)
-    │              photo  → content = caption if present, else [photo]
+    │              text   → content = raw_text
+    │              photo  → content = "[photo]" or "[photo]\n<caption>" (placeholder marks
+    │                       row as still needing vision description; caption preserved)
     │              voice / video_note / video → content = placeholder, file_id stored
     │
     ├─ text
@@ -66,7 +67,8 @@ ingester (current message, should_respond=True only)
     ├─ voice      → Groq Whisper → transcript
     ├─ video_note → Groq Whisper + frame extraction (see below)
     ├─ video      → Groq Whisper + frame extraction (see below)
-    └─ photo      → vision LLM, one-sentence Russian description
+    └─ photo      → vision LLM description; combined with caption when present
+                    "<description>\n(подпись: <caption>)" form
                     all non-text results: update unified_messages content
 
 frame extraction (PyAV)
@@ -77,11 +79,14 @@ frame extraction (PyAV)
 
 context_builder lazy enrichment (reply chain, on demand)
     for each row in the reply chain that still holds a placeholder:
-    [photo]      → describe_photo(file_id)              → update unified_messages
+    [photo] / [photo]\n<caption> → describe_photo(file_id) → combined with caption
+                                   → update unified_messages
     [voice]      → transcribe_voice(file_id)            → update unified_messages
     [video_note] → transcribe_video(file_id)  (+ frames) → update unified_messages
     [video]      → transcribe_video(file_id)  (+ frames) → update unified_messages
     Results are cached — repeated replies reuse the stored description/transcript.
+    Photos are detected by content.startswith(PHOTO_PLACEHOLDER); after enrichment
+    content begins with the description so re-enrichment is skipped.
 ```
 
 ---

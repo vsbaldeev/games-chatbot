@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage
 from src import log
 from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, invoke_with_retry
 from src.pipeline.state import BotState
+from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -83,14 +84,21 @@ class WorkerNode:
         if reply_chain:
             parts.append("Context (reply chain):")
             for row in reply_chain:
-                parts.append(f"@{row['username']}: {row['content']}")
+                parts.append(self.__render_row(row))
             parts.append("")
         else:
             recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
             if recent:
                 parts.append("Recent chat context:")
                 for row in reversed(recent):
-                    parts.append(f"@{row['username']}: {row['content']}")
+                    parts.append(self.__render_row(row))
                 parts.append("")
         parts.append(f"Question from @{username}: {user_input}")
         return "\n".join(parts)
+
+    @staticmethod
+    def __render_row(row: dict) -> str:
+        content = row["content"]
+        if row["media_type"] == "photo":
+            content = unified_messages.display_photo_content(content)
+        return f"@{row['username']}: {content}"

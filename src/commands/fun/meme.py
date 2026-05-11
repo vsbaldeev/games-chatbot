@@ -6,7 +6,6 @@ from telegram.ext import ContextTypes
 from src import config, log
 from src.memes.fetcher import get_meme
 from src.store import unified_messages
-from src.store.unified_messages import PHOTO_PLACEHOLDER
 
 logger = log.get_logger(__name__)
 
@@ -29,7 +28,7 @@ async def cmd_meme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             message_id=sent.message_id,
             user_id=context.bot.id,
             username=config.BOT_USERNAME,
-            content=caption or PHOTO_PLACEHOLDER,
+            content=unified_messages.format_photo_content(caption),
             media_type="photo",
             reply_to_msg_id=update.message.message_id,
             file_id=file_id,

@@ -66,7 +66,7 @@ class MessageRouter:
         elif media_type == "video":
             content = unified_messages.VIDEO_PLACEHOLDER
         elif media_type == "photo":
-            content = msg["raw_text"] or unified_messages.PHOTO_PLACEHOLDER
+            content = unified_messages.format_photo_content(msg["raw_text"])
         elif media_type == "sticker":
             content = unified_messages.STICKER_PLACEHOLDER
         elif media_type == "animation":

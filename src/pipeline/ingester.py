@@ -178,7 +178,12 @@ class MessageIngester:
         elif media_type in ("video_note", "video"):
             processed = await transcribe_video(msg["file_id"], media_type, bot)
         elif media_type == "photo":
-            processed = await describe_photo(msg["file_id"], bot)
+            description = await describe_photo(msg["file_id"], bot)
+            caption = msg["raw_text"] or ""
+            if description:
+                processed = unified_messages.combine_description_and_caption(description, caption)
+            else:
+                processed = caption
         else:
             processed = msg["raw_text"] or ""
 
