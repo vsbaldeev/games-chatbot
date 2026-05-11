@@ -63,7 +63,7 @@ def display_photo_content(content: str) -> str:
 
 
 async def init_table() -> None:
-    """Create the unified_messages table and its index if they do not exist."""
+    """Create the unified_messages table and its indexes if they do not exist."""
     async with database.acquire() as conn:
         async with conn.transaction():
             await conn.execute("""
@@ -84,6 +84,15 @@ async def init_table() -> None:
                 CREATE INDEX IF NOT EXISTS idx_unified_messages_chat_time
                 ON unified_messages (chat_id, created_at DESC)
             """)
+            await conn.execute("""
+                ALTER TABLE unified_messages
+                ADD COLUMN IF NOT EXISTS media_group_id TEXT
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_unified_messages_media_group
+                ON unified_messages (chat_id, media_group_id)
+                WHERE media_group_id IS NOT NULL
+            """)
 
 
 async def insert(
@@ -96,6 +105,7 @@ async def insert(
     media_type: str = "text",
     reply_to_msg_id: int | None = None,
     file_id: str | None = None,
+    media_group_id: str | None = None,
 ) -> None:
     """Insert a new message row. Silently ignores duplicate (chat_id, message_id) pairs."""
     async with database.acquire() as conn:
@@ -103,12 +113,12 @@ async def insert(
             """
             INSERT INTO unified_messages
                 (message_id, chat_id, user_id, username, content,
-                 media_type, reply_to_msg_id, file_id, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 media_type, reply_to_msg_id, file_id, media_group_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (chat_id, message_id) DO NOTHING
             """,
             message_id, chat_id, user_id, username, content,
-            media_type, reply_to_msg_id, file_id, time.time(),
+            media_type, reply_to_msg_id, file_id, media_group_id, time.time(),
         )
 
 
@@ -137,7 +147,8 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
                 break
             row = await conn.fetchrow(
                 """
-                SELECT message_id, user_id, username, content, media_type, reply_to_msg_id, file_id
+                SELECT message_id, user_id, username, content, media_type,
+                       reply_to_msg_id, file_id, media_group_id
                 FROM unified_messages
                 WHERE chat_id = $1 AND message_id = $2
                 """,
@@ -150,6 +161,22 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
 
     chain.reverse()
     return chain
+
+
+async def get_media_group(*, chat_id: int, media_group_id: str) -> list[dict]:
+    """Return all messages belonging to a media group, ordered by message_id ascending."""
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT message_id, user_id, username, content, media_type,
+                   reply_to_msg_id, file_id, media_group_id
+            FROM unified_messages
+            WHERE chat_id = $1 AND media_group_id = $2
+            ORDER BY message_id ASC
+            """,
+            chat_id, media_group_id,
+        )
+    return [dict(row) for row in rows]
 
 
 async def get_user_messages(*, chat_id: int, username: str, limit: int = 40) -> list[str]:

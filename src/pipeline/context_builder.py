@@ -84,6 +84,24 @@ class ContextBuilder:
             logger.warning("Media enrichment failed for message %s: %s", row["message_id"], err)
         return content
 
+    async def __expand_media_groups(self, chain: list[dict], chat_id: int) -> list[dict]:
+        """Expand any album message in the chain with its sibling messages."""
+        group_ids = {row["media_group_id"] for row in chain if row.get("media_group_id")}
+        if not group_ids:
+            return chain
+        seen_ids = {row["message_id"] for row in chain}
+        extra: list[dict] = []
+        for group_id in group_ids:
+            for row in await unified_messages.get_media_group(chat_id=chat_id, media_group_id=group_id):
+                if row["message_id"] not in seen_ids:
+                    extra.append(row)
+                    seen_ids.add(row["message_id"])
+        if not extra:
+            return chain
+        merged = chain + extra
+        merged.sort(key=lambda row: row["message_id"])
+        return merged
+
     async def __enrich_chain_media(
         self, chain: list[dict], chat_id: int, bot
     ) -> list[dict]:
@@ -111,6 +129,7 @@ class ContextBuilder:
             msg["user_id"],
             msg["username"],
         )
+        chain = await self.__expand_media_groups(chain, chat_id)
         chain = await self.__enrich_chain_media(chain, chat_id, bot)
 
         recent = await unified_messages.get_recent(

@@ -61,6 +61,13 @@ class MeaninglessFilterNode:
         if media_type != "text":
             text = state["incoming"]["processed_text"] or ""
             if not text.strip():
+                if state.get("response_trigger") == "explicit":
+                    logger.warning(
+                        "Filter: no transcription for %s message %s, but trigger is explicit — passing through",
+                        media_type,
+                        state["incoming"]["message_id"],
+                    )
+                    return {}
                 logger.warning(
                     "Filter: no transcription for %s message %s, skipping",
                     media_type,

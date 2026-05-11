@@ -17,6 +17,17 @@ src/jobs/           Scheduled jobs — weekly roast, weekly roles, silence sweep
 src/bot/            Application wiring — handler registration, job setup, startup lifecycle
 ```
 
+## Forwarded posts
+
+The bot ignores forwarded messages and does not respond to them directly.
+To ask the bot about a forwarded post, reply to it and mention the bot.
+
+When building context for such a reply the bot:
+1. Walks the reply chain to the forwarded message.
+2. If the forwarded post is part of a media group (album with multiple photos/videos), fetches all sibling messages by `media_group_id` and merges them into the context.
+3. Enriches each media item lazily — photos are described via vision LLM, voice/video is transcribed via Whisper.
+4. Passes the enriched content to the worker, which can also search the web using the described content.
+
 ## Tech stack
 
 ```

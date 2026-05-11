@@ -24,6 +24,7 @@ class IncomingMessage(TypedDict):
     reply_to_msg_id: int | None
     file_id: str | None           # Telegram file_id for voice / photo messages
     is_forwarded: bool
+    media_group_id: str | None    # Telegram media_group_id for album messages
 
 
 class AssembledContext(TypedDict):

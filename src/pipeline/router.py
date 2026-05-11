@@ -86,11 +86,15 @@ class MessageRouter:
                 media_type=media_type,
                 reply_to_msg_id=msg["reply_to_msg_id"],
                 file_id=msg["file_id"],
+                media_group_id=msg.get("media_group_id"),
             )
         except Exception as err:
             logger.warning("Failed to store message %s: %s", msg["message_id"], err)
 
     def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:
+        if msg["is_forwarded"]:
+            return False, "random"
+
         media_type = msg["media_type"]
 
         if media_type == "text":
