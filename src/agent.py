@@ -73,7 +73,7 @@ class ToolMessageSanitizer(AgentMiddleware):
 
 
 AGENT_MODEL_FALLBACKS = [
-    "meta-llama/llama-3.3-70b-versatile",         # primary: 500K TPD, 12K TPM
+    "llama-3.3-70b-versatile",                     # primary: 500K TPD, 12K TPM
     "meta-llama/llama-4-scout-17b-16e-instruct",  # fallback-1: 500K TPD, 30K TPM
     "qwen/qwen3-32b",                              # fallback-2: 500K TPD
     "openai/gpt-oss-20b",                          # fallback-3: 200K TPD
