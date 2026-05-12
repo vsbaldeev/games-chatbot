@@ -1,12 +1,14 @@
 """
 ContextBuilder tests.
 
-Scenarios anchored to real bugs:
+Scenarios anchored to real bugs and new features:
   4550f56 — reply_chain was never populated; worker got recent_history instead
   8da0de2 — replied-to not resolved when older than recent window;
              current message appeared in its own context
+  feature  — meme photo in reply chain enriched via vision LLM so bot can
+             explain the image when user replies and asks about it
 
-All store calls are mocked so no database is required.
+All store and LLM calls are mocked so no database or network is required.
 """
 
 import contextlib
@@ -20,8 +22,10 @@ from tests.builders import make_incoming, make_message_row, make_state
 STORE_GET_RECENT = "src.pipeline.context_builder.unified_messages.get_recent"
 STORE_GET_CHAIN = "src.pipeline.context_builder.unified_messages.get_chain"
 STORE_GET_BY_ID = "src.pipeline.context_builder.unified_messages.get_by_id"
+STORE_UPDATE_CONTENT = "src.pipeline.context_builder.unified_messages.update_content"
 STORE_GET_FACTS_FOR_USERS = "src.pipeline.context_builder.user_memories.get_facts_for_users"
 STORE_GET_FACTS = "src.pipeline.context_builder.user_memories.get_facts"
+DESCRIBE_PHOTO = "src.pipeline.context_builder.describe_photo"
 
 
 def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=None):
@@ -29,6 +33,7 @@ def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=N
     stack.enter_context(patch(STORE_GET_RECENT, new_callable=AsyncMock, return_value=recent or []))
     mock_chain = stack.enter_context(patch(STORE_GET_CHAIN, new_callable=AsyncMock, return_value=chain or []))
     mock_get_by_id = stack.enter_context(patch(STORE_GET_BY_ID, new_callable=AsyncMock, return_value=by_id))
+    stack.enter_context(patch(STORE_UPDATE_CONTENT, new_callable=AsyncMock))
     stack.enter_context(patch(STORE_GET_FACTS_FOR_USERS, new_callable=AsyncMock, return_value={}))
     stack.enter_context(patch(STORE_GET_FACTS, new_callable=AsyncMock, return_value=[]))
     return mock_chain, mock_get_by_id
@@ -126,3 +131,90 @@ class TestCurrentMessageExclusion:
         history_ids = [row["message_id"] for row in result["context"]["recent_history"]]
         assert 200 not in history_ids
         assert 198 in history_ids
+
+
+class TestPhotoEnrichmentInReplyChain:
+    """When the user replies to a meme photo and asks to explain it, the context
+    builder must describe the photo via vision LLM before workers run."""
+
+    async def test_placeholder_photo_in_chain_is_described(self, context_builder):
+        photo_row = make_message_row(
+            message_id=77,
+            media_type="photo",
+            content="[photo]\nReddit post title",
+            file_id="tg-file-abc",
+        )
+        incoming = make_incoming(reply_to_msg_id=77)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[photo_row])
+            mock_describe = stack.enter_context(
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="Мем с котом в шляпе.")
+            )
+            result = await context_builder(state)
+
+        mock_describe.assert_called_once()
+        enriched_content = result["context"]["reply_chain"][0]["content"]
+        assert "Мем с котом в шляпе." in enriched_content
+        assert "[photo]" not in enriched_content
+
+    async def test_already_described_photo_not_re_described(self, context_builder):
+        photo_row = make_message_row(
+            message_id=78,
+            media_type="photo",
+            content="Уже описанное фото — кот сидит на окне.",
+            file_id="tg-file-xyz",
+        )
+        incoming = make_incoming(reply_to_msg_id=78)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[photo_row])
+            mock_describe = stack.enter_context(
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="whatever")
+            )
+            result = await context_builder(state)
+
+        mock_describe.assert_not_called()
+        assert result["context"]["reply_chain"][0]["content"] == photo_row["content"]
+
+    async def test_photo_without_file_id_not_described(self, context_builder):
+        photo_row = make_message_row(
+            message_id=79,
+            media_type="photo",
+            content="[photo]",
+        )
+        incoming = make_incoming(reply_to_msg_id=79)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[photo_row])
+            mock_describe = stack.enter_context(
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="whatever")
+            )
+            await context_builder(state)
+
+        mock_describe.assert_not_called()
+
+    async def test_description_cached_in_db(self, context_builder):
+        photo_row = make_message_row(
+            message_id=80,
+            media_type="photo",
+            content="[photo]",
+            file_id="tg-file-cache",
+        )
+        incoming = make_incoming(reply_to_msg_id=80)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[photo_row])
+            stack.enter_context(
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="Описание мема.")
+            )
+            mock_update = stack.enter_context(
+                patch(STORE_UPDATE_CONTENT, new_callable=AsyncMock)
+            )
+            await context_builder(state)
+
+        mock_update.assert_called_once_with(chat_id=1000, message_id=80, content="Описание мема.")

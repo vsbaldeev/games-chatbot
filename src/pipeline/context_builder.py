@@ -8,9 +8,12 @@ Assembles everything the Agent node needs for an enriched prompt:
                        looked up in the recent window or fetched directly if older.
   3. User facts      — per-user memories for every participant visible in recent history
                        plus the initiating user.
+  4. Reply chain     — full reply chain with photo rows lazily enriched via vision LLM
+                       so WorkerNode and ResponseNode see real descriptions, not placeholders.
 """
 
 from src import log
+from src.pipeline.ingester import describe_photo
 from src.pipeline.state import AssembledContext, BotState
 from src.store import unified_messages, user_memories
 
@@ -26,9 +29,10 @@ class ContextBuilder:
         msg = state["incoming"]
         chat_id = msg["chat_id"]
 
+        bot = state["context_types"].bot
         recent = await self.__get_recent(chat_id, msg["message_id"])
         replied_to = await self.__find_replied_to(chat_id, msg["reply_to_msg_id"], recent)
-        reply_chain = await self.__get_reply_chain(chat_id, msg["reply_to_msg_id"])
+        reply_chain = await self.__get_reply_chain(chat_id, msg["reply_to_msg_id"], bot)
         user_facts = await self.__collect_user_facts(
             chat_id, msg["user_id"], msg["username"], recent
         )
@@ -47,10 +51,32 @@ class ContextBuilder:
         )
         return [row for row in all_recent if row["message_id"] != current_message_id]
 
-    async def __get_reply_chain(self, chat_id: int, reply_to_msg_id: int | None) -> list[dict]:
+    async def __get_reply_chain(self, chat_id: int, reply_to_msg_id: int | None, bot) -> list[dict]:
         if reply_to_msg_id is None:
             return []
-        return await unified_messages.get_chain(chat_id=chat_id, message_id=reply_to_msg_id)
+        chain = await unified_messages.get_chain(chat_id=chat_id, message_id=reply_to_msg_id)
+        return [await self.__maybe_enrich_photo(row, chat_id, bot) for row in chain]
+
+    async def __maybe_enrich_photo(self, row: dict, chat_id: int, bot) -> dict:
+        if row["media_type"] != "photo" or not unified_messages.needs_photo_description(row["content"]):
+            return row
+        file_id = row.get("file_id")
+        if not file_id:
+            return row
+        caption = unified_messages.extract_photo_caption(row["content"])
+        description = await describe_photo(file_id, bot)
+        if not description:
+            return row
+        combined = unified_messages.combine_description_and_caption(description, caption)
+        try:
+            await unified_messages.update_content(
+                chat_id=chat_id,
+                message_id=row["message_id"],
+                content=combined,
+            )
+        except Exception as err:
+            logger.warning("Failed to cache photo description for msg %s: %s", row["message_id"], err)
+        return {**row, "content": combined}
 
     async def __find_replied_to(
         self, chat_id: int, reply_to_msg_id: int | None, recent: list[dict]

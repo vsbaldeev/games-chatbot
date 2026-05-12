@@ -76,6 +76,7 @@ def make_message_row(
     user_id: int = 1,
     content: str = "hi",
     media_type: str = "text",
+    file_id: str | None = None,
 ) -> dict:
     return {
         "message_id": message_id,
@@ -83,4 +84,5 @@ def make_message_row(
         "user_id": user_id,
         "content": content,
         "media_type": media_type,
+        "file_id": file_id,
     }

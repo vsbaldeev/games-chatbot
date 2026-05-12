@@ -78,15 +78,12 @@ frame extraction (PyAV)
     output: "[Аудио]: <transcript>\n[Видео 1/N]: <desc>\n[Видео 2/N]: <desc>…"
 
 context_builder lazy enrichment (reply chain, on demand)
-    for each row in the reply chain that still holds a placeholder:
+    for each photo row in the reply chain that still holds a placeholder:
     [photo] / [photo]\n<caption> → describe_photo(file_id) → combined with caption
-                                   → update unified_messages
-    [voice]      → transcribe_voice(file_id)            → update unified_messages
-    [video_note] → transcribe_video(file_id)  (+ frames) → update unified_messages
-    [video]      → transcribe_video(file_id)  (+ frames) → update unified_messages
-    Results are cached — repeated replies reuse the stored description/transcript.
-    Photos are detected by content.startswith(PHOTO_PLACEHOLDER); after enrichment
-    content begins with the description so re-enrichment is skipped.
+                                   → update unified_messages (cached for future replies)
+    Detection: content.startswith("[photo]"); after enrichment content begins with the
+    description so re-enrichment is skipped automatically.
+    Rows without file_id (e.g. old records) are left as-is.
 ```
 
 ---
