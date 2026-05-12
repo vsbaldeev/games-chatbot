@@ -6,7 +6,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src import config, log
-from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, RESPONSE_PROMPT, apply_language_correction, strip_thinking
+from src.agent import AGENT_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, RESPONSE_PROMPT, apply_language_correction, strip_thinking
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -128,6 +128,12 @@ class ResponseNode:
             except Exception as err:
                 error_str = str(err).lower()
                 is_daily = any(phrase in error_str for phrase in ("per day", "daily", "tokens_per_day"))
+                is_context = any(phrase in error_str for phrase in (
+                    "context_length_exceeded", "request too large", "string_above_max_length",
+                    "maximum context length", "input too long", "tokens_in_context",
+                ))
+                if is_context:
+                    raise ContextLengthError("Response prompt exceeds model context window")
                 if is_daily and await self.__agent.advance_model():
                     llm = self.__agent.get_response_llm()
                     continue

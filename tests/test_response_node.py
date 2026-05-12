@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.agent import ContextLengthError
 from src.pipeline.response_node import ResponseNode
 from tests.builders import make_incoming, make_state
 
@@ -142,3 +143,29 @@ class TestThinkingBlockStripping:
 
         assert "<think>" not in result["response"]
         assert "Через 191 день." in result["response"]
+
+
+class TestContextLengthError:
+    """When the response LLM rejects the prompt as too long, ResponseNode must
+    raise ContextLengthError so the top-level handler can send a clear user message."""
+
+    async def test_context_length_exception_raises_context_length_error(self):
+        agent = MagicMock()
+        agent.get_response_llm.return_value.ainvoke = AsyncMock(
+            side_effect=Exception("context_length_exceeded: prompt too large")
+        )
+
+        incoming = make_incoming(username="bob", raw_text="вопрос", processed_text="вопрос")
+        state = make_state(
+            incoming,
+            should_respond=True,
+            context={"user_facts": {}, "recent_history": [], "replied_to": None, "reply_chain": []},
+            worker_output="",
+        )
+
+        with (
+            patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
+            patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
+        ):
+            with pytest.raises(ContextLengthError):
+                await ResponseNode(agent)(state)

@@ -5,7 +5,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, invoke_with_retry, strip_thinking
+from src.agent import AGENT_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, invoke_with_retry, strip_thinking
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -70,6 +70,9 @@ class WorkerNode:
                 if not await self.__agent.advance_model():
                     raise
                 executor = self.__agent.get_worker_executor(self.__domain)
+            except ContextLengthError as err:
+                logger.warning("Worker context too long (domain=%s): %s", self.__domain, err)
+                return {"worker_output": "", "search_notification_msg": None}
             except Exception as err:
                 logger.error("Worker failed (domain=%s): %s", self.__domain, err)
                 return {"worker_output": "", "search_notification_msg": None}

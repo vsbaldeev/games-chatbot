@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent import GENERAL_WORKER_PROMPT
+from src.agent import ContextLengthError, GENERAL_WORKER_PROMPT
 from src.pipeline.worker_node import WorkerNode
 from tests.builders import make_incoming, make_message_row, make_state
 
@@ -154,3 +154,26 @@ class TestWorkerNodeThinkingStripping:
 
         assert "<think>" not in result["worker_output"]
         assert "GTA 6 выходит 19 ноября 2026." in result["worker_output"]
+
+
+class TestContextLengthErrorHandling:
+    """When the assembled worker prompt exceeds the model context window,
+    WorkerNode must absorb the error and return empty output rather than
+    crashing the pipeline."""
+
+    async def test_context_length_error_returns_empty_output(self):
+        agent = MagicMock()
+        agent.get_worker_executor.return_value = MagicMock()
+
+        incoming = make_incoming(username="alice", raw_text="вопрос", processed_text="вопрос")
+        state = make_state(
+            incoming,
+            should_respond=True,
+            context={"reply_chain": [], "recent_history": []},
+        )
+
+        with patch(INVOKE_WITH_RETRY, new_callable=AsyncMock, side_effect=ContextLengthError("too long")):
+            result = await WorkerNode(agent, "general")(state)
+
+        assert result["worker_output"] == ""
+        assert result["search_notification_msg"] is None

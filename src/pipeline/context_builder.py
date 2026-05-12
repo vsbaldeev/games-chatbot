@@ -20,6 +20,7 @@ from src.store import unified_messages, user_memories
 logger = log.get_logger(__name__)
 
 RECENT_HISTORY_LIMIT = 20
+CHAIN_MSG_CHAR_LIMIT = 400
 
 
 class ContextBuilder:
@@ -55,7 +56,15 @@ class ContextBuilder:
         if reply_to_msg_id is None:
             return []
         chain = await unified_messages.get_chain(chat_id=chat_id, message_id=reply_to_msg_id)
-        return [await self.__maybe_enrich_photo(row, chat_id, bot) for row in chain]
+        enriched = [await self.__maybe_enrich_photo(row, chat_id, bot) for row in chain]
+        return [self.__truncate_chain_row(row) for row in enriched]
+
+    @staticmethod
+    def __truncate_chain_row(row: dict) -> dict:
+        content = row["content"]
+        if len(content) <= CHAIN_MSG_CHAR_LIMIT:
+            return row
+        return {**row, "content": content[:CHAIN_MSG_CHAR_LIMIT] + "…"}
 
     async def __maybe_enrich_photo(self, row: dict, chat_id: int, bot) -> dict:
         if row["media_type"] != "photo" or not unified_messages.needs_photo_description(row["content"]):

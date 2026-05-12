@@ -57,6 +57,10 @@ class DailyLimitError(Exception):
     pass
 
 
+class ContextLengthError(Exception):
+    pass
+
+
 class ToolMessageSanitizer(AgentMiddleware):
     """Replace empty ToolMessage content with a placeholder before each model call.
 
@@ -216,8 +220,14 @@ async def invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> 
             error_str = str(err).lower()
             is_daily = any(phrase in error_str for phrase in ("per day", "daily", "tokens_per_day"))
             is_rate = ("rate_limit" in error_str or "429" in error_str) and not is_daily
+            is_context = any(phrase in error_str for phrase in (
+                "context_length_exceeded", "request too large", "string_above_max_length",
+                "maximum context length", "input too long", "tokens_in_context",
+            ))
             if is_daily:
                 raise DailyLimitError("Groq daily token quota exhausted")
+            if is_context:
+                raise ContextLengthError("Input exceeds model context window")
             if is_rate:
                 if attempt < max_retries - 1:
                     wait_seconds = 5 * (2 ** attempt)

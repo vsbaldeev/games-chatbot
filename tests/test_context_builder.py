@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.pipeline.context_builder import ContextBuilder
+from src.pipeline.context_builder import CHAIN_MSG_CHAR_LIMIT, ContextBuilder
 from tests.builders import make_incoming, make_message_row, make_state
 
 STORE_GET_RECENT = "src.pipeline.context_builder.unified_messages.get_recent"
@@ -218,3 +218,57 @@ class TestPhotoEnrichmentInReplyChain:
             await context_builder(state)
 
         mock_update.assert_called_once_with(chat_id=1000, message_id=80, content="Описание мема.")
+
+
+class TestChainTruncation:
+    """Each message in the reply chain must be capped at CHAIN_MSG_CHAR_LIMIT characters
+    before being passed to the worker or response LLM, preventing context-window exhaustion
+    from deep threads with verbose bot replies."""
+
+    async def test_short_content_not_truncated(self, context_builder):
+        row = make_message_row(message_id=10, content="короткое сообщение")
+        incoming = make_incoming(reply_to_msg_id=10)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[row])
+            result = await context_builder(state)
+
+        assert result["context"]["reply_chain"][0]["content"] == "короткое сообщение"
+
+    async def test_content_at_limit_not_truncated(self, context_builder):
+        content = "a" * CHAIN_MSG_CHAR_LIMIT
+        row = make_message_row(message_id=11, content=content)
+        incoming = make_incoming(reply_to_msg_id=11)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[row])
+            result = await context_builder(state)
+
+        assert result["context"]["reply_chain"][0]["content"] == content
+
+    async def test_content_over_limit_truncated_with_ellipsis(self, context_builder):
+        content = "a" * (CHAIN_MSG_CHAR_LIMIT + 100)
+        row = make_message_row(message_id=12, content=content)
+        incoming = make_incoming(reply_to_msg_id=12)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=[row])
+            result = await context_builder(state)
+
+        assert result["context"]["reply_chain"][0]["content"] == "a" * CHAIN_MSG_CHAR_LIMIT + "…"
+
+    async def test_all_rows_in_chain_are_independently_truncated(self, context_builder):
+        long_content = "x" * (CHAIN_MSG_CHAR_LIMIT + 50)
+        rows = [make_message_row(message_id=idx, content=long_content) for idx in range(1, 4)]
+        incoming = make_incoming(reply_to_msg_id=3)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, chain=rows)
+            result = await context_builder(state)
+
+        for chain_row in result["context"]["reply_chain"]:
+            assert chain_row["content"] == "x" * CHAIN_MSG_CHAR_LIMIT + "…"

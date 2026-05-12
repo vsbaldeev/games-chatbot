@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 import asyncio
 
 from src import achievements, config
-from src.agent import agent, DailyLimitError, RateLimitError
+from src.agent import agent, ContextLengthError, DailyLimitError, RateLimitError
 from src.achievements import notify_unlocks
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
@@ -156,6 +156,12 @@ async def run_pipeline(
         await msg.reply_text(
             "📵 Суточный лимит токенов Groq исчерпан. Бот ушёл спать до завтра. "
             "Статья на Луркоморье: «Бесплатный тариф — он такой»."
+        )
+    except ContextLengthError:
+        logger.warning("Context length exceeded for chat %s", chat.id)
+        await msg.reply_text(
+            "Цепочка ответов слишком длинная — не влезает в контекст модели. "
+            "Начни новое сообщение вместо ответа на старое."
         )
     except RateLimitError:
         logger.warning("Rate limit reached for chat %s", chat.id)

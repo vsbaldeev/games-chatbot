@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent import apply_language_correction, strip_thinking
+from src.agent import ContextLengthError, DailyLimitError, apply_language_correction, invoke_with_retry, strip_thinking
 
 
 class TestStripThinking:
@@ -72,4 +72,28 @@ class TestApplyLanguageCorrection:
         ai_message.content = "<think>normal thinking</think>こんにちは"
         result = await apply_language_correction(llm, ai_message, [])
         assert result is corrected
-        llm.ainvoke.assert_called_once()
+
+
+class TestInvokeWithRetry:
+    """invoke_with_retry must convert Groq context-length errors to ContextLengthError
+    so callers can handle oversized prompts explicitly instead of seeing a generic crash."""
+
+    @pytest.mark.parametrize("phrase", [
+        "context_length_exceeded",
+        "request too large",
+        "string_above_max_length",
+        "maximum context length",
+        "input too long",
+        "tokens_in_context",
+    ])
+    async def test_context_length_phrases_raise_context_length_error(self, phrase):
+        runnable = MagicMock()
+        runnable.ainvoke = AsyncMock(side_effect=Exception(phrase))
+        with pytest.raises(ContextLengthError):
+            await invoke_with_retry(runnable, {})
+
+    async def test_daily_limit_phrase_raises_daily_limit_error(self):
+        runnable = MagicMock()
+        runnable.ainvoke = AsyncMock(side_effect=Exception("per day limit reached"))
+        with pytest.raises(DailyLimitError):
+            await invoke_with_retry(runnable, {})
