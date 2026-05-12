@@ -5,7 +5,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, invoke_with_retry
+from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, invoke_with_retry, strip_thinking
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -63,7 +63,7 @@ class WorkerNode:
                     {"messages": [HumanMessage(content=worker_input)]},
                     config=run_config,
                 )
-                output = result["messages"][-1].content or ""
+                output = strip_thinking(result["messages"][-1].content or "")
                 notification_msg = notification_holder[0] if notification_holder else None
                 return {"worker_output": output, "search_notification_msg": notification_msg}
             except DailyLimitError:

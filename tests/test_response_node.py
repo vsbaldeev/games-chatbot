@@ -105,3 +105,40 @@ class TestThreadHistoryStorage:
         stored_ai_content = mock_append.call_args.kwargs["ai_content"]
         assert "**" not in stored_ai_content
         assert stored_ai_content == "Жирный и курсив текст."
+
+
+class TestThinkingBlockStripping:
+    async def test_think_block_not_sent_to_user(self):
+        """Reasoning models (e.g. Qwen3) emit <think>...</think> before the answer.
+        The user must never see internal reasoning traces — only the final answer."""
+        ai_response = MagicMock()
+        ai_response.content = (
+            "<think>Пользователь спрашивает про GTA 6. "
+            "Дата релиза 19 ноября 2026, сегодня 12 мая 2026, разница 191 день.</think>"
+            "Через 191 день."
+        )
+        agent = make_mock_agent()
+        agent.get_response_llm.return_value.ainvoke = AsyncMock(return_value=ai_response)
+
+        incoming = make_incoming(
+            username="bob",
+            raw_text="через сколько дней GTA 6?",
+            processed_text="через сколько дней GTA 6?",
+        )
+        state = make_state(
+            incoming,
+            should_respond=True,
+            thread_id="thread-42",
+            context={"user_facts": {}, "recent_history": [], "replied_to": None, "reply_chain": []},
+            worker_output="GTA 6 выходит 19 ноября 2026. Сегодня 12 мая 2026. До релиза 191 день.",
+        )
+
+        with (
+            patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
+            patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
+            patch(APPLY_LANGUAGE_CORRECTION, new_callable=AsyncMock, return_value=ai_response),
+        ):
+            result = await ResponseNode(agent)(state)
+
+        assert "<think>" not in result["response"]
+        assert "Через 191 день." in result["response"]

@@ -6,7 +6,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src import config, log
-from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, RESPONSE_PROMPT, apply_language_correction
+from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, RESPONSE_PROMPT, apply_language_correction, strip_thinking
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -106,7 +106,7 @@ class ResponseNode:
             state.get("context"),
         )
         ai_message = await self.__generate(past_messages, enriched)
-        response_text = ai_message.content if ai_message else ""
+        response_text = strip_thinking(ai_message.content) if ai_message else ""
 
         if response_text.strip():
             await thread_history.append_turn(

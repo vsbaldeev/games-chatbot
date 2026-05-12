@@ -13,13 +13,15 @@ Two invariants tested here:
      so the rule has something to work with.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.agent import GENERAL_WORKER_PROMPT
 from src.pipeline.worker_node import WorkerNode
-from tests.builders import make_incoming, make_message_row
+from tests.builders import make_incoming, make_message_row, make_state
+
+INVOKE_WITH_RETRY = "src.pipeline.worker_node.invoke_with_retry"
 
 
 def make_worker() -> WorkerNode:
@@ -122,3 +124,33 @@ class TestWorkerNodeBuildInput:
 
         assert "@alice" in result
         assert "@testbot что думаешь?" in result
+
+
+class TestWorkerNodeThinkingStripping:
+    async def test_think_block_stripped_from_worker_output(self):
+        """Reasoning models emit <think>...</think> before actual facts.
+        worker_output passed to ResponseNode must contain only the real content."""
+        raw_content = "<think>Нужно найти данные о дате выхода GTA 6.</think>GTA 6 выходит 19 ноября 2026."
+        last_message = MagicMock()
+        last_message.content = raw_content
+
+        agent = MagicMock()
+        agent.get_worker_executor.return_value = MagicMock()
+
+        incoming = make_incoming(
+            username="alice",
+            raw_text="когда выйдет GTA 6?",
+            processed_text="когда выйдет GTA 6?",
+        )
+        state = make_state(
+            incoming,
+            should_respond=True,
+            context={"reply_chain": [], "recent_history": []},
+        )
+
+        with patch(INVOKE_WITH_RETRY, new_callable=AsyncMock,
+                   return_value={"messages": [last_message]}):
+            result = await WorkerNode(agent, "general")(state)
+
+        assert "<think>" not in result["worker_output"]
+        assert "GTA 6 выходит 19 ноября 2026." in result["worker_output"]
