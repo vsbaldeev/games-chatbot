@@ -32,16 +32,18 @@ unified_messages (
 )
 INDEX idx_unified_messages_chat_time ON (chat_id, created_at DESC)
 
--- LLM-extracted facts per user per chat; cap 20 rows per (chat_id, user_id)
+-- LLM-extracted facts per user per chat; cap 30 rows per (chat_id, user_id)
 user_memories (
     id         BIGSERIAL        PRIMARY KEY,
     chat_id    BIGINT,
     user_id    BIGINT,
     username   TEXT,
     fact       TEXT,
+    embedding  vector(384),     -- fastembed MiniLM-L12; NULL until computed
     updated_at DOUBLE PRECISION
 )
 INDEX idx_user_memories_lookup ON (chat_id, user_id)
+INDEX idx_user_memories_hnsw   ON (embedding vector_cosine_ops) WHERE embedding IS NOT NULL  -- HNSW
 
 -- Cumulative counters and max-value stats
 user_stats (
@@ -66,14 +68,24 @@ announced_achievements (
 -- Tracks registered chat members for job targeting and achievement queries
 chat_members (chat_id BIGINT, user_id BIGINT, username TEXT, PRIMARY KEY (chat_id, user_id))
 
--- LangChain conversation history (managed by SQLAlchemy / SQLChatMessageHistory via psycopg2)
-message_store (session_id TEXT, message TEXT, ...)
+-- Per-thread conversation history for the response LLM; keyed by reply-chain root or chat_id
+thread_history (
+    thread_id  TEXT             NOT NULL,
+    chat_id    BIGINT           NOT NULL,
+    role       TEXT             NOT NULL,   -- "human" | "ai"
+    content    TEXT             NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL
+)
+INDEX idx_thread_history_lookup ON (thread_id, created_at)
+Retention: 60 days (cleanup_messages_job)
 ```
 
 ## Modules
 
 ```
 db.py               asyncpg Pool; acquire() context manager; init() / close() lifecycle
-unified_messages.py insert (ON CONFLICT DO NOTHING), update_content, get_chain (max 10 hops), get_recent (last N), delete_old
-user_memories.py    upsert_facts (cap 20 per user), upsert_hack_attempt, upsert_stat_fact, get_facts, get_facts_for_users
+unified_messages.py insert (ON CONFLICT DO NOTHING), update_content, get_by_id, get_chain (max 10 hops), get_recent (last N), get_media_group, get_user_messages, cleanup_old
+user_memories.py    upsert_facts (cap 30 per user), upsert_hack_attempt, get_facts, get_facts_for_users, get_facts_with_embeddings, find_similar_fact, refresh_updated_at
+thread_history.py   append_turn, get_history (thread-scoped, oldest-first), cleanup_old (60-day retention)
+embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[float] (384-dim)
 ```

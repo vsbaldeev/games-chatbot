@@ -39,8 +39,9 @@ MessageHandlerManager
 ## Scheduled jobs
 
 ```
-RoastJobManager        daily 12:00 UTC   weekly_roast_job    (exits early unless it is this week's roast day)
-RolesJobManager        daily 14:00 UTC   weekly_roles_job    (exits early unless Sunday)
-SilenceSweepJobManager daily 10:00 UTC   silence_sweep_job   (awards silence achievements)
-ResetModelJobManager   daily 00:05 UTC   reset_model_job     (resets LLM fallback index to 0)
+RoastJobManager          daily 12:00 UTC   weekly_roast_job       (exits early unless it is this week's roast day)
+RolesJobManager          daily 14:00 UTC   weekly_roles_job        (exits early unless Sunday)
+SilenceSweepJobManager   daily 10:00 UTC   silence_sweep_job       (awards silence achievements)
+ResetModelJobManager     daily 00:05 UTC   reset_model_job         (resets LLM fallback index to 0)
+MessageCleanupJobManager daily 03:00 UTC   cleanup_messages_job    (prunes unified_messages and thread_history, 60-day retention)
 ```

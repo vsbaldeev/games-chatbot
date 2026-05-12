@@ -6,36 +6,16 @@ routes every message through a typed LangGraph pipeline.
 
 ## Architecture
 
-```
-src/pipeline/       LangGraph StateGraph — message processing nodes and graph wiring
-src/tools/          MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search
-src/store/          asyncpg data access — unified_messages, user_memories, user_stats
-src/achievements/   Achievement system — stat rules, unlock checks, announcements
-src/events/         Telegram event handlers — member tracking, reactions, messages
-src/commands/       Command handlers — /duel, /dnd_*, /roast, /top, /achievements
-src/jobs/           Scheduled jobs — weekly roast, weekly roles, silence sweep, model reset
-src/bot/            Application wiring — handler registration, job setup, startup lifecycle
-```
-
-## Forwarded posts
-
-The bot ignores forwarded messages and does not respond to them directly.
-To ask the bot about a forwarded post, reply to it and mention the bot.
-
-When building context for such a reply the bot:
-1. Walks the reply chain to the forwarded message.
-2. If the forwarded post is a media group (album), fetches all sibling messages by `media_group_id` and merges them into the context.
-3. Enriches each media item lazily — photos described via vision LLM, voice/video transcribed via Whisper.
-4. Passes the enriched content to the worker, which can also search the web based on it.
-
-## Roast fact selection
-
-`/roast` picks the target user's most embarrassing facts via a two-stage hybrid:
-
-1. **Anchor retrieval** — all stored facts are ranked by cosine similarity to a fixed "embarrassment anchor" embedding (`провал поражение слабость позор…`), top 8 are kept.
-2. **Tightest sub-cluster** — all C(8,3)=56 triples are scored by average pairwise similarity; the most internally coherent triple is passed to the LLM.
-
-This ensures the roast is focused on one specific embarrassing theme rather than a random mix of unrelated facts. Embeddings are computed locally via ONNX (no API call).
+| Module | Description |
+|---|---|
+| [src/pipeline/](src/pipeline/README.md) | LangGraph StateGraph — message processing nodes and graph wiring |
+| [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
+| [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
+| [src/commands/](src/commands/README.md) | Command handlers — /duel, /dnd_*, /roast, /top, /achievements |
+| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roast, weekly roles, silence sweep, cleanup |
+| [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
+| [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
+| [src/achievements/](src/achievements/README.md) | Achievement system — stat rules, unlock checks, announcements |
 
 ## Tech stack
 

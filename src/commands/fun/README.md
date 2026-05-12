@@ -12,22 +12,31 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 
 ```
 1. Pick target
-       /roast and weekly job → random.choice(chat_members)
+       /roast and weekly job → random.choice(chat_members), bot excluded from the pool
        auto-roast            → the offending user
 
 2. Load context
        user_memories — all extracted facts for the target in this chat, newest first
 
-3. LLM call
+3. Fact selection (hybrid — skipped if no embeddings stored)
+       a. Anchor retrieval: all facts ranked by cosine similarity to a fixed "embarrassment anchor"
+          embedding; top 8 kept.
+       b. Tightest sub-cluster: all C(8,3)=56 triples scored by avg pairwise similarity;
+          the most internally coherent triple passed to the LLM.
+       Falls back to plain get_facts() when no embeddings are available.
+
+4. LLM call
        model:       llama-3.3-70b-versatile
        temperature: 0.5   (controlled — specificity beats randomness for humor)
        top_p:       0.9
        max_tokens:  100
        constraint:  ≤ 2 sentences, Russian only, no joke explanation
 
-4. Fallback (no facts)
-       If the target has no stored facts:
+5. Fallback (no facts at all)
        → mock them for never writing anything ("@username вообще ничего не пишет в чате")
+
+6. Store roast to unified_messages (/roast only, not weekly job)
+       → sent message inserted so users can reply to the roast and the bot has context
 ```
 
 ## What information the roast reads
@@ -35,10 +44,10 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 ```
 user_memories
     Source:  LLM-extracted facts accumulated over time from all chat messages
-    Content: short plain-language sentences about the user, in the user's language
-    Window:  all facts for the target (max 20 stored per user per chat)
-    Usage:   injected as a bulleted list; the LLM picks the most embarrassing one
-             and crafts a single targeted joke around it
+    Content: short plain-language sentences about the user, in Russian
+    Window:  all facts for the target (max 30 stored per user per chat)
+    Usage:   hybrid selection picks the most thematically coherent embarrassing triple;
+             passed as a bulleted list; LLM crafts a targeted joke around them
 ```
 
 ## Auto-roast detection

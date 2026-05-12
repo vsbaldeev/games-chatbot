@@ -123,10 +123,11 @@ guard   llama-prompt-guard-2-86m
 
 ```
 context_builder
-    ├─ walk reply_to_msg_id links (max 10 hops) → enrich media placeholders (see above)
-    ├─ load user_memories facts for all user_ids in chain
-    └─ load initiating user's facts if not already in chain
-    │  recent_history = get_recent(limit=20)  [fallback when no reply chain]
+    ├─ get_recent(limit=20), excluding the current message — always loaded
+    ├─ find replied_to message (from recent window or get_by_id fallback)
+    ├─ get_chain(reply_to_msg_id) → reply_chain (max 10 hops, oldest-first)
+    ├─ load user_memories facts for all user_ids visible in recent history
+    └─ load initiating user's facts if not already in recent participants
     │
     ▼
 intent_classifier   llama-4-scout, max_tokens=5, temp=0
@@ -143,8 +144,9 @@ worker_*   ReAct agent, same model fallback chain as response node
     │
     ▼
 response   main personality LLM
-    ├─ prompt: [SYSTEM] + SQLChatMessageHistory (last 10 turns)
-    │            + user facts + worker findings + reply chain + current message
+    ├─ thread_id = reply-chain root message_id, or chat_id for flat messages
+    ├─ prompt: [SYSTEM] + thread_history (last 10 turns, thread-scoped)
+    │            + user facts + recent history (last 10) + replied_to + worker findings + current message
     ├─ DailyLimitError → advance_model(), retry
     ├─ RateLimitError  → exponential backoff (5s, 10s, 20s)
     └─ CJK/Hangul/Thai/Arabic detected → retry with language correction prompt
@@ -152,13 +154,14 @@ response   main personality LLM
     ▼
 memory_writer
     ├─ is_forwarded=True → skip entirely
+    ├─ passive (no response): skip if user_message < 20 chars
     └─ asyncio.create_task() — does NOT block the reply
           → llama-4-scout-17b extracts up to 3 new facts
           → dedup via cosine similarity (fastembed MiniLM-L12, threshold 0.85)
-            duplicate → refresh updated_at; new → insert
+            duplicate → refresh updated_at; new → insert with embedding
           → cap: 30 facts per user per chat, oldest pruned on overflow
           → facts written in Russian
-          → cross-user extraction for any @mentioned users
+          → cross-user extraction for any @mentioned users (if stripped message ≥ 20 chars)
 ```
 
 ---
@@ -173,11 +176,13 @@ IncomingMessage:
     media_type: "text" | "voice" | "video_note" | "video" | "photo"
     message_id, reply_to_msg_id, file_id
     is_forwarded: bool            # True when message.forward_origin is set
+    media_group_id: str | None    # Telegram album group id
 
 AssembledContext:
-    reply_chain: list[dict]              # messages up the reply chain, oldest first
     user_facts: dict[str, list[str]]     # username → extracted fact strings
-    recent_history: list[dict]           # flat window (last 20) for context fill
+    recent_history: list[dict]           # flat window (last 20), newest-first
+    replied_to: dict | None              # the specific message being replied to (for annotation)
+    reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
 
 BotState:
     incoming: IncomingMessage
@@ -185,6 +190,7 @@ BotState:
     response_trigger: "explicit" | "random"
     blocked: bool
     context: AssembledContext | None
+    thread_id: str | None         # reply-chain root message_id or chat_id; scopes LLM history
     intent: "games" | "media" | "general" | None
     worker_output: str | None
     response: str | None
