@@ -1,0 +1,128 @@
+"""
+ContextBuilder tests.
+
+Scenarios anchored to real bugs:
+  4550f56 — reply_chain was never populated; worker got recent_history instead
+  8da0de2 — replied-to not resolved when older than recent window;
+             current message appeared in its own context
+
+All store calls are mocked so no database is required.
+"""
+
+import contextlib
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.pipeline.context_builder import ContextBuilder
+from tests.builders import make_incoming, make_message_row, make_state
+
+STORE_GET_RECENT = "src.pipeline.context_builder.unified_messages.get_recent"
+STORE_GET_CHAIN = "src.pipeline.context_builder.unified_messages.get_chain"
+STORE_GET_BY_ID = "src.pipeline.context_builder.unified_messages.get_by_id"
+STORE_GET_FACTS_FOR_USERS = "src.pipeline.context_builder.user_memories.get_facts_for_users"
+STORE_GET_FACTS = "src.pipeline.context_builder.user_memories.get_facts"
+
+
+def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=None):
+    """Enter all store patches into an ExitStack. Returns (mock_chain, mock_get_by_id)."""
+    stack.enter_context(patch(STORE_GET_RECENT, new_callable=AsyncMock, return_value=recent or []))
+    mock_chain = stack.enter_context(patch(STORE_GET_CHAIN, new_callable=AsyncMock, return_value=chain or []))
+    mock_get_by_id = stack.enter_context(patch(STORE_GET_BY_ID, new_callable=AsyncMock, return_value=by_id))
+    stack.enter_context(patch(STORE_GET_FACTS_FOR_USERS, new_callable=AsyncMock, return_value={}))
+    stack.enter_context(patch(STORE_GET_FACTS, new_callable=AsyncMock, return_value=[]))
+    return mock_chain, mock_get_by_id
+
+
+@pytest.fixture
+def context_builder() -> ContextBuilder:
+    return ContextBuilder()
+
+
+class TestReplyChain:
+    """reply_chain must be populated from the store when a reply_to_msg_id is present."""
+
+    async def test_reply_chain_populated_from_store(self, context_builder):
+        # Bug (4550f56): ContextBuilder was not calling get_chain, so workers
+        # fell back silently to recent_history for thread context.
+        chain_rows = [make_message_row(message_id=50), make_message_row(message_id=51)]
+        incoming = make_incoming(reply_to_msg_id=51)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            mock_chain, _ = patch_store(stack, chain=chain_rows)
+            result = await context_builder(state)
+
+        mock_chain.assert_called_once_with(chat_id=1000, message_id=51)
+        assert result["context"]["reply_chain"] == chain_rows
+
+    async def test_reply_chain_empty_when_no_reply(self, context_builder):
+        incoming = make_incoming(reply_to_msg_id=None)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            mock_chain, _ = patch_store(stack)
+            result = await context_builder(state)
+
+        mock_chain.assert_not_called()
+        assert result["context"]["reply_chain"] == []
+
+
+class TestRepliedToResolution:
+    """replied_to must be resolved correctly whether the message is in recent or older."""
+
+    async def test_replied_to_found_in_recent_without_extra_db_call(self, context_builder):
+        # Bug (8da0de2): when the replied-to message existed in recent, it was
+        # still triggering a redundant get_by_id fetch.
+        target_row = make_message_row(message_id=99)
+        recent_rows = [make_message_row(message_id=98), target_row]
+        incoming = make_incoming(message_id=200, reply_to_msg_id=99)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            _, mock_get_by_id = patch_store(stack, recent=recent_rows)
+            result = await context_builder(state)
+
+        mock_get_by_id.assert_not_called()
+        assert result["context"]["replied_to"] == target_row
+
+    async def test_replied_to_fetched_by_id_when_not_in_recent(self, context_builder):
+        old_row = make_message_row(message_id=10)
+        recent_rows = [make_message_row(message_id=98)]
+        incoming = make_incoming(message_id=200, reply_to_msg_id=10)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            _, mock_get_by_id = patch_store(stack, recent=recent_rows, by_id=old_row)
+            result = await context_builder(state)
+
+        mock_get_by_id.assert_called_once_with(chat_id=1000, message_id=10)
+        assert result["context"]["replied_to"] == old_row
+
+    async def test_replied_to_is_none_when_no_reply(self, context_builder):
+        incoming = make_incoming(message_id=200, reply_to_msg_id=None)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack)
+            result = await context_builder(state)
+
+        assert result["context"]["replied_to"] is None
+
+
+class TestCurrentMessageExclusion:
+    async def test_current_message_excluded_from_recent_history(self, context_builder):
+        # Bug (8da0de2): the incoming message itself was included in recent_history,
+        # causing the bot to see its own prompt as part of context.
+        current_row = make_message_row(message_id=200)
+        older_row = make_message_row(message_id=198)
+        incoming = make_incoming(message_id=200)
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, recent=[current_row, older_row])
+            result = await context_builder(state)
+
+        history_ids = [row["message_id"] for row in result["context"]["recent_history"]]
+        assert 200 not in history_ids
+        assert 198 in history_ids
