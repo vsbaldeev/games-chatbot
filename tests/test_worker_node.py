@@ -1,0 +1,124 @@
+"""WorkerNode tests.
+
+Regression for the forwarded-article scenario: a user forwarding a post from
+another channel, then replying with "@bot what's this article about?" triggered
+a web_search even though the article text was already in the reply chain.
+
+Root cause: GENERAL_WORKER_PROMPT had no rule about using existing context first.
+Fix: CONTEXT FIRST clause added before TOOL SELECTION in agent.py.
+
+Two invariants tested here:
+  1. The prompt carries the CONTEXT FIRST rule in the right position.
+  2. __build_worker_input includes reply-chain content in the assembled input
+     so the rule has something to work with.
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.agent import GENERAL_WORKER_PROMPT
+from src.pipeline.worker_node import WorkerNode
+from tests.builders import make_incoming, make_message_row
+
+
+def make_worker() -> WorkerNode:
+    return WorkerNode(MagicMock(), "general")
+
+
+def build_input(worker: WorkerNode, msg: dict, context: dict) -> str:
+    return worker._WorkerNode__build_worker_input(msg, context)
+
+
+class TestGeneralWorkerPrompt:
+    def test_context_first_rule_exists(self):
+        """GENERAL_WORKER_PROMPT must contain the CONTEXT FIRST directive so the
+        LLM knows to use existing reply-chain content before reaching for tools."""
+        assert "CONTEXT FIRST" in GENERAL_WORKER_PROMPT
+
+    def test_context_first_precedes_tool_selection(self):
+        """CONTEXT FIRST must appear before TOOL SELECTION so the model evaluates
+        available context before deciding whether a tool call is needed."""
+        context_first_pos = GENERAL_WORKER_PROMPT.index("CONTEXT FIRST")
+        tool_selection_pos = GENERAL_WORKER_PROMPT.index("TOOL SELECTION")
+        assert context_first_pos < tool_selection_pos
+
+    def test_prompt_forbids_tools_when_context_is_sufficient(self):
+        """The prompt must explicitly say not to call tools when the needed
+        content is already present in the reply chain."""
+        assert "Do NOT call any tools" in GENERAL_WORKER_PROMPT
+
+
+class TestWorkerNodeBuildInput:
+    """__build_worker_input assembles the LLM prompt string for the worker.
+
+    The forwarded-article fix relies on this method correctly embedding the
+    reply chain — without that, the CONTEXT FIRST directive has no content
+    to point the model at.
+    """
+
+    def test_reply_chain_content_appears_in_worker_input(self):
+        """Article text from a forwarded message must appear in the assembled
+        input so the LLM can summarize it without calling web_search."""
+        forwarded = make_message_row(
+            message_id=10,
+            username="news_channel",
+            content="Подробный обзор новой игры с оценками и деталями релиза.",
+        )
+        incoming = make_incoming(
+            username="alice",
+            raw_text="@testbot что за статья?",
+            processed_text="@testbot что за статья?",
+        )
+        context = {"reply_chain": [forwarded], "recent_history": []}
+
+        result = build_input(make_worker(), incoming, context)
+
+        assert "Подробный обзор новой игры с оценками и деталями релиза." in result
+
+    def test_reply_chain_suppresses_recent_history(self):
+        """When a reply chain is present, recent history must not appear in
+        the input — they are mutually exclusive context sources."""
+        chain_msg = make_message_row(message_id=20, username="fwd", content="контент из канала")
+        recent_msg = make_message_row(message_id=5, username="bob", content="недавнее сообщение")
+        incoming = make_incoming(
+            username="alice",
+            raw_text="@testbot объясни",
+            processed_text="@testbot объясни",
+        )
+        context = {"reply_chain": [chain_msg], "recent_history": [recent_msg]}
+
+        result = build_input(make_worker(), incoming, context)
+
+        assert "контент из канала" in result
+        assert "недавнее сообщение" not in result
+
+    def test_recent_history_used_when_no_reply_chain(self):
+        """Without a reply chain the worker falls back to recent history so
+        conversational context is still available to the LLM."""
+        recent_msg = make_message_row(message_id=5, username="bob", content="недавнее сообщение")
+        incoming = make_incoming(
+            username="alice",
+            raw_text="@testbot помнишь?",
+            processed_text="@testbot помнишь?",
+        )
+        context = {"reply_chain": [], "recent_history": [recent_msg]}
+
+        result = build_input(make_worker(), incoming, context)
+
+        assert "недавнее сообщение" in result
+
+    def test_user_question_always_present(self):
+        """The user's question must appear at the end of every worker input
+        regardless of context availability."""
+        incoming = make_incoming(
+            username="alice",
+            raw_text="@testbot что думаешь?",
+            processed_text="@testbot что думаешь?",
+        )
+        context = {"reply_chain": [], "recent_history": []}
+
+        result = build_input(make_worker(), incoming, context)
+
+        assert "@alice" in result
+        assert "@testbot что думаешь?" in result
