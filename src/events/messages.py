@@ -26,9 +26,6 @@ OFFENSE_RE = re.compile(
 )
 
 
-TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
-
-
 MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
 
@@ -46,14 +43,20 @@ def is_reply_to_game_message(update: Update) -> bool:
     return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
-def strip_markdown(text: str) -> str:
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", text, flags=re.DOTALL)
-    lines = [line for line in text.splitlines() if not TABLE_SEP_RE.match(line)]
-    return "\n".join(lines)
+from src.pipeline.response_node import strip_markdown
 from src.pipeline.state import BotState, IncomingMessage
 from src.commands.fun.roast import generate_roast_text
+
+
+async def derive_thread_id(chat_id: int, reply_to_msg_id: int | None) -> str:
+    """Return a thread_id scoped to the reply chain root, or chat_id for flat messages."""
+    if reply_to_msg_id is None:
+        return str(chat_id)
+    chain = await unified_messages.get_chain(chat_id=chat_id, message_id=reply_to_msg_id)
+    if not chain:
+        return str(chat_id)
+    root = chain[0]  # get_chain returns oldest-first
+    return f"{chat_id}_{root['message_id']}"
 
 logger = log.get_logger(__name__)
 
@@ -119,7 +122,10 @@ async def run_pipeline(
     """Run the LangGraph pipeline and return True if the bot sent a response."""
     msg = update.message
     chat = update.effective_chat
+    reply_to_msg_id = msg.reply_to_message.message_id if msg.reply_to_message else None
+    thread_id = await derive_thread_id(chat.id, reply_to_msg_id)
     initial_state = build_pipeline_state(update, context, media_type, file_id)
+    initial_state["thread_id"] = thread_id
 
     try:
         pipeline = agent.get_pipeline()

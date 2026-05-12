@@ -1,56 +1,30 @@
 """ResponseNode — personality LLM that turns worker facts into a chat reply."""
 
-import asyncio
 import datetime
+import re
 
-from langchain_community.chat_message_histories import SQLChatMessageHistory
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src import config, log
 from src.agent import AGENT_MODEL_FALLBACKS, DailyLimitError, RESPONSE_PROMPT, apply_language_correction
 from src.pipeline.state import BotState
-from src.store import unified_messages
+from src.store import thread_history, unified_messages
 
 logger = log.get_logger(__name__)
 
 RECENT_FILL_LIMIT = 10
+TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 
-def build_history(chat_id: str) -> SQLChatMessageHistory:
-    return SQLChatMessageHistory(
-        session_id=chat_id,
-        connection=config.SQLALCHEMY_DB_URL,
-        table_name="message_store",
-    )
+def strip_markdown(text: str) -> str:
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", text, flags=re.DOTALL)
+    lines = [line for line in text.splitlines() if not TABLE_SEP_RE.match(line)]
+    return "\n".join(lines)
 
 
-async def trim_history(history: SQLChatMessageHistory, max_messages: int) -> None:
-    def trim_sync() -> None:
-        messages = history.messages
-        if len(messages) <= max_messages:
-            return
-        to_keep = messages[-max_messages:]
-        history.clear()
-        for msg in to_keep:
-            history.add_message(msg)
-    await asyncio.to_thread(trim_sync)
-
-
-async def trim_db_history(history: SQLChatMessageHistory, max_user_messages: int = 40) -> None:
-    def trim_sync() -> None:
-        messages = history.messages
-        user_indices = [idx for idx, msg in enumerate(messages) if isinstance(msg, HumanMessage)]
-        if len(user_indices) <= max_user_messages:
-            return
-        cutoff = user_indices[-max_user_messages]
-        to_keep = messages[cutoff:]
-        history.clear()
-        for msg in to_keep:
-            history.add_message(msg)
-    await asyncio.to_thread(trim_sync)
-
-
-def render_row(row: dict) -> str:
+def _render_row(row: dict) -> str:
     media_type = row["media_type"]
     content = row["content"]
     if media_type == "photo":
@@ -59,31 +33,53 @@ def render_row(row: dict) -> str:
     return f"@{row['username']}{media_label}: {content}"
 
 
-def build_response_input(username: str, user_input: str, worker_output: str, context) -> str:
+def _build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
+    result: list[HumanMessage | AIMessage] = []
+    for entry in history:
+        if entry["role"] == "human":
+            result.append(HumanMessage(content=entry["content"]))
+        else:
+            result.append(AIMessage(content=entry["content"]))
+    return result
+
+
+def _build_response_input(
+    username: str, user_input: str, worker_output: str, context
+) -> str:
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
+
     user_facts = (context or {}).get("user_facts") or {}
     if user_facts:
         parts.append("Что я знаю об участниках чата:")
         for uname, facts in user_facts.items():
             parts.append(f"@{uname}: {'; '.join(facts)}")
         parts.append("")
-    reply_chain = (context or {}).get("reply_chain") or []
-    if reply_chain:
-        parts.append("Цепочка ответов (от старого к новому):")
-        for row in reply_chain:
-            parts.append(render_row(row))
+
+    recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
+    if recent:
+        parts.append("Недавние сообщения чата:")
+        for row in reversed(recent):
+            parts.append(_render_row(row))
         parts.append("")
-    else:
-        recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
-        if recent:
-            parts.append("Недавние сообщения чата:")
-            for row in reversed(recent):
-                parts.append(render_row(row))
+
+    replied_to = (context or {}).get("replied_to")
+    if replied_to:
+        recent_ids = {row["message_id"] for row in recent}
+        if replied_to["message_id"] not in recent_ids:
+            parts.append("Сообщение, на которое отвечают:")
+            parts.append(_render_row(replied_to))
             parts.append("")
+
     if worker_output:
         parts.append(f"[Собранные данные]:\n{worker_output}\n")
-    parts.append(f"@{username}: {user_input}")
+
+    if replied_to:
+        trigger = f"@{username} (↳ @{replied_to['username']}): {user_input}"
+    else:
+        trigger = f"@{username}: {user_input}"
+    parts.append(trigger)
+
     return "\n".join(parts)
 
 
@@ -95,19 +91,32 @@ class ResponseNode:
 
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
-        history = build_history(str(msg["chat_id"]))
-        await trim_history(history, config.MAX_HISTORY_MESSAGES)
-        past_messages = await asyncio.to_thread(lambda: history.messages)
+        thread_id = state.get("thread_id") or str(msg["chat_id"])
+
+        history = await thread_history.get_history(
+            thread_id=thread_id, limit=config.MAX_HISTORY_MESSAGES
+        )
+        past_messages = _build_past_messages(history)
+
         user_input = msg["processed_text"] or msg["raw_text"] or ""
-        enriched = build_response_input(
+        enriched = _build_response_input(
             msg["username"],
             user_input,
             state.get("worker_output") or "",
             state.get("context"),
         )
         ai_message = await self.__generate(past_messages, enriched)
-        await self.__save(history, msg["username"], user_input, ai_message)
-        return {"response": ai_message.content if ai_message else ""}
+        response_text = ai_message.content if ai_message else ""
+
+        if response_text.strip():
+            await thread_history.append_turn(
+                thread_id=thread_id,
+                chat_id=msg["chat_id"],
+                human_content=f"@{msg['username']}: {user_input}",
+                ai_content=strip_markdown(response_text),
+            )
+
+        return {"response": response_text}
 
     async def __generate(self, past_messages: list, enriched: str):
         messages = [SystemMessage(content=RESPONSE_PROMPT)] + past_messages + [HumanMessage(content=enriched)]
@@ -124,12 +133,3 @@ class ResponseNode:
                     continue
                 raise
         raise DailyLimitError("All fallback models exhausted in response node")
-
-    async def __save(self, history, username: str, user_input: str, ai_message) -> None:
-        if not (ai_message and ai_message.content and ai_message.content.strip()):
-            return
-        def save_sync() -> None:
-            history.add_user_message(f"@{username}: {user_input}")
-            history.add_message(ai_message)
-        await asyncio.to_thread(save_sync)
-        await trim_db_history(history)

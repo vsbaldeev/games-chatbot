@@ -225,6 +225,7 @@ class Agent:
         self.__pipeline = None
         self.__worker_executors: dict = {}
         self.__response_llm: Optional[ChatGroq] = None
+        self.__model_lock: asyncio.Lock = asyncio.Lock()
 
     async def init(self, reset_model: bool = True) -> None:
         if reset_model:
@@ -246,23 +247,25 @@ class Agent:
         return self.__response_llm
 
     async def advance_model(self) -> bool:
-        next_index = self.__model_index + 1
-        if next_index >= len(AGENT_MODEL_FALLBACKS):
-            return False
-        self.__model_index = next_index
-        logger.warning(
-            "Daily limit on %s, switching to: %s",
-            AGENT_MODEL_FALLBACKS[next_index - 1],
-            AGENT_MODEL_FALLBACKS[next_index],
-        )
-        await self.__build_all_executors()
-        return True
+        async with self.__model_lock:
+            next_index = self.__model_index + 1
+            if next_index >= len(AGENT_MODEL_FALLBACKS):
+                return False
+            self.__model_index = next_index
+            logger.warning(
+                "Daily limit on %s, switching to: %s",
+                AGENT_MODEL_FALLBACKS[next_index - 1],
+                AGENT_MODEL_FALLBACKS[next_index],
+            )
+            await self.__build_all_executors()
+            return True
 
     async def reset_model_index(self) -> None:
-        if self.__model_index != 0:
-            logger.info("Resetting to primary model from index %s", self.__model_index)
-            self.__model_index = 0
-            await self.__build_all_executors()
+        async with self.__model_lock:
+            if self.__model_index != 0:
+                logger.info("Resetting to primary model from index %s", self.__model_index)
+                self.__model_index = 0
+                await self.__build_all_executors()
 
     async def __build_all_executors(self) -> None:
         from src.tools import GAMES_TOOLS, GENERAL_TOOLS, MEDIA_DOMAIN_TOOLS

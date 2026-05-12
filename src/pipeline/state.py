@@ -30,9 +30,10 @@ class IncomingMessage(TypedDict):
 class AssembledContext(TypedDict):
     """Everything the Agent node needs to build an enriched prompt."""
 
-    reply_chain: list[dict]        # messages up the reply chain, oldest first
-    user_facts: dict[str, list[str]]  # username → list of LLM-extracted fact strings
-    recent_history: list[dict]     # flat recent messages used to fill the context window
+    user_facts: dict[str, list[str]]   # username → list of LLM-extracted fact strings
+    recent_history: list[dict]         # flat recent messages used to fill the context window
+    replied_to: dict | None            # the specific message being replied to, for annotation
+    reply_chain: list[dict]            # full reply chain from root to replied-to message, oldest-first
 
 
 class BotState(TypedDict):
@@ -44,7 +45,8 @@ class BotState(TypedDict):
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
-    context_types: Any            # telegram.ext.ContextTypes instance for sending replies
+    context_types: Any             # telegram.ext.ContextTypes instance for sending replies
+    thread_id: NotRequired[str]    # derived from reply-chain root; scopes LLM history
     intent: NotRequired[str | None]        # "games" | "media" | "general"
     worker_output: NotRequired[str | None] # raw facts gathered by the specialist worker
-    search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator; edited with final reply
+    search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator

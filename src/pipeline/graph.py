@@ -3,13 +3,14 @@ LangGraph StateGraph wiring for the bot pipeline.
 
 Graph edges:
   START → router
-    ├─ should_respond=True → ingester
-    ├─ should_respond=False + text (≥20 chars) → memory_writer  (passive learning)
-    └─ should_respond=False + other → END
+    ├─ text + should_respond=True  → ingester
+    ├─ text + long + not forwarded → memory_writer
+    ├─ text + other                → END
+    └─ any media                  → ingester  (always, to enrich content in DB)
                 ingester
-                    ├─ should_respond=True → guard
-                    └─ should_respond=False → END  (photo described+stored, no reply)
-                              guard
+                    ├─ should_respond=True  → filter
+                    └─ should_respond=False → END  (media described+stored, no reply)
+                              filter
                                 ├─ blocked → END
                                 └─ ok → context_builder → intent_classifier
                                               ├─► worker_games ─┐
@@ -36,12 +37,14 @@ logger = log.get_logger(__name__)
 
 
 def route_after_router(state: BotState) -> str:
-    if state["should_respond"]:
-        return "ingester"
     msg = state["incoming"]
-    if msg["media_type"] == "text" and len((msg.get("raw_text") or "").strip()) >= MIN_PASSIVE_LENGTH:
-        return "memory_writer"
-    return END
+    if msg["media_type"] == "text":
+        if state["should_respond"]:
+            return "ingester"
+        if not msg.get("is_forwarded") and len((msg.get("raw_text") or "").strip()) >= MIN_PASSIVE_LENGTH:
+            return "memory_writer"
+        return END
+    return "ingester"
 
 
 def route_after_ingester(state: BotState) -> str:

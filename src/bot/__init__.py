@@ -10,7 +10,7 @@ from src import achievements, log
 from src.agent import agent
 from src.bot.jobs import RoastJobManager, RolesJobManager, SilenceSweepJobManager, ResetModelJobManager, MessageCleanupJobManager
 from src.memes import store as meme_store
-from src.store import db as database, unified_messages as msg_store, user_memories as memory_store
+from src.store import db as database, unified_messages as msg_store, user_memories as memory_store, thread_history as thread_history_store
 
 log.setup()
 logger = log.get_logger(__name__)
@@ -23,6 +23,7 @@ async def __on_startup(application: Application) -> None:
     await msg_store.init_table()
     await memory_store.init_table()
     await meme_store.init_table()
+    await thread_history_store.init_table()
     logger.info("Bot started, all tables and jobs initialized")
 
 

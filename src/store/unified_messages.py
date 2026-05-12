@@ -209,6 +209,21 @@ async def cleanup_old(*, days: int = MESSAGE_RETENTION_DAYS) -> int:
     return int(result.split()[-1])
 
 
+async def get_by_id(*, chat_id: int, message_id: int) -> dict | None:
+    """Fetch a single message row by its primary key. Returns None if not found."""
+    async with database.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT message_id, user_id, username, content, media_type,
+                   reply_to_msg_id, file_id, media_group_id
+            FROM unified_messages
+            WHERE chat_id = $1 AND message_id = $2
+            """,
+            chat_id, message_id,
+        )
+    return dict(row) if row else None
+
+
 async def get_recent(*, chat_id: int, limit: int = 20) -> list[dict]:
     """Return the most recent messages for a chat, newest-first."""
     async with database.acquire() as conn:
