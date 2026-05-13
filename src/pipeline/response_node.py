@@ -6,7 +6,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src import config, log
-from src.agent import AGENT_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, RESPONSE_PROMPT, apply_language_correction, strip_thinking
+from src.agent import RESPONSE_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, RESPONSE_PROMPT, apply_language_correction, strip_thinking
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -44,7 +44,8 @@ def _build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
 
 
 def _build_response_input(
-    username: str, user_input: str, worker_output: str, context, response_trigger: str = "explicit"
+    username: str, user_input: str, worker_output: str, context,
+    response_trigger: str = "explicit", has_thread_history: bool = False,
 ) -> str:
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
@@ -57,9 +58,10 @@ def _build_response_input(
         parts.append("")
 
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
-    # Skip unrelated recent history for random triggers — the bot should focus
-    # only on the media/message that triggered it, not other open threads.
-    if recent and response_trigger != "random":
+    # Skip recent history when thread history is present (thread turns already
+    # provide conversational context, group chat would just confuse the model)
+    # or when the trigger is random (bot should focus only on the triggering media).
+    if recent and response_trigger != "random" and not has_thread_history:
         parts.append("Недавние сообщения чата:")
         for row in reversed(recent):
             parts.append(_render_row(row))
@@ -107,6 +109,7 @@ class ResponseNode:
             state.get("worker_output") or "",
             state.get("context"),
             state.get("response_trigger") or "explicit",
+            has_thread_history=bool(past_messages),
         )
         ai_message = await self.__generate(past_messages, enriched)
         response_text = strip_thinking(ai_message.content) if ai_message else ""
@@ -124,7 +127,7 @@ class ResponseNode:
     async def __generate(self, past_messages: list, enriched: str):
         messages = [SystemMessage(content=RESPONSE_PROMPT)] + past_messages + [HumanMessage(content=enriched)]
         llm = self.__agent.get_response_llm()
-        for _ in range(len(AGENT_MODEL_FALLBACKS)):
+        for _ in range(len(RESPONSE_MODEL_FALLBACKS)):
             try:
                 ai_message = await llm.ainvoke(messages)
                 return await apply_language_correction(llm, ai_message, messages)
@@ -137,7 +140,7 @@ class ResponseNode:
                 ))
                 if is_context:
                     raise ContextLengthError("Response prompt exceeds model context window")
-                if is_daily and await self.__agent.advance_model():
+                if is_daily and await self.__agent.advance_response_model():
                     llm = self.__agent.get_response_llm()
                     continue
                 raise

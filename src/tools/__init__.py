@@ -9,7 +9,7 @@ from src.tools.store import (
     get_steam_player_count,
     get_steam_reviews_summary,
 )
-from src.tools.web import fetch_article, web_search
+from src.tools.web import web_search
 
 ALL_TOOLS = [
     search_games,
@@ -24,5 +24,4 @@ ALL_TOOLS = [
     search_movie_or_tv,
     search_anime,
     web_search,
-    fetch_article,
 ]

@@ -5,13 +5,13 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent import AGENT_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, invoke_with_retry, strip_thinking
+from src.agent import WORKER_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, invoke_with_retry, strip_thinking
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
-SEARCH_TOOLS = frozenset({"web_search", "fetch_article"})
+SEARCH_TOOLS = frozenset({"web_search"})
 RECENT_FILL_LIMIT = 10
 
 
@@ -33,7 +33,7 @@ class SearchNotificationCallback(AsyncCallbackHandler):
         if tool_name not in SEARCH_TOOLS or self.__notified:
             return
         self.__notified = True
-        text = "🔗 Читаю страницу, подожди..." if tool_name == "fetch_article" else "🔍 Ищу, подожди немного..."
+        text = "🔍 Ищу, подожди немного..."
         try:
             sent = await self.__message.reply_text(text)
             self.__holder.append(sent)
@@ -55,7 +55,7 @@ class WorkerNode:
         executor = self.__agent.get_worker_executor()
         run_config = {"callbacks": [callback]}
 
-        for _ in range(len(AGENT_MODEL_FALLBACKS)):
+        for _ in range(len(WORKER_MODEL_FALLBACKS)):
             try:
                 result = await invoke_with_retry(
                     executor,
@@ -66,7 +66,7 @@ class WorkerNode:
                 notification_msg = notification_holder[0] if notification_holder else None
                 return {"worker_output": output, "search_notification_msg": notification_msg}
             except DailyLimitError:
-                if not await self.__agent.advance_model():
+                if not await self.__agent.advance_worker_model():
                     raise
                 executor = self.__agent.get_worker_executor()
             except ContextLengthError as err:

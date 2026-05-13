@@ -6,14 +6,7 @@ nodes. Each node reads BotState and returns a partial update dict.
 ## Overview
 
 ```
-router ──► ingester ──► filter ──► guard ──► context_builder ──► intent_classifier
-                                                                         │
-                                               ┌─────────────────────────┼─────────────────────┐
-                                               ▼                         ▼                     ▼
-                                          worker_games            worker_media           worker_general
-                                               └─────────────────────────┼─────────────────────┘
-                                                                         ▼
-                                                                      response ──► memory_writer ──► END
+router ──► ingester ──► filter ──► guard ──► context_builder ──► worker ──► response ──► memory_writer ──► END
 ```
 
 Conditional exits exist at every node — see the detailed diagrams below.
@@ -116,7 +109,7 @@ guard   llama-prompt-guard-2-86m
 
 ---
 
-## Response pipeline (context_builder → response → memory_writer)
+## Response pipeline (context_builder → worker → response → memory_writer)
 
 ```
 context_builder
@@ -127,17 +120,14 @@ context_builder
     └─ load initiating user's facts if not already in recent participants
     │
     ▼
-intent_classifier   llama-4-scout, max_tokens=5, temp=0
-    ├─ "games"   → worker_games   (IGDB, Steam, PS Store tools)
-    ├─ "media"   → worker_media   (TMDB, AniList, OpenCritic tools)
-    └─ "general" → worker_general (web_search, fetch_article tools)
-    │
-    ▼
-worker_*   ReAct agent, same model fallback chain as response node
-    ├─ prompt: reply chain (or recent history) + current question
-    ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search calls
+worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web)
+    ├─ CONTEXT FIRST: if reply chain already contains the answer, no tools called
+    ├─ prompt: reply chain (or recent history for explicit triggers) + current question
+    │          random triggers receive only the reply chain — no recent history bleed
+    ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search/fetch_article
     ├─ DailyLimitError → advance_model(), retry with next fallback
-    └─ any other error → worker_output="" (response node still runs)
+    ├─ ContextLengthError → worker_output="" (response node still runs)
+    └─ any other error   → worker_output="" (response node still runs)
     │
     ▼
 response   main personality LLM
@@ -188,8 +178,8 @@ BotState:
     blocked: bool
     context: AssembledContext | None
     thread_id: str | None         # reply-chain root message_id or chat_id; scopes LLM history
-    intent: "games" | "media" | "general" | None
     worker_output: str | None
+    search_notification_msg: Any | None   # Telegram Message used as search indicator
     response: str | None
     context_types: ContextTypes          # Telegram context for sending replies
 ```
