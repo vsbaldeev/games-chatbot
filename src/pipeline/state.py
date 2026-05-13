@@ -47,6 +47,5 @@ class BotState(TypedDict):
     response: str | None
     context_types: Any             # telegram.ext.ContextTypes instance for sending replies
     thread_id: NotRequired[str]    # derived from reply-chain root; scopes LLM history
-    intent: NotRequired[str | None]        # "games" | "media" | "general"
-    worker_output: NotRequired[str | None] # raw facts gathered by the specialist worker
+    worker_output: NotRequired[str | None] # raw facts gathered by the worker
     search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator

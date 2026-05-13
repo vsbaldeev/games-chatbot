@@ -4,7 +4,7 @@ Regression for the forwarded-article scenario: a user forwarding a post from
 another channel, then replying with "@bot what's this article about?" triggered
 a web_search even though the article text was already in the reply chain.
 
-Root cause: GENERAL_WORKER_PROMPT had no rule about using existing context first.
+Root cause: WORKER_PROMPT had no rule about using existing context first.
 Fix: CONTEXT FIRST clause added before TOOL SELECTION in agent.py.
 
 Two invariants tested here:
@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent import ContextLengthError, GENERAL_WORKER_PROMPT
+from src.agent import ContextLengthError, WORKER_PROMPT
 from src.pipeline.worker_node import WorkerNode
 from tests.builders import make_incoming, make_message_row, make_state
 
@@ -25,30 +25,30 @@ INVOKE_WITH_RETRY = "src.pipeline.worker_node.invoke_with_retry"
 
 
 def make_worker() -> WorkerNode:
-    return WorkerNode(MagicMock(), "general")
+    return WorkerNode(MagicMock())
 
 
 def build_input(worker: WorkerNode, msg: dict, context: dict, response_trigger: str = "explicit") -> str:
     return worker._WorkerNode__build_worker_input(msg, context, response_trigger)
 
 
-class TestGeneralWorkerPrompt:
+class TestWorkerPrompt:
     def test_context_first_rule_exists(self):
-        """GENERAL_WORKER_PROMPT must contain the CONTEXT FIRST directive so the
+        """WORKER_PROMPT must contain the CONTEXT FIRST directive so the
         LLM knows to use existing reply-chain content before reaching for tools."""
-        assert "CONTEXT FIRST" in GENERAL_WORKER_PROMPT
+        assert "CONTEXT FIRST" in WORKER_PROMPT
 
     def test_context_first_precedes_tool_selection(self):
         """CONTEXT FIRST must appear before TOOL SELECTION so the model evaluates
         available context before deciding whether a tool call is needed."""
-        context_first_pos = GENERAL_WORKER_PROMPT.index("CONTEXT FIRST")
-        tool_selection_pos = GENERAL_WORKER_PROMPT.index("TOOL SELECTION")
+        context_first_pos = WORKER_PROMPT.index("CONTEXT FIRST")
+        tool_selection_pos = WORKER_PROMPT.index("TOOL SELECTION")
         assert context_first_pos < tool_selection_pos
 
     def test_prompt_forbids_tools_when_context_is_sufficient(self):
         """The prompt must explicitly say not to call tools when the needed
         content is already present in the reply chain."""
-        assert "Do NOT call any tools" in GENERAL_WORKER_PROMPT
+        assert "Do NOT call any tools" in WORKER_PROMPT
 
 
 class TestWorkerNodeBuildInput:
@@ -177,7 +177,7 @@ class TestWorkerNodeThinkingStripping:
 
         with patch(INVOKE_WITH_RETRY, new_callable=AsyncMock,
                    return_value={"messages": [last_message]}):
-            result = await WorkerNode(agent, "general")(state)
+            result = await WorkerNode(agent)(state)
 
         assert "<think>" not in result["worker_output"]
         assert "GTA 6 выходит 19 ноября 2026." in result["worker_output"]
@@ -200,7 +200,7 @@ class TestContextLengthErrorHandling:
         )
 
         with patch(INVOKE_WITH_RETRY, new_callable=AsyncMock, side_effect=ContextLengthError("too long")):
-            result = await WorkerNode(agent, "general")(state)
+            result = await WorkerNode(agent)(state)
 
         assert result["worker_output"] == ""
         assert result["search_notification_msg"] is None

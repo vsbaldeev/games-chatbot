@@ -89,47 +89,28 @@ AGENT_MODEL_FALLBACKS = [
     "meta-llama/llama-4-scout-17b-16e-instruct",  # fallback-3: 17B, 500K TPD, 30K TPM
 ]
 
-GAMES_WORKER_PROMPT = """You are a data-gathering assistant for video game questions.
-Call tools to fetch facts. Output findings as plain text. No personality, no sarcasm.
+WORKER_PROMPT = """You are a data-gathering assistant. Call tools to fetch facts when needed.
+Output findings as plain text. No personality, no sarcasm.
 Use English for tool queries; output language should match the user's question.
-
-TOOL SELECTION:
-- Game platforms, genres, modes, rating, developer: search_games → get_game_details
-- Steam online players: get_steam_player_count
-- Steam price/details: get_steam_app_details
-- Critic review scores: get_game_reviews
-- Crossplay, news, release dates, recent updates: web_search
-- Top PS5 game recommendations by mode: get_ps5_recommendations
-- PS Store price in Turkish lira: get_ps_store_price_tr
-
-STRICT: call ALL needed tools BEFORE writing any text. NEVER output text between tool calls.
-Output raw facts only — no conversational wrapping."""
-
-MEDIA_WORKER_PROMPT = """You are a data-gathering assistant for movies, TV shows, cartoons, and anime.
-Call tools to fetch facts. Output findings as plain text. No personality, no sarcasm.
-
-TOOL SELECTION:
-- Movie or animated film rating, overview, genres, year: search_movie_or_tv with type "movie"
-- TV series or animated series: search_movie_or_tv with type "tv"
-- Anime episodes, airing status, score, studios: search_anime
-- Streaming platform, new season date, recent news: web_search
-- Read a specific article or page: fetch_article
-
-STRICT: call ALL needed tools BEFORE writing any text. NEVER output text between tool calls.
-Output raw facts only — no conversational wrapping."""
-
-GENERAL_WORKER_PROMPT = """You are a data-gathering assistant for general questions.
-Call tools only when factual data is needed. Output findings as plain text. No personality.
 
 CONTEXT FIRST: If the reply chain already contains the content the user is asking about
 (a forwarded post, article text, or message), extract the key facts from it directly.
 Do NOT call any tools for content already present in the context.
 
 TOOL SELECTION:
-- Web search for any factual question: web_search
-- Read a specific web page: fetch_article
+- Game details, platforms, genres, rating, developer: search_games → get_game_details
+- Steam player count: get_steam_player_count
+- Steam price and store details: get_steam_app_details
+- Critic and user review scores: get_game_reviews, get_steam_reviews_summary
+- Top PS5 game recommendations: get_ps5_recommendations
+- PS Store price in Turkish lira: get_ps_store_price_tr, get_ps_store_sales
+- Movie or animated film: search_movie_or_tv (type "movie")
+- TV series or animated series: search_movie_or_tv (type "tv")
+- Anime details, episodes, score, studios: search_anime
+- Any other factual question, news, release dates, crossplay: web_search
+- Read a specific page or article: fetch_article
 
-If no tools are needed and no facts to extract (casual chat, bot commands, greetings), output an empty string.
+If no tools are needed and no facts to extract (casual chat, reactions, bot commands, greetings), output an empty string.
 
 STRICT: call ALL needed tools BEFORE writing any text. NEVER output text between tool calls.
 Output raw facts only — no conversational wrapping."""
@@ -230,9 +211,8 @@ class Agent:
     def __init__(self) -> None:
         self.__model_index: int = 0
         self.__pipeline = None
-        self.__worker_executors: dict = {}
+        self.__worker_executor = None
         self.__response_llm: Optional[ChatGroq] = None
-        self.__classifier_llm: Optional[ChatGroq] = None
         self.__model_lock: asyncio.Lock = asyncio.Lock()
 
     async def init(self, reset_model: bool = True) -> None:
@@ -248,16 +228,13 @@ class Agent:
             self.__pipeline = build_pipeline(self)
         return self.__pipeline
 
-    def get_worker_executor(self, domain: str):
-        return self.__worker_executors.get(domain, self.__worker_executors["general"])
+    def get_worker_executor(self):
+        assert self.__worker_executor is not None, "Agent.init() must be called before get_worker_executor()"
+        return self.__worker_executor
 
     def get_response_llm(self) -> ChatGroq:
         assert self.__response_llm is not None, "Agent.init() must be called before get_response_llm()"
         return self.__response_llm
-
-    def get_classifier_llm(self) -> ChatGroq:
-        assert self.__classifier_llm is not None, "Agent.init() must be called before get_classifier_llm()"
-        return self.__classifier_llm
 
     async def advance_model(self) -> bool:
         async with self.__model_lock:
@@ -281,17 +258,13 @@ class Agent:
                 await self.__build_all_executors()
 
     async def __build_all_executors(self) -> None:
-        from src.tools import GAMES_TOOLS, GENERAL_TOOLS, MEDIA_DOMAIN_TOOLS
+        from src.tools import ALL_TOOLS
         model = AGENT_MODEL_FALLBACKS[self.__model_index]
         worker_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.3, max_tokens=1024)
-        middleware = [ToolMessageSanitizer()]
-        self.__worker_executors = {
-            "games": create_agent(worker_llm, GAMES_TOOLS, system_prompt=GAMES_WORKER_PROMPT, middleware=middleware),
-            "media": create_agent(worker_llm, MEDIA_DOMAIN_TOOLS, system_prompt=MEDIA_WORKER_PROMPT, middleware=middleware),
-            "general": create_agent(worker_llm, GENERAL_TOOLS, system_prompt=GENERAL_WORKER_PROMPT, middleware=middleware),
-        }
-        self.__response_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=512)
-        self.__classifier_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.0, max_tokens=5)
+        self.__worker_executor = create_agent(
+            worker_llm, ALL_TOOLS, system_prompt=WORKER_PROMPT, middleware=[ToolMessageSanitizer()]
+        )
+        self.__response_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=1024)
         logger.info("Agent executors built with model: %s", model)
 
 

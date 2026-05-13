@@ -1,4 +1,4 @@
-"""WorkerNode — domain-specific agent that gathers facts using tools."""
+"""WorkerNode — agent that gathers facts using tools."""
 
 import datetime
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -42,18 +42,17 @@ class SearchNotificationCallback(AsyncCallbackHandler):
 
 
 class WorkerNode:
-    """Calls the domain-specific worker agent and stores gathered facts in state."""
+    """Calls the worker agent and stores gathered facts in state."""
 
-    def __init__(self, agent, domain: str) -> None:
+    def __init__(self, agent) -> None:
         self.__agent = agent
-        self.__domain = domain
 
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")
         notification_holder: list = []
         callback = SearchNotificationCallback(msg["update"].message, notification_holder)
-        executor = self.__agent.get_worker_executor(self.__domain)
+        executor = self.__agent.get_worker_executor()
         run_config = {"callbacks": [callback]}
 
         for _ in range(len(AGENT_MODEL_FALLBACKS)):
@@ -69,12 +68,12 @@ class WorkerNode:
             except DailyLimitError:
                 if not await self.__agent.advance_model():
                     raise
-                executor = self.__agent.get_worker_executor(self.__domain)
+                executor = self.__agent.get_worker_executor()
             except ContextLengthError as err:
-                logger.warning("Worker context too long (domain=%s): %s", self.__domain, err)
+                logger.warning("Worker context too long: %s", err)
                 return {"worker_output": "", "search_notification_msg": None}
             except Exception as err:
-                logger.error("Worker failed (domain=%s): %s", self.__domain, err)
+                logger.error("Worker failed: %s", err)
                 return {"worker_output": "", "search_notification_msg": None}
         raise DailyLimitError("All fallback models exhausted in worker")
 
