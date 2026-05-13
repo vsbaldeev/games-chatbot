@@ -28,8 +28,8 @@ def make_worker() -> WorkerNode:
     return WorkerNode(MagicMock(), "general")
 
 
-def build_input(worker: WorkerNode, msg: dict, context: dict) -> str:
-    return worker._WorkerNode__build_worker_input(msg, context)
+def build_input(worker: WorkerNode, msg: dict, context: dict, response_trigger: str = "explicit") -> str:
+    return worker._WorkerNode__build_worker_input(msg, context, response_trigger)
 
 
 class TestGeneralWorkerPrompt:
@@ -109,6 +109,33 @@ class TestWorkerNodeBuildInput:
         result = build_input(make_worker(), incoming, context)
 
         assert "недавнее сообщение" in result
+
+    def test_random_trigger_suppresses_recent_history_without_reply_chain(self):
+        """When the bot randomly reacts to media (not @mentioned), unrelated recent
+        chat history must be withheld so the worker focuses only on the media."""
+        recent_msg = make_message_row(message_id=5, username="bob", content="посторонний разговор")
+        incoming = make_incoming(
+            username="tmaxims",
+            raw_text=None,
+            processed_text="Изображение: руководство по стрижкам",
+            media_type="photo",
+        )
+        context = {"reply_chain": [], "recent_history": [recent_msg]}
+
+        result = build_input(make_worker(), incoming, context, response_trigger="random")
+
+        assert "посторонний разговор" not in result
+
+    def test_reply_chain_included_for_random_trigger(self):
+        """Reply chain is always the primary context source — it must be included
+        even for random triggers because the user explicitly replied in that thread."""
+        chain_msg = make_message_row(message_id=20, username="fwd", content="контент из цепочки")
+        incoming = make_incoming(username="alice", raw_text="вопрос", processed_text="вопрос")
+        context = {"reply_chain": [chain_msg], "recent_history": []}
+
+        result = build_input(make_worker(), incoming, context, response_trigger="random")
+
+        assert "контент из цепочки" in result
 
     def test_user_question_always_present(self):
         """The user's question must appear at the end of every worker input

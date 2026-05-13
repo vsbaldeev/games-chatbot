@@ -44,7 +44,7 @@ def _build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
 
 
 def _build_response_input(
-    username: str, user_input: str, worker_output: str, context
+    username: str, user_input: str, worker_output: str, context, response_trigger: str = "explicit"
 ) -> str:
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
@@ -57,7 +57,9 @@ def _build_response_input(
         parts.append("")
 
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
-    if recent:
+    # Skip unrelated recent history for random triggers — the bot should focus
+    # only on the media/message that triggered it, not other open threads.
+    if recent and response_trigger != "random":
         parts.append("Недавние сообщения чата:")
         for row in reversed(recent):
             parts.append(_render_row(row))
@@ -104,6 +106,7 @@ class ResponseNode:
             user_input,
             state.get("worker_output") or "",
             state.get("context"),
+            state.get("response_trigger") or "explicit",
         )
         ai_message = await self.__generate(past_messages, enriched)
         response_text = strip_thinking(ai_message.content) if ai_message else ""

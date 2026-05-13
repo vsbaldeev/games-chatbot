@@ -77,7 +77,7 @@ def build_pipeline(agent) -> StateGraph:
     graph.add_node("filter", MeaninglessFilterNode())
     graph.add_node("guard", GuardNode())
     graph.add_node("context_builder", ContextBuilder())
-    graph.add_node("intent_classifier", IntentClassifierNode())
+    graph.add_node("intent_classifier", IntentClassifierNode(agent))
     graph.add_node("worker_games", WorkerNode(agent, "games"))
     graph.add_node("worker_media", WorkerNode(agent, "media"))
     graph.add_node("worker_general", WorkerNode(agent, "general"))

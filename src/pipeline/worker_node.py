@@ -50,7 +50,7 @@ class WorkerNode:
 
     async def __call__(self, state: BotState) -> dict:
         msg = state["incoming"]
-        worker_input = self.__build_worker_input(msg, state.get("context"))
+        worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")
         notification_holder: list = []
         callback = SearchNotificationCallback(msg["update"].message, notification_holder)
         executor = self.__agent.get_worker_executor(self.__domain)
@@ -78,7 +78,7 @@ class WorkerNode:
                 return {"worker_output": "", "search_notification_msg": None}
         raise DailyLimitError("All fallback models exhausted in worker")
 
-    def __build_worker_input(self, msg: dict, context) -> str:
+    def __build_worker_input(self, msg: dict, context, response_trigger: str = "explicit") -> str:
         user_input = msg["processed_text"] or msg["raw_text"] or ""
         username = msg["username"]
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -89,7 +89,7 @@ class WorkerNode:
             for row in reply_chain:
                 parts.append(self.__render_row(row))
             parts.append("")
-        else:
+        elif response_trigger != "random":
             recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
             if recent:
                 parts.append("Recent chat context:")

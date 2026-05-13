@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent import ContextLengthError
-from src.pipeline.response_node import ResponseNode
+from src.pipeline.response_node import ResponseNode, _build_response_input
 from tests.builders import make_incoming, make_state
 
 THREAD_GET_HISTORY = "src.pipeline.response_node.thread_history.get_history"
@@ -143,6 +143,91 @@ class TestThinkingBlockStripping:
 
         assert "<think>" not in result["response"]
         assert "Через 191 день." in result["response"]
+
+
+class TestRandomTriggerContext:
+    """Regression for mixed-topic responses: when the bot randomly reacts to a
+    photo it should not drag in unrelated recent-history threads.
+
+    Root cause (46013): random photo trigger still injected the full recent chat
+    history into the response prompt, so the LLM addressed multiple open threads
+    and broke the 'never suggest commands unprompted' rule.
+    """
+
+    RECENT_MSG = {
+        "message_id": 1,
+        "username": "bob",
+        "content": "я в мобильном",
+        "media_type": "text",
+        "user_id": 2,
+    }
+
+    def make_context(self) -> dict:
+        return {
+            "user_facts": {},
+            "recent_history": [self.RECENT_MSG],
+            "replied_to": None,
+            "reply_chain": [],
+        }
+
+    def test_random_trigger_excludes_recent_history(self):
+        """Unrelated recent chat must not appear in the prompt when the bot
+        fired by random chance — prevents mixing unrelated conversation threads."""
+        result = _build_response_input(
+            "tmaxims",
+            "Изображение: руководство по стрижкам",
+            "",
+            self.make_context(),
+            response_trigger="random",
+        )
+
+        assert "я в мобильном" not in result
+
+    def test_explicit_trigger_includes_recent_history(self):
+        """When the user explicitly @mentioned the bot or replied to it, recent
+        history must still be included for conversational context."""
+        result = _build_response_input(
+            "alice",
+            "@bot что нового?",
+            "",
+            self.make_context(),
+            response_trigger="explicit",
+        )
+
+        assert "я в мобильном" in result
+
+    def test_random_trigger_still_includes_user_facts(self):
+        """Per-user memories must always be injected — they personalise the
+        response regardless of how the trigger fired."""
+        context = {
+            "user_facts": {"alice": ["любит PS5", "играет в FIFA"]},
+            "recent_history": [self.RECENT_MSG],
+            "replied_to": None,
+            "reply_chain": [],
+        }
+
+        result = _build_response_input(
+            "alice",
+            "Изображение: что-то",
+            "",
+            context,
+            response_trigger="random",
+        )
+
+        assert "любит PS5" in result
+        assert "я в мобильном" not in result
+
+    def test_random_trigger_includes_worker_output(self):
+        """Worker facts must always reach the response LLM even for random triggers."""
+        result = _build_response_input(
+            "alice",
+            "Изображение: стрижки",
+            "Руководство содержит 12 стилей.",
+            self.make_context(),
+            response_trigger="random",
+        )
+
+        assert "Руководство содержит 12 стилей." in result
 
 
 class TestContextLengthError:

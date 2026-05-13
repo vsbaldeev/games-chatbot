@@ -4,13 +4,6 @@ import asyncio
 import re
 from typing import Optional
 
-THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-
-def strip_thinking(text: str) -> str:
-    """Remove <think>...</think> blocks emitted by reasoning models (e.g. Qwen3)."""
-    return THINK_RE.sub("", text).strip()
-
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -20,6 +13,7 @@ from src import config, log
 
 logger = log.get_logger(__name__)
 
+THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 FOREIGN_SCRIPT_RE = re.compile(
     "[一-鿿"   # CJK Unified Ideographs
     "㐀-䶿"    # CJK Extension A
@@ -30,6 +24,10 @@ FOREIGN_SCRIPT_RE = re.compile(
     "؀-ۿ"    # Arabic
     "֐-׿]"   # Hebrew
 )
+
+
+def strip_thinking(text: str) -> str:
+    return THINK_RE.sub("", text).strip()
 
 
 class RateLimitError(Exception):
@@ -69,19 +67,19 @@ class ToolMessageSanitizer(AgentMiddleware):
 
     async def abefore_model(self, state, runtime):
         messages = state["messages"]
-        sanitized = [
-            ToolMessage(
-                content="(no output)",
-                tool_call_id=msg.tool_call_id,
-                name=getattr(msg, "name", None),
-            )
-            if isinstance(msg, ToolMessage) and not (msg.content or "").strip()
-            else msg
-            for msg in messages
-        ]
-        if sanitized == messages:
-            return None
-        return {"messages": sanitized}
+        changed = False
+        sanitized = []
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and not (msg.content or "").strip():
+                sanitized.append(ToolMessage(
+                    content="(no output)",
+                    tool_call_id=msg.tool_call_id,
+                    name=getattr(msg, "name", None),
+                ))
+                changed = True
+            else:
+                sanitized.append(msg)
+        return {"messages": sanitized} if changed else None
 
 
 AGENT_MODEL_FALLBACKS = [
@@ -145,32 +143,17 @@ RESPONSE_PROMPT = """Ты — игровой бот для группы друз
 
 ━━━ ЧТО ТЫ УМЕЕШЬ ━━━
 Когда спрашивают про твои возможности — отвечай точно по этому списку:
+• `/dnd_pvp` — PvP D&D, 1 раунд
+• `/dnd_coop` — кооп D&D против NPC, 2 раунда
+• `/dnd_heist` — D&D-ограбление, 3 раунда (мин. 3 игрока; если двое — бот заполняет слот)
+• `/duel` — эмодзи-дуэль 1v1
+• `/roast` — прожарка участника (и авто раз в неделю)
+• `/achievements` — твои достижения
+• `/top` — топ-3 по достижениям
 
-*Игры:*
-• `/dnd_pvp` — D&D-приключение на 1 раунд, все против всех (PvP)
-• `/dnd_coop` — D&D-кооп на 2 раунда: весь отряд против одного абсурдного босса-NPC
-• `/dnd_heist` — Великое Ограбление на 3 раунда: проникновение → дело → побег
-  (все три режима: минимум 3 игрока, если в чате только двое — бот заполняет слот)
-• `/duel` — эмодзи-дуэль между двумя участниками чата
-
-*Развлечения:*
-• `/roast` — прожарка случайного участника чата (также запускается автоматически раз в неделю)
-
-*Статистика:*
-• `/achievements` — твои достижения (выдаются за активность, победы в играх и т.п.)
-• `/top` — топ-3 участников чата по количеству достижений
-
-ВАЖНО: все перечисленные `/команды` — это Telegram-команды, не инструменты агента.
-Ты НЕ МОЖЕШЬ выполнить их сам. Если пишут команду через @упоминание или с опечаткой —
-исправь и скажи написать правильную команду. Пример: «/dnv_pvp» → «имел в виду `/dnd_pvp`? Напиши её отдельно.»
-Никогда не предлагай команды, которых нет в этом списке — они не существуют.
-Никогда не предлагай команды сам по себе в конце ответа — это выглядит как реклама и раздражает.
-Упоминай команды только если тебя прямо спрашивают о возможностях бота.
-
-*Вопросы об играх:*
-Упомяни меня через @ — отвечу на вопрос про любую игру: онлайн, жанр, кросплей, технические детали.
-Реагирую на голосовые сообщения и фото (иногда).
-Попроси подобрать кооп или одиночную PS5-игру — найду с ценой.
+Это Telegram-команды, не инструменты агента — ты НЕ МОЖЕШЬ выполнить их сам.
+Упоминай команды только если тебя прямо спрашивают о возможностях.
+Никогда не предлагай команды сам по себе в конце ответа — это выглядит как реклама.
 
 ━━━ СТИЛЬ ━━━
 - Разговорный русский, как будто пишешь другу в чат
@@ -179,7 +162,6 @@ RESPONSE_PROMPT = """Ты — игровой бот для группы друз
 - Короткие ответы: одна мысль — одно-два предложения, без воды
 - Факты с иронией: «да, игра жива, аж 47 человек онлайн»
 - ТОЛЬКО русский язык, даже если пишут по-английски
-- НИКОГДА не начинай ответ с имени или ника пользователя — это неестественно
 
 ━━━ ОГРАНИЧЕНИЯ ━━━
 - Следующие темы полностью под запретом — отказывай вежливо, но твёрдо:
@@ -213,6 +195,8 @@ RESPONSE_PROMPT = """Ты — игровой бот для группы друз
 
 
 async def invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> dict:
+    if max_retries < 1:
+        raise ValueError(f"max_retries must be >= 1, got {max_retries}")
     for attempt in range(max_retries):
         try:
             return await runnable.ainvoke(*args, **kwargs)
@@ -239,6 +223,7 @@ async def invoke_with_retry(runnable, *args, max_retries: int = 3, **kwargs) -> 
                 logger.warning("tool_use_failed on attempt %s, retrying", attempt + 1)
             else:
                 raise
+    raise RateLimitError("Groq rate limit retries exhausted")
 
 
 class Agent:
@@ -247,6 +232,7 @@ class Agent:
         self.__pipeline = None
         self.__worker_executors: dict = {}
         self.__response_llm: Optional[ChatGroq] = None
+        self.__classifier_llm: Optional[ChatGroq] = None
         self.__model_lock: asyncio.Lock = asyncio.Lock()
 
     async def init(self, reset_model: bool = True) -> None:
@@ -266,7 +252,12 @@ class Agent:
         return self.__worker_executors.get(domain, self.__worker_executors["general"])
 
     def get_response_llm(self) -> ChatGroq:
+        assert self.__response_llm is not None, "Agent.init() must be called before get_response_llm()"
         return self.__response_llm
+
+    def get_classifier_llm(self) -> ChatGroq:
+        assert self.__classifier_llm is not None, "Agent.init() must be called before get_classifier_llm()"
+        return self.__classifier_llm
 
     async def advance_model(self) -> bool:
         async with self.__model_lock:
@@ -300,6 +291,7 @@ class Agent:
             "general": create_agent(worker_llm, GENERAL_TOOLS, system_prompt=GENERAL_WORKER_PROMPT, middleware=middleware),
         }
         self.__response_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=512)
+        self.__classifier_llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.0, max_tokens=5)
         logger.info("Agent executors built with model: %s", model)
 
 
