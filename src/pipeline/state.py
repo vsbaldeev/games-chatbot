@@ -41,7 +41,7 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply) or "random" (25% chance)
+    response_trigger: str          # "explicit" (@mention/reply) or "random" (20% chance)
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None

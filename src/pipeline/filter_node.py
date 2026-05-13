@@ -20,7 +20,7 @@ from src.pipeline.state import BotState
 
 logger = log.get_logger(__name__)
 
-REACTION_POOL = ["👍", "❤️", "🔥", "😂", "👀", "😎", "💯", "🤣", "⚡", "🫡", "🤙"]
+REACTION_POOL = ["👍", "❤", "🔥", "😁", "👀", "😎", "💯", "🤣", "⚡", "🫡", "🎉"]
 
 FILTER_SYSTEM = (
     "You are a telegram bot's message filter. "

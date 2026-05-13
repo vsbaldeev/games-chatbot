@@ -9,7 +9,7 @@ Responsibilities:
 Respond when:
   - The bot is @mentioned in the text / caption.
   - The message is a direct reply to a bot message (text or any media type).
-  - Random chance fires for voice/video_note/video/photo (25%).
+  - Random chance fires for voice/video_note/video/photo (20%).
 """
 
 import asyncio
@@ -23,7 +23,7 @@ from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
-MEDIA_RESPONSE_CHANCE = 0.25
+MEDIA_RESPONSE_CHANCE = 0.20
 
 
 class MessageRouter:

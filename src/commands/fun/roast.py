@@ -18,6 +18,7 @@ from src import achievements, config, log
 from src.achievements import notify_unlocks
 from src.agent import apply_language_correction
 from src.store import embedder, unified_messages
+from src.store.roast_store import log_roast, pop_roast_target
 from src.store.user_memories import get_facts, get_facts_with_embeddings
 
 logger = log.get_logger(__name__)
@@ -33,7 +34,11 @@ SYSTEM_PROMPT = (
     "Чем конкретнее — тем смешнее. Не объясняй шутку. Только русский. Мат допустим."
 )
 
-ROAST_ANCHOR = "провал поражение слабость позор неловкость плохая привычка стыд проигрыш"
+ROAST_ANCHORS = {
+    "shame": "провал поражение слабость позор неловкость плохая привычка стыд проигрыш",
+    "quirk": "странность привычка особенность манера поведение повторяет всегда никогда",
+    "boast": "хвастовство преувеличение самолюбование заявил гордится переоценивает",
+}
 
 ANCHOR_CANDIDATE_COUNT = 8
 CLUSTER_SIZE = 3
@@ -76,11 +81,12 @@ def pick_roast_cluster(
 class Roaster:
     """Generates LLM-powered roasts and handles the /roast Telegram command."""
 
-    async def generate(self, chat_id: int, user_id: int, target_username: str) -> tuple[str, str]:
+    async def generate(self, chat_id: int, user_id: int, target_username: str) -> tuple[str, str, str]:
         llm = ChatGroq(model=ROAST_MODEL, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=100)
+        anchor_key = random.choice(list(ROAST_ANCHORS))
         facts_with_embs = await get_facts_with_embeddings(chat_id=chat_id, user_id=user_id)
         if facts_with_embs:
-            anchor_emb = np.array(await embedder.embed(ROAST_ANCHOR))
+            anchor_emb = np.array(await embedder.embed(ROAST_ANCHORS[anchor_key]))
             selected = pick_roast_cluster(facts_with_embs, anchor_emb)
         else:
             selected = await get_facts(chat_id=chat_id, user_id=user_id)
@@ -94,7 +100,7 @@ class Roaster:
             user_prompt = f"@{target_username} вообще ничего не пишет в чате. Затроль его за молчание."
         header = random.choice(ROAST_HEADERS)
         response = await self.__invoke(llm, SYSTEM_PROMPT, user_prompt)
-        return header, response.content
+        return header, response.content, anchor_key
 
     async def __invoke(self, llm: ChatGroq, system_prompt: str, user_prompt: str):
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
@@ -114,12 +120,13 @@ class Roaster:
                 "В базе нет участников. Пусть сначала кто-нибудь напишет в чат."
             )
             return
-        target_id, target_username = random.choice(members)
+        target_id, target_username = await pop_roast_target(chat_id, members)
         await update.message.chat.send_action("typing")
         try:
-            header, roast_text = await self.generate(chat_id, target_id, target_username)
+            header, roast_text, anchor_key = await self.generate(chat_id, target_id, target_username)
             full_text = f"{header} #прожарка @{target_username}\n\n{roast_text}"
             sent = await update.message.reply_text(full_text)
+            await log_roast(message_id=sent.message_id, chat_id=chat_id, target_user_id=target_id, anchor_key=anchor_key)
             await unified_messages.insert(
                 chat_id=chat_id,
                 message_id=sent.message_id,
@@ -145,7 +152,7 @@ class Roaster:
 roaster = Roaster()
 
 
-async def generate_roast_text(chat_id: int, user_id: int, target_username: str) -> tuple[str, str]:
+async def generate_roast_text(chat_id: int, user_id: int, target_username: str) -> tuple[str, str, str]:
     return await roaster.generate(chat_id, user_id, target_username)
 
 

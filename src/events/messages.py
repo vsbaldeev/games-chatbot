@@ -16,6 +16,7 @@ from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.store import unified_messages
+from src.store.roast_store import log_roast
 
 OFFENSE_RE = re.compile(
     r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
@@ -236,9 +237,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             counts[user_id] = 0
             await update.message.chat.send_action("typing")
             try:
-                header, roast_text = await generate_roast_text(chat_id, user_id, username)
+                header, roast_text, anchor_key = await generate_roast_text(chat_id, user_id, username)
                 full_text = f"{header} #прожарка @{username}\n\n{strip_markdown(roast_text)}"
                 sent = await update.message.reply_text(full_text)
+                await log_roast(message_id=sent.message_id, chat_id=chat_id, target_user_id=user_id, anchor_key=anchor_key)
                 await unified_messages.insert(
                     chat_id=chat_id,
                     message_id=sent.message_id,
