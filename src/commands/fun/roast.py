@@ -9,30 +9,19 @@ import itertools
 import random
 
 import numpy as np
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
 from src.achievements import notify_unlocks
-from src.agent import apply_language_correction
+from src.agent import roast_agent
 from src.store import embedder, unified_messages
 from src.store.roast_store import log_roast, pop_roast_target
 from src.store.user_memories import get_facts, get_facts_with_embeddings
 
 logger = log.get_logger(__name__)
 
-ROAST_MODEL = "llama-3.3-70b-versatile"
-
 ROAST_HEADERS = ("💀", "😤", "🎮", "🔥", "💢")
-
-SYSTEM_PROMPT = (
-    "Ты — острый на язык завсегдатай русского игрового чата. "
-    "Тебе дают факты о человеке — уже отобранные, самые неловкие. "
-    "Коротко установи контекст, потом одна неожиданная фраза, которая бьёт точно в цель. "
-    "Чем конкретнее — тем смешнее. Не объясняй шутку. Только русский. Мат допустим."
-)
 
 ROAST_ANCHORS = {
     "shame": "провал поражение слабость позор неловкость плохая привычка стыд проигрыш",
@@ -82,7 +71,16 @@ class Roaster:
     """Generates LLM-powered roasts and handles the /roast Telegram command."""
 
     async def generate(self, chat_id: int, user_id: int, target_username: str) -> tuple[str, str, str]:
-        llm = ChatGroq(model=ROAST_MODEL, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=100)
+        """Generate a roast for the target user.
+
+        Args:
+            chat_id: Telegram chat ID used to look up user facts.
+            user_id: Telegram user ID of the roast target.
+            target_username: Username of the roast target (without ``@``).
+
+        Returns:
+            Tuple of ``(header_emoji, roast_text, anchor_key)``.
+        """
         anchor_key = random.choice(list(ROAST_ANCHORS))
         facts_with_embs = await get_facts_with_embeddings(chat_id=chat_id, user_id=user_id)
         if facts_with_embs:
@@ -99,13 +97,8 @@ class Roaster:
         else:
             user_prompt = f"@{target_username} вообще ничего не пишет в чате. Затроль его за молчание."
         header = random.choice(ROAST_HEADERS)
-        response = await self.__invoke(llm, SYSTEM_PROMPT, user_prompt)
-        return header, response.content, anchor_key
-
-    async def __invoke(self, llm: ChatGroq, system_prompt: str, user_prompt: str):
-        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
-        response = await llm.ainvoke(messages)
-        return await apply_language_correction(llm, response, messages)
+        roast_text = await roast_agent.invoke_roast(user_prompt)
+        return header, roast_text, anchor_key
 
     async def cmd_roast(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message:

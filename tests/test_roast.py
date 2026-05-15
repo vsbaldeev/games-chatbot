@@ -123,13 +123,9 @@ class TestPopRoastTarget:
 
 class TestRoasterGenerate:
     async def test_returns_header_text_anchor_key_tuple(self):
-        mock_response = MagicMock(content="прожарка")
-        mock_llm = AsyncMock()
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
         with patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.get_facts", AsyncMock(return_value=[])), \
-             patch("src.commands.fun.roast.ChatGroq", return_value=mock_llm), \
-             patch("src.commands.fun.roast.apply_language_correction", AsyncMock(return_value=mock_response)):
+             patch("src.commands.fun.roast.roast_agent.invoke_roast", AsyncMock(return_value="прожарка")):
             header, text, anchor_key = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
         assert header in ROAST_HEADERS
         assert text == "прожарка"
@@ -137,14 +133,10 @@ class TestRoasterGenerate:
 
     async def test_uses_embedding_facts_when_available(self):
         fake_emb = np.ones(4)
-        mock_response = MagicMock(content="эмбеддинг-прожарка")
-        mock_llm = AsyncMock()
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
         with patch("src.commands.fun.roast.get_facts_with_embeddings",
                    AsyncMock(return_value=[("играет ночью", fake_emb)])), \
              patch("src.commands.fun.roast.embedder.embed", AsyncMock(return_value=list(fake_emb))), \
-             patch("src.commands.fun.roast.ChatGroq", return_value=mock_llm), \
-             patch("src.commands.fun.roast.apply_language_correction", AsyncMock(return_value=mock_response)):
+             patch("src.commands.fun.roast.roast_agent.invoke_roast", AsyncMock(return_value="эмбеддинг-прожарка")):
             header, text, anchor_key = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
         assert header in ROAST_HEADERS
         assert text == "эмбеддинг-прожарка"
@@ -152,21 +144,12 @@ class TestRoasterGenerate:
 
     async def test_silent_member_gets_silence_fallback_prompt(self):
         """When a user has no facts, the prompt must call out their silence."""
-        mock_response = MagicMock(content="молчун")
-        captured: list = []
-        mock_llm = AsyncMock()
-
-        async def capture_invoke(messages):
-            captured.extend(messages)
-            return mock_response
-
-        mock_llm.ainvoke = capture_invoke
+        mock_invoke = AsyncMock(return_value="молчун")
         with patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.get_facts", AsyncMock(return_value=[])), \
-             patch("src.commands.fun.roast.ChatGroq", return_value=mock_llm), \
-             patch("src.commands.fun.roast.apply_language_correction", AsyncMock(return_value=mock_response)):
+             patch("src.commands.fun.roast.roast_agent.invoke_roast", mock_invoke):
             await Roaster().generate(CHAT_ID, USER_ID, "silentuser")
-        user_prompt = captured[1].content
+        user_prompt = mock_invoke.call_args[0][0]
         assert "silentuser" in user_prompt
         assert "ничего не пишет" in user_prompt
 
