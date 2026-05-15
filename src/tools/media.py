@@ -1,4 +1,4 @@
-"""Movie, TV, anime, and game-review tools."""
+"""Movie, TV, and anime tools."""
 
 import json
 
@@ -8,8 +8,6 @@ from langchain_core.tools import tool
 from src import config
 
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
-OPENCRITIC_SEARCH_API = "https://api.opencritic.com/api/game/search"
-OPENCRITIC_GAME_API = "https://api.opencritic.com/api/game"
 ANILIST_API = "https://graphql.anilist.co"
 
 ANILIST_QUERY = """
@@ -132,46 +130,6 @@ async def search_anime(query: str) -> str:
 
 
 @tool
-async def get_game_reviews(game_name: str) -> str:
-    """
-    Get critic review summary from OpenCritic for a game.
-    Returns overall score, recommendation percentage, and top critic excerpts.
-    No API key required.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            search_response = await client.get(
-                OPENCRITIC_SEARCH_API,
-                params={"criteria": game_name},
-            )
-            search_response.raise_for_status()
-            items = search_response.json()
-            if not items:
-                return json.dumps({"error": f"No OpenCritic results for '{game_name}'"})
-
-            game_id = items[0]["id"]
-            game_response = await client.get(f"{OPENCRITIC_GAME_API}/{game_id}")
-            game_response.raise_for_status()
-            data = game_response.json()
-
-        top_critics = [
-            {"outlet": review.get("Outlet", {}).get("name"), "snippet": review.get("snippet")}
-            for review in data.get("Reviews", [])[:3]
-            if review.get("snippet")
-        ]
-        return json.dumps({
-            "name": data.get("name"),
-            "opencritic_score": data.get("averageScore"),
-            "top_critic_score": data.get("topCriticScore"),
-            "percent_recommended": data.get("percentRecommended"),
-            "num_reviews": data.get("numReviews"),
-            "top_reviews": top_critics,
-        }, ensure_ascii=False)
-    except Exception as error:
-        return json.dumps({"error": str(error)})
-
-
-@tool
 async def explain_term(term: str) -> str:
     """
     Look up a term, technology, or concept on Wikipedia.
@@ -205,4 +163,4 @@ async def explain_term(term: str) -> str:
         return json.dumps({"error": str(error)})
 
 
-ALL_TOOLS = [search_movie_or_tv, search_anime, get_game_reviews, explain_term]
+ALL_TOOLS = [search_movie_or_tv, search_anime, explain_term]

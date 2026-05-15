@@ -1,5 +1,6 @@
 """Web search and article extraction tools."""
 
+import asyncio
 import json
 
 import httpx
@@ -74,11 +75,14 @@ async def __search_tavily(query: str) -> str:
 
 async def __search_duckduckgo(query: str) -> str:
     try:
-        from duckduckgo_search import AsyncDDGS
+        from duckduckgo_search import DDGS
 
-        async with AsyncDDGS() as ddgs:
-            raw_results = await ddgs.atext(query, max_results=5)
+        def run_search() -> list[dict]:
+            """Run DuckDuckGo text search synchronously inside a thread."""
+            with DDGS() as ddgs:
+                return ddgs.text(query, max_results=5)
 
+        raw_results = await asyncio.to_thread(run_search)
         results = [
             {"title": item.get("title"), "url": item.get("href"), "snippet": item.get("body")}
             for item in raw_results
