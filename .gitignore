@@ -7,4 +7,4 @@ __pycache__/
 .venv/
 *.egg-info/
 .idea/
-CLAUDE.md
+.claude/settings.local.json

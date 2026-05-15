@@ -3,10 +3,9 @@
 import datetime
 import re
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config, log
-from src.agent import RESPONSE_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, RESPONSE_PROMPT, apply_language_correction, strip_thinking
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -17,6 +16,17 @@ TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 
 def strip_markdown(text: str) -> str:
+    """Strip common Markdown formatting characters from text.
+
+    Removes bold, italic, and table-separator lines so the output reads as
+    plain chat text rather than formatted markup.
+
+    Args:
+        text: Input string that may contain Markdown.
+
+    Returns:
+        Plain text with bold/italic markers removed and table separators dropped.
+    """
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", text, flags=re.DOTALL)
@@ -24,7 +34,15 @@ def strip_markdown(text: str) -> str:
     return "\n".join(lines)
 
 
-def _render_row(row: dict) -> str:
+def render_row(row: dict) -> str:
+    """Format a message row as ``@username [media_type]: content``.
+
+    Args:
+        row: Message dict with ``username``, ``media_type``, and ``content`` keys.
+
+    Returns:
+        Formatted string representation of the message.
+    """
     media_type = row["media_type"]
     content = row["content"]
     if media_type == "photo":
@@ -33,7 +51,16 @@ def _render_row(row: dict) -> str:
     return f"@{row['username']}{media_label}: {content}"
 
 
-def _build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
+def build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
+    """Convert thread-history records into LangChain message objects.
+
+    Args:
+        history: List of dicts with ``role`` (``"human"`` or ``"ai"``) and
+            ``content`` keys, ordered oldest-first.
+
+    Returns:
+        List of ``HumanMessage`` and ``AIMessage`` instances.
+    """
     result: list[HumanMessage | AIMessage] = []
     for entry in history:
         if entry["role"] == "human":
@@ -43,19 +70,52 @@ def _build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
     return result
 
 
-def _build_response_input(
-    username: str, user_input: str, worker_output: str, context,
-    response_trigger: str = "explicit", has_thread_history: bool = False,
+def build_user_facts_lines(context) -> list[str]:
+    """Return formatted user-facts section lines for the response prompt.
+
+    Args:
+        context: AssembledContext dict or None.
+
+    Returns:
+        List of prompt lines, including a trailing blank line, or empty list
+        when no facts are available.
+    """
+    user_facts = (context or {}).get("user_facts") or {}
+    if not user_facts:
+        return []
+    parts = ["Что я знаю об участниках чата:"]
+    for uname, facts in user_facts.items():
+        parts.append(f"@{uname}: {'; '.join(facts)}")
+    parts.append("")
+    return parts
+
+
+def build_response_input(
+    username: str,
+    user_input: str,
+    worker_output: str,
+    context,
+    response_trigger: str = "explicit",
+    has_thread_history: bool = False,
 ) -> str:
+    """Assemble the enriched user-turn string for the response LLM.
+
+    Args:
+        username: Sender's username (without ``@``).
+        user_input: Processed text of the triggering message.
+        worker_output: Facts gathered by the worker agent, or empty string.
+        context: AssembledContext dict or None.
+        response_trigger: ``"explicit"`` when the bot was @mentioned or replied
+            to; ``"random"`` for unprompted triggers.
+        has_thread_history: ``True`` when per-thread turn history is available;
+            suppresses recent chat history to avoid double-context.
+
+    Returns:
+        Prompt string ready to pass as the final human turn to the response LLM.
+    """
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
-
-    user_facts = (context or {}).get("user_facts") or {}
-    if user_facts:
-        parts.append("Что я знаю об участниках чата:")
-        for uname, facts in user_facts.items():
-            parts.append(f"@{uname}: {'; '.join(facts)}")
-        parts.append("")
+    parts += build_user_facts_lines(context)
 
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     # Skip recent history when thread history is present (thread turns already
@@ -64,7 +124,7 @@ def _build_response_input(
     if recent and response_trigger != "random" and not has_thread_history:
         parts.append("Недавние сообщения чата:")
         for row in reversed(recent):
-            parts.append(_render_row(row))
+            parts.append(render_row(row))
         parts.append("")
 
     replied_to = (context or {}).get("replied_to")
@@ -72,7 +132,7 @@ def _build_response_input(
         recent_ids = {row["message_id"] for row in recent}
         if replied_to["message_id"] not in recent_ids:
             parts.append("Сообщение, на которое отвечают:")
-            parts.append(_render_row(replied_to))
+            parts.append(render_row(replied_to))
             parts.append("")
 
     if worker_output:
@@ -83,7 +143,6 @@ def _build_response_input(
     else:
         trigger = f"@{username}: {user_input}"
     parts.append(trigger)
-
     return "\n".join(parts)
 
 
@@ -91,19 +150,34 @@ class ResponseNode:
     """Generates the final personality-driven reply from gathered worker facts."""
 
     def __init__(self, agent) -> None:
+        """Initialize ResponseNode.
+
+        Args:
+            agent: Agent instance used to invoke the response LLM.
+        """
         self.__agent = agent
 
     async def __call__(self, state: BotState) -> dict:
+        """Generate a response and persist the turn to thread history.
+
+        Args:
+            state: Current pipeline state with incoming message, context, and
+                optional worker output.
+
+        Returns:
+            Dict with ``response`` and ``response_messages`` keys; the latter
+            carries the assembled LangChain message list for the correction node.
+        """
         msg = state["incoming"]
         thread_id = state.get("thread_id") or str(msg["chat_id"])
 
         history = await thread_history.get_history(
             thread_id=thread_id, limit=config.MAX_HISTORY_MESSAGES
         )
-        past_messages = _build_past_messages(history)
+        past_messages = build_past_messages(history)
 
         user_input = msg["processed_text"] or msg["raw_text"] or ""
-        enriched = _build_response_input(
+        enriched = build_response_input(
             msg["username"],
             user_input,
             state.get("worker_output") or "",
@@ -111,8 +185,8 @@ class ResponseNode:
             state.get("response_trigger") or "explicit",
             has_thread_history=bool(past_messages),
         )
-        ai_message = await self.__generate(past_messages, enriched)
-        response_text = strip_thinking(ai_message.content) if ai_message else ""
+        messages = past_messages + [HumanMessage(content=enriched)]
+        response_text = await self.__generate(messages)
 
         if response_text.strip():
             await thread_history.append_turn(
@@ -122,26 +196,21 @@ class ResponseNode:
                 ai_content=strip_markdown(response_text),
             )
 
-        return {"response": response_text}
+        return {"response": response_text, "response_messages": messages}
 
-    async def __generate(self, past_messages: list, enriched: str):
-        messages = [SystemMessage(content=RESPONSE_PROMPT)] + past_messages + [HumanMessage(content=enriched)]
-        llm = self.__agent.get_response_llm()
-        for _ in range(len(RESPONSE_MODEL_FALLBACKS)):
-            try:
-                ai_message = await llm.ainvoke(messages)
-                return await apply_language_correction(llm, ai_message, messages)
-            except Exception as err:
-                error_str = str(err).lower()
-                is_daily = any(phrase in error_str for phrase in ("per day", "daily", "tokens_per_day"))
-                is_context = any(phrase in error_str for phrase in (
-                    "context_length_exceeded", "request too large", "string_above_max_length",
-                    "maximum context length", "input too long", "tokens_in_context",
-                ))
-                if is_context:
-                    raise ContextLengthError("Response prompt exceeds model context window")
-                if is_daily and await self.__agent.advance_response_model():
-                    llm = self.__agent.get_response_llm()
-                    continue
-                raise
-        raise DailyLimitError("All fallback models exhausted in response node")
+    async def __generate(self, messages: list) -> str:
+        """Delegate to the response agent.
+
+        Args:
+            messages: Assembled message list (history + human turn, no system prompt —
+                the executor prepends it internally).
+
+        Returns:
+            Reply text from the agent. Empty string if the agent returned nothing.
+
+        Raises:
+            ContextLengthError: If the prompt exceeds the model's context window.
+            DailyLimitError: If all models have exhausted their daily token quota.
+            RateLimitError: If rate-limit retries are exhausted on all models.
+        """
+        return await self.__agent.invoke_response(messages)

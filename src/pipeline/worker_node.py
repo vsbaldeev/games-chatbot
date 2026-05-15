@@ -1,11 +1,12 @@
 """WorkerNode — agent that gathers facts using tools."""
 
 import datetime
+from typing import Literal
+
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent import WORKER_MODEL_FALLBACKS, ContextLengthError, DailyLimitError, invoke_with_retry, strip_thinking
+from src.agent import ContextLengthError, DailyLimitError, RateLimitError
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -16,27 +17,37 @@ RECENT_FILL_LIMIT = 10
 
 
 class SearchNotificationCallback(AsyncCallbackHandler):
-    """Sends a Telegram notification before web_search or fetch_article runs.
+    """Sends a Telegram notification before web_search runs.
 
-    The sent Message object is appended to `holder` so the caller can later
-    edit it with the final response instead of sending a second message.
+    The sent Message object is stored as ``sent_message`` so the caller can
+    later edit it with the final response instead of sending a second message.
     """
 
-    def __init__(self, message, holder: list) -> None:
+    def __init__(self, message) -> None:
+        """Initialize the callback.
+
+        Args:
+            message: Telegram Message object used to send the notification reply.
+        """
         super().__init__()
         self.__message = message
-        self.__holder = holder
         self.__notified = False
+        self.sent_message = None
 
     async def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
+        """Send a search notification on the first web_search tool invocation.
+
+        Args:
+            serialized: Tool metadata dict containing at least a ``name`` key.
+            input_str: Raw input string passed to the tool (unused).
+            **kwargs: Additional keyword arguments forwarded by LangChain.
+        """
         tool_name = serialized.get("name", "")
         if tool_name not in SEARCH_TOOLS or self.__notified:
             return
         self.__notified = True
-        text = "🔍 Ищу, подожди немного..."
         try:
-            sent = await self.__message.reply_text(text)
-            self.__holder.append(sent)
+            self.sent_message = await self.__message.reply_text("🔍 Ищу, подожди немного...")
         except Exception as err:
             logger.warning("Failed to send search notification: %s", err)
 
@@ -45,39 +56,67 @@ class WorkerNode:
     """Calls the worker agent and stores gathered facts in state."""
 
     def __init__(self, agent) -> None:
+        """Initialize the worker node.
+
+        Args:
+            agent: Agent instance providing the worker executor and fallback logic.
+        """
         self.__agent = agent
 
     async def __call__(self, state: BotState) -> dict:
+        """Run the worker agent and return gathered facts.
+
+        Absorbs ContextLengthError and unexpected exceptions by returning empty
+        output so the pipeline can still attempt a response. DailyLimitError and
+        RateLimitError are re-raised for the top-level handler to surface to the user.
+
+        Args:
+            state: Current pipeline state containing the incoming message and context.
+
+        Returns:
+            Dict with keys ``worker_output`` (str) and ``search_notification_msg``
+            (the sent Telegram Message or None).
+
+        Raises:
+            DailyLimitError: Propagated from ``agent.invoke_worker`` on daily quota exhaustion.
+            RateLimitError: Propagated from ``agent.invoke_worker`` on transient rate limits.
+        """
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")
-        notification_holder: list = []
-        callback = SearchNotificationCallback(msg["update"].message, notification_holder)
-        executor = self.__agent.get_worker_executor()
-        run_config = {"callbacks": [callback]}
+        tg_message = msg["update"].message
+        callback = SearchNotificationCallback(tg_message) if tg_message is not None else None
+        callbacks = [callback] if callback is not None else None
 
-        for _ in range(len(WORKER_MODEL_FALLBACKS)):
-            try:
-                result = await invoke_with_retry(
-                    executor,
-                    {"messages": [HumanMessage(content=worker_input)]},
-                    config=run_config,
-                )
-                output = strip_thinking(result["messages"][-1].content or "")
-                notification_msg = notification_holder[0] if notification_holder else None
-                return {"worker_output": output, "search_notification_msg": notification_msg}
-            except DailyLimitError:
-                if not await self.__agent.advance_worker_model():
-                    raise
-                executor = self.__agent.get_worker_executor()
-            except ContextLengthError as err:
-                logger.warning("Worker context too long: %s", err)
-                return {"worker_output": "", "search_notification_msg": None}
-            except Exception as err:
-                logger.error("Worker failed: %s", err)
-                return {"worker_output": "", "search_notification_msg": None}
-        raise DailyLimitError("All fallback models exhausted in worker")
+        try:
+            output = await self.__agent.invoke_worker(worker_input, callbacks=callbacks)
+            notification_msg = callback.sent_message if callback is not None else None
+            return {"worker_output": output, "search_notification_msg": notification_msg}
+        except ContextLengthError as err:
+            logger.warning("Worker context too long: %s", err)
+            return {"worker_output": "", "search_notification_msg": None}
+        except (DailyLimitError, RateLimitError):
+            raise
+        except Exception as err:
+            logger.error("Worker failed: %s", err, exc_info=True)
+            return {"worker_output": "", "search_notification_msg": None}
 
-    def __build_worker_input(self, msg: dict, context, response_trigger: str = "explicit") -> str:
+    def __build_worker_input(self, msg: dict, context, response_trigger: Literal["explicit", "random"] = "explicit") -> str:
+        """Assemble the prompt string sent to the worker agent.
+
+        Includes the current UTC datetime, reply chain or recent history as
+        context (mutually exclusive), and the user's question. Recent history
+        is omitted for random triggers to avoid injecting unrelated chat noise.
+
+        Args:
+            msg: IncomingMessage dict for the current update.
+            context: Context dict with ``reply_chain`` and ``recent_history`` lists,
+                or None if context is unavailable.
+            response_trigger: ``"explicit"`` when the bot was @mentioned or replied
+                to; ``"random"`` for unprompted media responses.
+
+        Returns:
+            Assembled prompt string ready to send to the worker executor.
+        """
         user_input = msg["processed_text"] or msg["raw_text"] or ""
         username = msg["username"]
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -100,6 +139,14 @@ class WorkerNode:
 
     @staticmethod
     def __render_row(row: dict) -> str:
+        """Format a message row as ``@username: content`` for the worker prompt.
+
+        Args:
+            row: Message row dict with ``username``, ``content``, and ``media_type`` keys.
+
+        Returns:
+            Formatted string representation of the message.
+        """
         content = row["content"]
         if row["media_type"] == "photo":
             content = unified_messages.display_photo_content(content)

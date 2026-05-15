@@ -13,15 +13,13 @@ Two invariants tested here:
      so the rule has something to work with.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent import ContextLengthError, WORKER_PROMPT
+from src.agent import ContextLengthError, DailyLimitError, RateLimitError, WORKER_PROMPT
 from src.pipeline.worker_node import WorkerNode
 from tests.builders import make_incoming, make_message_row, make_state
-
-INVOKE_WITH_RETRY = "src.pipeline.worker_node.invoke_with_retry"
 
 
 def make_worker() -> WorkerNode:
@@ -30,6 +28,15 @@ def make_worker() -> WorkerNode:
 
 def build_input(worker: WorkerNode, msg: dict, context: dict, response_trigger: str = "explicit") -> str:
     return worker._WorkerNode__build_worker_input(msg, context, response_trigger)
+
+
+def make_worker_state(*, username: str = "alice", raw_text: str = "вопрос", processed_text: str = "вопрос"):
+    incoming = make_incoming(username=username, raw_text=raw_text, processed_text=processed_text)
+    return make_state(
+        incoming,
+        should_respond=True,
+        context={"reply_chain": [], "recent_history": []},
+    )
 
 
 class TestWorkerPrompt:
@@ -153,54 +160,46 @@ class TestWorkerNodeBuildInput:
         assert "@testbot что думаешь?" in result
 
 
-class TestWorkerNodeThinkingStripping:
-    async def test_think_block_stripped_from_worker_output(self):
-        """Reasoning models emit <think>...</think> before actual facts.
-        worker_output passed to ResponseNode must contain only the real content."""
-        raw_content = "<think>Нужно найти данные о дате выхода GTA 6.</think>GTA 6 выходит 19 ноября 2026."
-        last_message = MagicMock()
-        last_message.content = raw_content
+class TestWorkerNodeOutput:
+    """WorkerNode stores whatever invoke_worker returns in the pipeline state."""
 
+    async def test_worker_output_stored_in_state(self):
+        """Output from invoke_worker must be forwarded verbatim to worker_output."""
         agent = MagicMock()
-        agent.get_worker_executor.return_value = MagicMock()
-
-        incoming = make_incoming(
+        agent.invoke_worker = AsyncMock(return_value="GTA 6 выходит 19 ноября 2026.")
+        state = make_worker_state(
             username="alice",
             raw_text="когда выйдет GTA 6?",
             processed_text="когда выйдет GTA 6?",
         )
-        state = make_state(
-            incoming,
-            should_respond=True,
-            context={"reply_chain": [], "recent_history": []},
-        )
-
-        with patch(INVOKE_WITH_RETRY, new_callable=AsyncMock,
-                   return_value={"messages": [last_message]}):
-            result = await WorkerNode(agent)(state)
-
-        assert "<think>" not in result["worker_output"]
-        assert "GTA 6 выходит 19 ноября 2026." in result["worker_output"]
+        result = await WorkerNode(agent)(state)
+        assert result["worker_output"] == "GTA 6 выходит 19 ноября 2026."
 
 
 class TestContextLengthErrorHandling:
-    """When the assembled worker prompt exceeds the model context window,
-    WorkerNode must absorb the error and return empty output rather than
-    crashing the pipeline."""
+    """When invoke_worker raises ContextLengthError WorkerNode must absorb it
+    and return empty output so the pipeline can still attempt a response."""
 
     async def test_context_length_error_returns_empty_output(self):
         agent = MagicMock()
-        agent.get_worker_executor.return_value = MagicMock()
-
-        incoming = make_incoming(username="alice", raw_text="вопрос", processed_text="вопрос")
-        state = make_state(
-            incoming,
-            should_respond=True,
-            context={"reply_chain": [], "recent_history": []},
-        )
-
-        with patch(INVOKE_WITH_RETRY, new_callable=AsyncMock, side_effect=ContextLengthError("too long")):
-            result = await WorkerNode(agent)(state)
-
+        agent.invoke_worker = AsyncMock(side_effect=ContextLengthError("too long"))
+        result = await WorkerNode(agent)(make_worker_state())
         assert result["worker_output"] == ""
         assert result["search_notification_msg"] is None
+
+
+class TestErrorPropagation:
+    """WorkerNode must propagate typed pipeline exceptions from invoke_worker
+    so the top-level handler in events/messages.py can surface them to the user."""
+
+    async def test_daily_limit_raises_daily_limit_error(self):
+        agent = MagicMock()
+        agent.invoke_worker = AsyncMock(side_effect=DailyLimitError("per day limit exhausted"))
+        with pytest.raises(DailyLimitError):
+            await WorkerNode(agent)(make_worker_state())
+
+    async def test_transient_rate_limit_raises_rate_limit_error(self):
+        agent = MagicMock()
+        agent.invoke_worker = AsyncMock(side_effect=RateLimitError("rate_limit exceeded"))
+        with pytest.raises(RateLimitError):
+            await WorkerNode(agent)(make_worker_state())

@@ -12,16 +12,20 @@ Graph edges:
                     └─ should_respond=False → END  (media described+stored, no reply)
                               filter
                                 ├─ blocked → END
-                                └─ ok → context_builder → worker → response → memory_writer → END
+                                └─ ok → context_builder → worker → response
+                                            ├─ foreign script → language_correction → memory_writer → END
+                                            └─ ok             → memory_writer → END
 """
 
 from langgraph.graph import END, START, StateGraph
 
 from src import config, log
+from src.agent import FOREIGN_SCRIPT_RE
 from src.pipeline.context_builder import ContextBuilder
 from src.pipeline.filter_node import MeaninglessFilterNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
+from src.pipeline.language_correction_node import LanguageCorrectionNode
 from src.pipeline.memory_writer import MemoryWriter, MIN_PASSIVE_LENGTH
 from src.pipeline.response_node import ResponseNode
 from src.pipeline.router import MessageRouter
@@ -54,7 +58,15 @@ def route_by_guard(state: BotState) -> str:
     return END if state.get("blocked") else "context_builder"
 
 
-def build_pipeline(agent) -> StateGraph:
+def route_after_response(state: BotState) -> str:
+    """Route to language_correction when the response contains foreign script."""
+    response = state.get("response") or ""
+    if response and FOREIGN_SCRIPT_RE.search(response):
+        return "language_correction"
+    return "memory_writer"
+
+
+def build_pipeline(worker_agent, response_agent) -> StateGraph:
     """Build and compile the pipeline graph. Call once at startup."""
     graph = StateGraph(BotState)
 
@@ -63,8 +75,9 @@ def build_pipeline(agent) -> StateGraph:
     graph.add_node("filter", MeaninglessFilterNode())
     graph.add_node("guard", GuardNode())
     graph.add_node("context_builder", ContextBuilder())
-    graph.add_node("worker", WorkerNode(agent))
-    graph.add_node("response", ResponseNode(agent))
+    graph.add_node("worker", WorkerNode(worker_agent))
+    graph.add_node("response", ResponseNode(response_agent))
+    graph.add_node("language_correction", LanguageCorrectionNode(response_agent))
     graph.add_node("memory_writer", MemoryWriter())
 
     graph.add_edge(START, "router")
@@ -78,7 +91,12 @@ def build_pipeline(agent) -> StateGraph:
     graph.add_conditional_edges("guard", route_by_guard, {"context_builder": "context_builder", END: END})
     graph.add_edge("context_builder", "worker")
     graph.add_edge("worker", "response")
-    graph.add_edge("response", "memory_writer")
+    graph.add_conditional_edges(
+        "response",
+        route_after_response,
+        {"language_correction": "language_correction", "memory_writer": "memory_writer"},
+    )
+    graph.add_edge("language_correction", "memory_writer")
     graph.add_edge("memory_writer", END)
 
     return graph.compile()

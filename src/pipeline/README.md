@@ -6,7 +6,8 @@ nodes. Each node reads BotState and returns a partial update dict.
 ## Overview
 
 ```
-router ──► ingester ──► filter ──► guard ──► context_builder ──► worker ──► response ──► memory_writer ──► END
+router ──► ingester ──► filter ──► guard ──► context_builder ──► worker ──► response ─┬─► memory_writer ──► END
+                                                                                        └─► language_correction ──► memory_writer ──► END
 ```
 
 Conditional exits exist at every node — see the detailed diagrams below.
@@ -120,23 +121,32 @@ context_builder
     └─ load initiating user's facts if not already in recent participants
     │
     ▼
-worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web)
+worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web); primary gpt-oss-120b for quality, Llama/Qwen fallbacks for rate-limit scenarios
     ├─ CONTEXT FIRST: if reply chain already contains the answer, no tools called
     ├─ prompt: reply chain (or recent history for explicit triggers) + current question
     │          random triggers receive only the reply chain — no recent history bleed
-    ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search/fetch_article
+    ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search
     ├─ DailyLimitError → advance_model(), retry with next fallback
     ├─ ContextLengthError → worker_output="" (response node still runs)
     └─ any other error   → worker_output="" (response node still runs)
     │
     ▼
-response   main personality LLM
+response   personality LLM (ReAct executor, no tools)
     ├─ thread_id = reply-chain root message_id, or chat_id for flat messages
-    ├─ prompt: [SYSTEM] + thread_history (last 10 turns, thread-scoped)
+    ├─ prompt: thread_history (last 10 turns, thread-scoped)
     │            + user facts + recent history (last 10) + replied_to + worker findings + current message
-    ├─ DailyLimitError → advance_model(), retry
-    ├─ RateLimitError  → exponential backoff (5s, 10s, 20s)
-    └─ CJK/Hangul/Thai/Arabic detected → retry with language correction prompt
+    │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
+    ├─ saves response_messages to state for LanguageCorrectionNode
+    ├─ DailyLimitError / RateLimitError → propagate to top-level handler
+    │
+    ├─ CJK/Hangul/Thai/Arabic/Hebrew detected in response → language_correction
+    └─ otherwise → memory_writer
+    │
+    ▼ (foreign script path)
+language_correction
+    ├─ re-invokes ResponseAgent with original response_messages + correction instruction
+    ├─ DailyLimitError / RateLimitError → propagate
+    └─ any other error → keep original response (silent fallback)
     │
     ▼
 memory_writer
@@ -177,9 +187,10 @@ BotState:
     response_trigger: "explicit" | "random"
     blocked: bool
     context: AssembledContext | None
-    thread_id: str | None         # reply-chain root message_id or chat_id; scopes LLM history
+    thread_id: str | None              # reply-chain root message_id or chat_id; scopes LLM history
     worker_output: str | None
-    search_notification_msg: Any | None   # Telegram Message used as search indicator
+    search_notification_msg: Any | None  # Telegram Message used as search indicator
     response: str | None
-    context_types: ContextTypes          # Telegram context for sending replies
+    response_messages: list | None     # LangChain messages passed from response → language_correction
+    context_types: ContextTypes        # Telegram context for sending replies
 ```

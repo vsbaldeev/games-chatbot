@@ -49,3 +49,4 @@ class BotState(TypedDict):
     thread_id: NotRequired[str]    # derived from reply-chain root; scopes LLM history
     worker_output: NotRequired[str | None] # raw facts gathered by the worker
     search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator
+    response_messages: NotRequired[list]  # assembled LangChain messages forwarded to LanguageCorrectionNode

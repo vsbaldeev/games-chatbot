@@ -10,13 +10,16 @@ from telegram.ext import ContextTypes
 import asyncio
 
 from src import achievements, config
-from src.agent import agent, ContextLengthError, DailyLimitError, RateLimitError
+from src.agent import worker_agent, response_agent, ContextLengthError, DailyLimitError, RateLimitError
+from src.pipeline.graph import build_pipeline
 from src.achievements import notify_unlocks
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.store import unified_messages
 from src.store.roast_store import log_roast
+
+PIPELINE = build_pipeline(worker_agent, response_agent)
 
 OFFENSE_RE = re.compile(
     r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
@@ -129,8 +132,7 @@ async def run_pipeline(
     initial_state["thread_id"] = thread_id
 
     try:
-        pipeline = agent.get_pipeline()
-        final_state = await pipeline.ainvoke(initial_state)
+        final_state = await PIPELINE.ainvoke(initial_state)
         response = final_state.get("response") or ""
         if response.strip():
             clean = strip_markdown(response)

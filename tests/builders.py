@@ -1,6 +1,8 @@
-"""Helpers for constructing IncomingMessage and BotState dicts in tests."""
+"""Helpers for constructing IncomingMessage, BotState, and Groq error dicts in tests."""
 
 from unittest.mock import MagicMock
+
+import groq
 
 
 def make_telegram_message(
@@ -67,6 +69,22 @@ def make_state(incoming: dict, **overrides) -> dict:
     }
     state.update(overrides)
     return state
+
+
+def make_bad_request_error(message: str) -> groq.BadRequestError:
+    """Create a ``groq.BadRequestError`` (HTTP 400) with the given message string."""
+    mock_response = MagicMock()
+    mock_response.status_code = 400
+    mock_response.request = MagicMock()
+    return groq.BadRequestError(message, response=mock_response, body=None)
+
+
+def make_rate_limit_error(message: str) -> groq.RateLimitError:
+    """Create a ``groq.RateLimitError`` (HTTP 429) with the given message string."""
+    mock_response = MagicMock()
+    mock_response.status_code = 429
+    mock_response.request = MagicMock()
+    return groq.RateLimitError(message, response=mock_response, body=None)
 
 
 def make_message_row(

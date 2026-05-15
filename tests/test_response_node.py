@@ -13,22 +13,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent import ContextLengthError
-from src.pipeline.response_node import ResponseNode, _build_response_input
+from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.pipeline.response_node import ResponseNode, build_response_input
 from tests.builders import make_incoming, make_state
 
 THREAD_GET_HISTORY = "src.pipeline.response_node.thread_history.get_history"
 THREAD_APPEND_TURN = "src.pipeline.response_node.thread_history.append_turn"
-APPLY_LANGUAGE_CORRECTION = "src.pipeline.response_node.apply_language_correction"
 
 
 def make_mock_agent(response_text: str = "Это ответ бота.") -> MagicMock:
-    ai_message = MagicMock()
-    ai_message.content = response_text
-    llm = MagicMock()
-    llm.ainvoke = AsyncMock(return_value=ai_message)
+    """Return a mock Agent whose invoke_response returns response_text."""
     agent = MagicMock()
-    agent.get_response_llm.return_value = llm
+    agent.invoke_response = AsyncMock(return_value=response_text)
     return agent
 
 
@@ -39,8 +35,6 @@ class TestThreadHistoryStorage:
         reply chains. Next turn the LLM read that as fresh context and answered
         about the wrong thread.  Only the bare user utterance must be persisted.
         """
-        ai_response = MagicMock()
-        ai_response.content = "Это ответ бота."
         agent = make_mock_agent()
 
         incoming = make_incoming(
@@ -64,7 +58,6 @@ class TestThreadHistoryStorage:
         with (
             patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
             patch(THREAD_APPEND_TURN, new_callable=AsyncMock) as mock_append,
-            patch(APPLY_LANGUAGE_CORRECTION, new_callable=AsyncMock, return_value=ai_response),
         ):
             response_node = ResponseNode(agent)
             await response_node(state)
@@ -81,10 +74,7 @@ class TestThreadHistoryStorage:
     async def test_stored_ai_turn_is_stripped_of_markdown(self):
         """Markdown in AI responses must be stripped before storage to prevent
         the LLM from reinforcing its own markdown formatting in future turns."""
-        ai_response = MagicMock()
-        ai_response.content = "**Жирный** и _курсив_ текст."
-        agent = make_mock_agent()
-        agent.get_response_llm.return_value.ainvoke = AsyncMock(return_value=ai_response)
+        agent = make_mock_agent(response_text="**Жирный** и _курсив_ текст.")
 
         incoming = make_incoming(username="bob", raw_text="расскажи", processed_text="расскажи")
         state = make_state(
@@ -98,7 +88,6 @@ class TestThreadHistoryStorage:
         with (
             patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
             patch(THREAD_APPEND_TURN, new_callable=AsyncMock) as mock_append,
-            patch(APPLY_LANGUAGE_CORRECTION, new_callable=AsyncMock, return_value=ai_response),
         ):
             response_node = ResponseNode(agent)
             await response_node(state)
@@ -109,17 +98,10 @@ class TestThreadHistoryStorage:
 
 
 class TestThinkingBlockStripping:
-    async def test_think_block_not_sent_to_user(self):
-        """Reasoning models (e.g. Qwen3) emit <think>...</think> before the answer.
-        The user must never see internal reasoning traces — only the final answer."""
-        ai_response = MagicMock()
-        ai_response.content = (
-            "<think>Пользователь спрашивает про GTA 6. "
-            "Дата релиза 19 ноября 2026, сегодня 12 мая 2026, разница 191 день.</think>"
-            "Через 191 день."
-        )
-        agent = make_mock_agent()
-        agent.get_response_llm.return_value.ainvoke = AsyncMock(return_value=ai_response)
+    async def test_response_text_passed_through_from_agent(self):
+        """ResponseNode places whatever invoke_response returns into state['response']
+        without modification — thinking stripping is Agent's responsibility."""
+        agent = make_mock_agent(response_text="Через 191 день.")
 
         incoming = make_incoming(
             username="bob",
@@ -131,18 +113,16 @@ class TestThinkingBlockStripping:
             should_respond=True,
             thread_id="thread-42",
             context={"user_facts": {}, "recent_history": [], "replied_to": None, "reply_chain": []},
-            worker_output="GTA 6 выходит 19 ноября 2026. Сегодня 12 мая 2026. До релиза 191 день.",
+            worker_output="GTA 6 выходит 19 ноября 2026.",
         )
 
         with (
             patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
             patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
-            patch(APPLY_LANGUAGE_CORRECTION, new_callable=AsyncMock, return_value=ai_response),
         ):
             result = await ResponseNode(agent)(state)
 
-        assert "<think>" not in result["response"]
-        assert "Через 191 день." in result["response"]
+        assert result["response"] == "Через 191 день."
 
 
 class TestRandomTriggerContext:
@@ -173,7 +153,7 @@ class TestRandomTriggerContext:
     def test_random_trigger_excludes_recent_history(self):
         """Unrelated recent chat must not appear in the prompt when the bot
         fired by random chance — prevents mixing unrelated conversation threads."""
-        result = _build_response_input(
+        result = build_response_input(
             "tmaxims",
             "Изображение: руководство по стрижкам",
             "",
@@ -186,7 +166,7 @@ class TestRandomTriggerContext:
     def test_explicit_trigger_includes_recent_history(self):
         """When the user explicitly @mentioned the bot or replied to it, recent
         history must still be included for conversational context."""
-        result = _build_response_input(
+        result = build_response_input(
             "alice",
             "@bot что нового?",
             "",
@@ -206,7 +186,7 @@ class TestRandomTriggerContext:
             "reply_chain": [],
         }
 
-        result = _build_response_input(
+        result = build_response_input(
             "alice",
             "Изображение: что-то",
             "",
@@ -219,7 +199,7 @@ class TestRandomTriggerContext:
 
     def test_random_trigger_includes_worker_output(self):
         """Worker facts must always reach the response LLM even for random triggers."""
-        result = _build_response_input(
+        result = build_response_input(
             "alice",
             "Изображение: стрижки",
             "Руководство содержит 12 стилей.",
@@ -230,27 +210,55 @@ class TestRandomTriggerContext:
         assert "Руководство содержит 12 стилей." in result
 
 
-class TestContextLengthError:
-    """When the response LLM rejects the prompt as too long, ResponseNode must
-    raise ContextLengthError so the top-level handler can send a clear user message."""
+class TestErrorPropagation:
+    """Typed exceptions raised by agent.invoke_response must propagate through
+    ResponseNode so the top-level handler can surface them to the user."""
 
-    async def test_context_length_exception_raises_context_length_error(self):
-        agent = MagicMock()
-        agent.get_response_llm.return_value.ainvoke = AsyncMock(
-            side_effect=Exception("context_length_exceeded: prompt too large")
-        )
-
+    def make_state_for_error(self):
         incoming = make_incoming(username="bob", raw_text="вопрос", processed_text="вопрос")
-        state = make_state(
+        return make_state(
             incoming,
             should_respond=True,
             context={"user_facts": {}, "recent_history": [], "replied_to": None, "reply_chain": []},
             worker_output="",
         )
 
+    async def test_context_length_error_propagates(self):
+        agent = MagicMock()
+        agent.invoke_response = AsyncMock(side_effect=ContextLengthError("too long"))
         with (
             patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
             patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
         ):
             with pytest.raises(ContextLengthError):
-                await ResponseNode(agent)(state)
+                await ResponseNode(agent)(self.make_state_for_error())
+
+    async def test_daily_limit_error_propagates(self):
+        agent = MagicMock()
+        agent.invoke_response = AsyncMock(side_effect=DailyLimitError("quota"))
+        with (
+            patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
+            patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
+        ):
+            with pytest.raises(DailyLimitError):
+                await ResponseNode(agent)(self.make_state_for_error())
+
+    async def test_rate_limit_error_propagates(self):
+        agent = MagicMock()
+        agent.invoke_response = AsyncMock(side_effect=RateLimitError("rate limit"))
+        with (
+            patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
+            patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
+        ):
+            with pytest.raises(RateLimitError):
+                await ResponseNode(agent)(self.make_state_for_error())
+
+    async def test_unknown_exception_propagates_unchanged(self):
+        agent = MagicMock()
+        agent.invoke_response = AsyncMock(side_effect=RuntimeError("unexpected failure"))
+        with (
+            patch(THREAD_GET_HISTORY, new_callable=AsyncMock, return_value=[]),
+            patch(THREAD_APPEND_TURN, new_callable=AsyncMock),
+        ):
+            with pytest.raises(RuntimeError, match="unexpected failure"):
+                await ResponseNode(agent)(self.make_state_for_error())
