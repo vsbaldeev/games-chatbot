@@ -111,42 +111,117 @@ def extract_try_price(text: str) -> str | None:
     return None
 
 
-async def fetch_ps_store_price_via_web_search(game_name: str) -> dict:
-    """Search for Turkish PS Store price via web search.
+def find_price_in_ps_store_data(data: object, depth: int = 0) -> str | None:
+    """Recursively search PS Store __NEXT_DATA__ JSON for a price field.
 
-    Used as a fallback when direct PS Store scraping fails. Queries for
-    the game's price from aggregator sites (psdeals.net, psprices.com, etc.)
-    and matches any TRY price pattern found in result snippets.
+    Args:
+        data: JSON value to search.
+        depth: Current recursion depth; stops at 10 to bound traversal.
+
+    Returns:
+        Price string (e.g. "2.090,00 ₺") if found, otherwise None.
+    """
+    if depth > 10:
+        return None
+    if isinstance(data, dict):
+        for key in ("basePrice", "discountedPrice", "displayPrice"):
+            value = data.get(key, "")
+            if isinstance(value, str) and any(char.isdigit() for char in value):
+                return value.strip()
+        for value in data.values():
+            found = find_price_in_ps_store_data(value, depth + 1)
+            if found:
+                return found
+    elif isinstance(data, list):
+        for item in data[:20]:
+            found = find_price_in_ps_store_data(item, depth + 1)
+            if found:
+                return found
+    return None
+
+
+async def fetch_ps_store_product_page_price(product_url: str) -> dict:
+    """Scrape a PS Store product page URL for the current TRY price.
+
+    Args:
+        product_url: A store.playstation.com/en-tr/product/... URL.
+
+    Returns:
+        Dict with regular_price_try and ps_store_product_url, or empty dict.
+    """
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        response = await client.get(
+            product_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+            },
+        )
+        response.raise_for_status()
+
+    found = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+        response.text,
+        re.DOTALL,
+    )
+    if not found:
+        return {}
+
+    price = find_price_in_ps_store_data(json.loads(found.group(1)))
+    if not price:
+        return {}
+    return {"regular_price_try": price, "ps_store_product_url": product_url}
+
+
+async def find_ps_store_product_url_via_web_search(game_name: str) -> str | None:
+    """Use web search to find the PS Store TR product page URL for a game.
 
     Args:
         game_name: Game title to search for.
 
     Returns:
-        Dict with name, regular_price_try, and source on success,
-        or empty dict when nothing is found.
+        A store.playstation.com/en-tr/product URL, or None if not found.
     """
     from src.tools.web import web_search
 
-    query = f"{game_name} PlayStation Store Turkey price TL TRY fiyat"
+    query = f'"{game_name}" site:store.playstation.com/en-tr/product'
     raw = await web_search.ainvoke({"query": query})
     results = json.loads(raw)
 
     if not isinstance(results, list):
-        return {}
-
+        return None
     for item in results:
-        price = extract_try_price(item.get("snippet", ""))
-        if not price:
-            continue
-        result: dict = {"regular_price_try": price, "source": "web_search"}
-        title = item.get("title", "")
-        if title:
-            result["name"] = title
         url = item.get("url", "")
-        if url:
-            result["price_source_url"] = url
-        return result
-    return {}
+        if "store.playstation.com/en-tr/product/" in url:
+            return url
+    return None
+
+
+async def fetch_ps_store_price_via_web_search(game_name: str) -> dict:
+    """Locate the PS Store TR product page via web search and scrape its price.
+
+    Uses web search restricted to store.playstation.com/en-tr/product to find
+    the product URL, then fetches that page directly — never trusts aggregator
+    snippet prices.
+
+    Args:
+        game_name: Game title to search for.
+
+    Returns:
+        Dict with regular_price_try, ps_store_product_url, and source on
+        success, or empty dict when no product page or price is found.
+    """
+    product_url = await find_ps_store_product_url_via_web_search(game_name)
+    if not product_url:
+        return {}
+    price_data = await fetch_ps_store_product_page_price(product_url)
+    if not price_data:
+        return {}
+    return {**price_data, "source": "web_search"}
 
 
 async def __fetch_ps_store_price(game_name: str) -> dict:
@@ -190,27 +265,38 @@ async def __fetch_ps_store_price(game_name: str) -> dict:
 async def get_ps_store_price_tr(game_name: str) -> str:
     """
     Get the Turkish PlayStation Store price for a game in TRY.
-    First scrapes the PS Store TR directly; falls back to web search
-    when the page is inaccessible. Always returns a ps_store_search_url.
+    Fetches price from the PS Store product page for accuracy.
+    Always returns a ps_store_search_url.
     """
     store_url = f"https://store.playstation.com/en-tr/search/{quote(game_name)}"
     result: dict = {"game": game_name, "ps_store_search_url": store_url}
 
+    product_url: str | None = None
     try:
-        price_fields = await __fetch_ps_store_price(game_name)
-        result.update(price_fields)
+        search_data = await __fetch_ps_store_price(game_name)
+        product_url = search_data.get("ps_store_product_url")
     except Exception:
         pass
 
-    has_price = "regular_price_try" in result or "sale_price_try" in result
-    if not has_price:
+    if not product_url:
         try:
-            web_fields = await fetch_ps_store_price_via_web_search(game_name)
-            if web_fields:
-                result.pop("note", None)
-                result.update(web_fields)
-        except Exception as error:
-            result.setdefault("note", f"Price lookup failed: {error}")
+            product_url = await find_ps_store_product_url_via_web_search(game_name)
+        except Exception:
+            pass
+
+    if not product_url:
+        result["note"] = "Game not found in PS Store TR"
+        return json.dumps(result, ensure_ascii=False)
+
+    result["ps_store_product_url"] = product_url
+    try:
+        page_data = await fetch_ps_store_product_page_price(product_url)
+        if page_data:
+            result.update(page_data)
+        else:
+            result["note"] = "Price unavailable — use ps_store_product_url"
+    except Exception as error:
+        result["note"] = f"Price lookup failed: {error}"
 
     return json.dumps(result, ensure_ascii=False)
 
