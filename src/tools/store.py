@@ -10,9 +10,18 @@ from langchain_core.tools import tool
 
 
 async def __find_steam_appid(game_name: str, client: httpx.AsyncClient) -> tuple[int, str] | None:
+    """Search Steam for a game by name and return its appid and canonical name.
+
+    Args:
+        game_name: Human-readable game title to search for.
+        client: Shared async HTTP client.
+
+    Returns:
+        A (appid, name) tuple for the top result, or None if not found.
+    """
     response = await client.get(
         "https://store.steampowered.com/api/storesearch/",
-        params={"term": game_name, "cc": "us", "l": "en"},
+        params={"term": game_name, "cc": "tr", "l": "en"},
     )
     response.raise_for_status()
     data = response.json()
@@ -22,24 +31,42 @@ async def __find_steam_appid(game_name: str, client: httpx.AsyncClient) -> tuple
     return items[0]["id"], items[0]["name"]
 
 
-def __parse_psdeals_price(page_data: dict, game_name: str) -> dict:
-    games_list = page_data.get("props", {}).get("pageProps", {}).get("gamesList", [])
-    name_lower = game_name.lower()
-    for game_item in games_list[:20]:
-        if name_lower not in game_item.get("name", "").lower():
-            continue
-        price_obj = game_item.get("price") or {}
-        result: dict = {"name": game_item.get("name", game_name)}
-        if price_obj.get("regular"):
-            result["regular_price_try"] = price_obj["regular"]
-        if price_obj.get("discount"):
-            result["sale_price_try"] = price_obj["discount"]
-        if price_obj.get("discountPercent"):
-            result["discount_percent"] = price_obj["discountPercent"]
-        psdeals_id = game_item.get("id") or game_item.get("slug") or ""
-        if psdeals_id:
-            result["psdeals_url"] = f"https://psdeals.net/tr-store/game/{psdeals_id}"
-        return result
+def __parse_ps_store_search_data(next_data: dict, game_name: str) -> dict:
+    """Extract price fields from a PlayStation Store search page __NEXT_DATA__ blob.
+
+    Args:
+        next_data: Parsed JSON from the __NEXT_DATA__ script tag.
+        game_name: Original search term, used as fallback name.
+
+    Returns:
+        Dict with price fields if a matching product was found, otherwise empty.
+    """
+    try:
+        search_results = (
+            next_data.get("props", {})
+            .get("pageProps", {})
+            .get("searchResults", {})
+            .get("searchResultItems", [])
+        )
+        name_lower = game_name.lower()
+        for item in search_results[:10]:
+            item_name = item.get("name", "")
+            if name_lower not in item_name.lower():
+                continue
+            price_obj = item.get("price") or {}
+            result: dict = {"name": item_name}
+            if price_obj.get("basePrice"):
+                result["regular_price_try"] = price_obj["basePrice"]
+            if price_obj.get("discountedPrice"):
+                result["sale_price_try"] = price_obj["discountedPrice"]
+            if price_obj.get("discountText"):
+                result["discount_percent"] = price_obj["discountText"]
+            product_id = item.get("id") or item.get("productId") or ""
+            if product_id:
+                result["ps_store_product_url"] = f"https://store.playstation.com/en-tr/product/{product_id}"
+            return result
+    except (KeyError, TypeError, AttributeError):
+        pass
     return {}
 
 
@@ -68,41 +95,122 @@ async def get_ps_store_sales(limit: int = 12) -> str:
         return json.dumps({"error": str(error)})
 
 
+def extract_try_price(text: str) -> str | None:
+    """Extract a Turkish Lira price string from arbitrary text.
+
+    Args:
+        text: Text snippet that may contain a TRY price.
+
+    Returns:
+        The price string (e.g. "₺1.500,00") or None if not found.
+    """
+    for pattern in (r'₺[\d.,]+', r'[\d.,]+\s*TL\b', r'[\d.,]+\s*TRY\b'):
+        found = re.search(pattern, text, re.IGNORECASE)
+        if found:
+            return found.group(0).strip()
+    return None
+
+
+async def fetch_ps_store_price_via_web_search(game_name: str) -> dict:
+    """Search for Turkish PS Store price via web search.
+
+    Used as a fallback when direct PS Store scraping fails. Queries for
+    the game's price from aggregator sites (psdeals.net, psprices.com, etc.)
+    and matches any TRY price pattern found in result snippets.
+
+    Args:
+        game_name: Game title to search for.
+
+    Returns:
+        Dict with name, regular_price_try, and source on success,
+        or empty dict when nothing is found.
+    """
+    from src.tools.web import web_search
+
+    query = f"{game_name} PlayStation Store Turkey price TL TRY fiyat"
+    raw = await web_search.ainvoke({"query": query})
+    results = json.loads(raw)
+
+    if not isinstance(results, list):
+        return {}
+
+    for item in results:
+        price = extract_try_price(item.get("snippet", ""))
+        if not price:
+            continue
+        result: dict = {"regular_price_try": price, "source": "web_search"}
+        title = item.get("title", "")
+        if title:
+            result["name"] = title
+        url = item.get("url", "")
+        if url:
+            result["price_source_url"] = url
+        return result
+    return {}
+
+
+async def __fetch_ps_store_price(game_name: str) -> dict:
+    """Fetch Turkish PS Store price by scraping the store's own search page.
+
+    Args:
+        game_name: Game title to search for.
+
+    Returns:
+        Dict with price fields on success, or with a 'note' key on failure.
+    """
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        response = await client.get(
+            f"https://store.playstation.com/en-tr/search/{quote(game_name)}",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+            },
+        )
+        response.raise_for_status()
+
+    match = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+        response.text,
+        re.DOTALL,
+    )
+    if not match:
+        return {"note": "Price unavailable — use ps_store_search_url"}
+    next_data = json.loads(match.group(1))
+    price_fields = __parse_ps_store_search_data(next_data, game_name)
+    if not price_fields:
+        return {"note": "Game not found in PS Store TR search results"}
+    return price_fields
+
+
 @tool
 async def get_ps_store_price_tr(game_name: str) -> str:
     """
-    Get the Turkish PlayStation Store link for a game and try to fetch its
-    current price in TRY from psdeals.net. Always returns a ps_store_search_url.
+    Get the Turkish PlayStation Store price for a game in TRY.
+    First scrapes the PS Store TR directly; falls back to web search
+    when the page is inaccessible. Always returns a ps_store_search_url.
     """
-    store_url = f"https://store.playstation.com/tr-tr/search/{quote(game_name)}"
+    store_url = f"https://store.playstation.com/en-tr/search/{quote(game_name)}"
     result: dict = {"game": game_name, "ps_store_search_url": store_url}
 
     try:
-        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
-            response = await client.get(
-                "https://psdeals.net/tr-store",
-                params={"q": game_name},
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "text/html,application/xhtml+xml",
-                },
-            )
-            response.raise_for_status()
+        price_fields = await __fetch_ps_store_price(game_name)
+        result.update(price_fields)
+    except Exception:
+        pass
 
-        next_data_match = re.search(
-            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-            response.text,
-            re.DOTALL,
-        )
-        if next_data_match:
-            page_data = json.loads(next_data_match.group(1))
-            price_fields = __parse_psdeals_price(page_data, game_name)
-            result.update(price_fields)
-        else:
-            result["note"] = "Price unavailable — use ps_store_search_url"
-
-    except Exception as error:
-        result["note"] = f"Price lookup failed: {error}"
+    has_price = "regular_price_try" in result or "sale_price_try" in result
+    if not has_price:
+        try:
+            web_fields = await fetch_ps_store_price_via_web_search(game_name)
+            if web_fields:
+                result.pop("note", None)
+                result.update(web_fields)
+        except Exception as error:
+            result.setdefault("note", f"Price lookup failed: {error}")
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -150,7 +258,7 @@ async def get_steam_app_details(game_name: str) -> str:
 
             details_response = await client.get(
                 "https://store.steampowered.com/api/appdetails",
-                params={"appids": app_id, "l": "en"},
+                params={"appids": app_id, "cc": "tr", "l": "en"},
             )
             details_response.raise_for_status()
             raw = details_response.json().get(str(app_id), {})
@@ -166,7 +274,7 @@ async def get_steam_app_details(game_name: str) -> str:
                 "developers": data.get("developers", []),
                 "release_date": data.get("release_date", {}).get("date"),
                 "genres": [genre_item["description"] for genre_item in data.get("genres", [])],
-                "price_usd": price_overview.get("final_formatted"),
+                "price_try": price_overview.get("final_formatted"),
                 "metacritic_score": metacritic.get("score"),
                 "steam_url": f"https://store.steampowered.com/app/{app_id}/",
             }, ensure_ascii=False)

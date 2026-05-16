@@ -41,21 +41,21 @@ def make_worker_state(*, username: str = "alice", raw_text: str = "вопрос"
 
 class TestWorkerPrompt:
     def test_context_first_rule_exists(self):
-        """WORKER_PROMPT must contain the CONTEXT FIRST directive so the
+        """WORKER_PROMPT must contain the СНАЧАЛА КОНТЕКСТ directive so the
         LLM knows to use existing reply-chain content before reaching for tools."""
-        assert "CONTEXT FIRST" in WORKER_PROMPT
+        assert "СНАЧАЛА КОНТЕКСТ" in WORKER_PROMPT
 
     def test_context_first_precedes_tool_selection(self):
-        """CONTEXT FIRST must appear before TOOL SELECTION so the model evaluates
+        """СНАЧАЛА КОНТЕКСТ must appear before ВЫБОР ИНСТРУМЕНТА so the model evaluates
         available context before deciding whether a tool call is needed."""
-        context_first_pos = WORKER_PROMPT.index("CONTEXT FIRST")
-        tool_selection_pos = WORKER_PROMPT.index("TOOL SELECTION")
+        context_first_pos = WORKER_PROMPT.index("СНАЧАЛА КОНТЕКСТ")
+        tool_selection_pos = WORKER_PROMPT.index("ВЫБОР ИНСТРУМЕНТА")
         assert context_first_pos < tool_selection_pos
 
     def test_prompt_forbids_tools_when_context_is_sufficient(self):
         """The prompt must explicitly say not to call tools when the needed
         content is already present in the reply chain."""
-        assert "Do NOT call any tools" in WORKER_PROMPT
+        assert "НЕ вызывай инструменты" in WORKER_PROMPT
 
 
 class TestWorkerNodeBuildInput:
