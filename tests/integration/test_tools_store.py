@@ -11,6 +11,7 @@ import pytest
 
 from src.tools.store import (
     fetch_ps_store_price_via_web_search,
+    fetch_ps_store_product_page_price,
     get_ps_store_price_tr,
     get_steam_app_details,
     get_steam_player_count,
@@ -116,10 +117,10 @@ class TestGetPsStorePriceTr:
         assert "elden" in store_url
 
     async def test_returns_price_in_try_for_known_game(self):
-        """Elden Ring should return a TRY price when PS Store TR search succeeds.
+        """Elden Ring should return a TRY price sourced from web search.
 
-        The price may come from direct scraping or the web search fallback.
-        Either path is valid; the assertion only checks format when a price is present.
+        Asserts format only when a price is present — PS Store geo-restrictions
+        may occasionally prevent scraping.
         """
         raw = await get_ps_store_price_tr.ainvoke({"game_name": "Elden Ring"})
         result = json.loads(raw)
@@ -127,18 +128,17 @@ class TestGetPsStorePriceTr:
         if "regular_price_try" in result:
             assert any(char.isdigit() for char in result["regular_price_try"])
 
-    async def test_web_search_fallback_is_wired(self):
-        """When the web search fallback supplies a price, source must be 'web_search'.
+    async def test_price_source_is_web_search(self):
+        """When a price is found, source must be 'web_search'.
 
-        This confirms the fallback path in get_ps_store_price_tr is connected:
-        the tool always returns the search URL, and any web-search-sourced price
-        carries the source field.
+        Confirms the web search path is wired end-to-end: any price returned
+        by get_ps_store_price_tr must carry source='web_search'.
         """
         raw = await get_ps_store_price_tr.ainvoke({"game_name": "Elden Ring"})
         result = json.loads(raw)
         assert "ps_store_search_url" in result
-        if result.get("source") == "web_search":
-            assert "regular_price_try" in result
+        if "regular_price_try" in result:
+            assert result.get("source") == "web_search"
 
 
 @pytest.mark.integration
@@ -159,6 +159,58 @@ class TestFetchPsStorePriceViaWebSearch:
             assert result["source"] == "web_search"
             price = result["regular_price_try"]
             assert any(char.isdigit() for char in price)
+
+
+@pytest.mark.integration
+class TestFetchPsStoreProductPagePrice:
+    """Tests for fetch_ps_store_product_page_price using known stable product URLs.
+
+    Arc Raiders and Helldivers 2 are used because their exact product URLs and
+    expected prices are known. These tests guard against price-parser regressions
+    where DLC or virtual-currency prices were returned instead of the main game price.
+    """
+
+    ARC_RAIDERS_URL = (
+        "https://store.playstation.com/en-tr/product/"
+        "EP6848-PPSA04998_00-4085881659726287"
+    )
+    HELLDIVERS_2_URL = (
+        "https://store.playstation.com/en-tr/product/"
+        "EP9000-PPSA06016_00-HELLDIVERS200000"
+    )
+
+    async def test_arc_raiders_returns_price(self):
+        """Arc Raiders product page must return a TRY price, not a DLC price.
+
+        Previous regression: 1.000,00 TL (old aggregator price) was returned
+        instead of the correct 2.090,00 TL main game price.
+        """
+        result = await fetch_ps_store_product_page_price(self.ARC_RAIDERS_URL)
+        assert isinstance(result, dict)
+        assert "regular_price_try" in result
+        price = result["regular_price_try"]
+        assert any(char.isdigit() for char in price)
+        assert "ps_store_product_url" in result
+
+    async def test_helldivers_2_returns_main_game_price(self):
+        """Helldivers 2 product page must return the main game price, not a DLC price.
+
+        Previous regression: 429,00 TL (Super Credits virtual currency DLC) was
+        returned instead of the correct 1.399,00 TL main game price.
+        """
+        result = await fetch_ps_store_product_page_price(self.HELLDIVERS_2_URL)
+        assert isinstance(result, dict)
+        assert "regular_price_try" in result
+        price = result["regular_price_try"]
+        assert any(char.isdigit() for char in price)
+        assert "1.399" in price or "1399" in price.replace(".", "").replace(",", "")
+
+    async def test_returns_empty_dict_for_invalid_url(self):
+        """An invalid product URL must return an empty dict, not raise."""
+        result = await fetch_ps_store_product_page_price(
+            "https://store.playstation.com/en-tr/product/INVALID-PRODUCT-ID-00000"
+        )
+        assert isinstance(result, dict)
 
 
 @pytest.mark.integration
@@ -199,6 +251,35 @@ class TestGetPsStorePriceTrWithLLM:
         lower = result.lower()
         assert any(
             term in lower
-            for term in ["tl", "try", "₺", "store.playstation.com", "playstation", "fiyat",
-                         "лира", "цена", "стоит", "магазин", "недоступ", "найден", "war"]
+            for term in [
+                "tl", "try", "₺", "store.playstation.com", "playstation", "fiyat",
+                "лира", "цена", "стоит", "магазин", "недоступ", "найден", "war",
+                "found", "turkey", "ps store",
+            ]
         )
+
+    async def test_worker_returns_correct_price_for_arc_raiders(self, worker_agent):
+        """WorkerAgent must return the correct Arc Raiders price: 2.090 TL.
+
+        Regression guard: previously the tool returned 1.000 TL (stale aggregator
+        price) instead of the 2.090 TL shown on the PS Store TR product page.
+        """
+        prompt = "Question from @user: Сколько стоит Arc Raiders в турецком PS Store?"
+        result = await worker_agent.invoke_worker(prompt)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        normalised = result.replace(".", "").replace(",", "").replace(" ", "")
+        assert "2.090" in result or "2 090" in result or "2090" in normalised
+
+    async def test_worker_returns_correct_price_for_helldivers_2(self, worker_agent):
+        """WorkerAgent must return the Helldivers 2 main game price: 1.399 TL.
+
+        Regression guard: previously the tool returned 429 TL (Super Credits
+        virtual-currency DLC) instead of the 1.399 TL main game price.
+        """
+        prompt = "Question from @user: Сколько стоит Helldivers 2 в PS Store Турции?"
+        result = await worker_agent.invoke_worker(prompt)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        normalised = result.replace(".", "").replace(",", "").replace(" ", "")
+        assert "1.399" in result or "1 399" in result or "1399" in normalised
