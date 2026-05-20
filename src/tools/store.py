@@ -56,39 +56,97 @@ async def get_ps_store_sales(limit: int = 12) -> str:
         return json.dumps({"error": str(error)})
 
 
-def scrape_ps_store_final_price(html: str) -> str | None:
-    """Extract the final purchase price from PS Store product page HTML.
+def is_ps_store_addon_page(html: str) -> bool:
+    """Return True if the PS Store page is for an Add-On rather than a base game.
 
-    Targets the ``data-qa="mfeCtaMain#offer0#finalPrice"`` span rendered by
-    the Next.js SSR layer — the only reliable source for the main game price.
-    Avoids DLC and virtual-currency prices that appear elsewhere in the DOM.
+    Checks the Next.js SSR data and rendered HTML for add-on category markers.
+    Used to skip DLC/addon URLs returned by web search before scraping a price.
+
+    Args:
+        html: Full HTML of a store.playstation.com product page.
+
+    Returns:
+        True if the page is detected as an Add-On or DLC, False otherwise.
+    """
+    addon_signals = [
+        r'"topCategory"\s*:\s*"(?:Add-On|ADD_ON|GAME_ADD_ON)"',
+        r'"contentType"\s*:\s*"GAME_ADD_ON"',
+        r'data-qa="[^"]*topCategory[^"]*"[^>]*>\s*Add-On',
+    ]
+    return any(re.search(pattern, html, re.IGNORECASE) for pattern in addon_signals)
+
+
+def extract_offer_name(html: str, offer_index: str) -> str | None:
+    """Extract the display name for one PS Store offer by its index.
+
+    Tries known data-qa naming patterns used by the PS Store Next.js layer.
+
+    Args:
+        html: Full HTML of a store.playstation.com product page.
+        offer_index: String index of the offer (e.g. ``"0"``, ``"1"``).
+
+    Returns:
+        The offer name, or None if no recognisable name element is found.
+    """
+    name_patterns = [
+        rf'data-qa="mfeCtaMain#offer{offer_index}#label"[^>]*>(.*?)</(?:span|div|p)>',
+        rf'data-qa="mfeCtaMain#offer{offer_index}#name"[^>]*>(.*?)</(?:span|div|p)>',
+    ]
+    for pattern in name_patterns:
+        match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
+        if match:
+            name = re.sub(r'<[^>]+>', '', match.group(1)).strip()
+            if name:
+                return name
+    return None
+
+
+def scrape_ps_store_editions(html: str) -> list[dict]:
+    """Extract all editions with names and prices from PS Store product page HTML.
+
+    Finds every ``mfeCtaMain#offerN#finalPrice`` span and pairs each price with
+    an edition name from ``extract_offer_name``.
 
     Args:
         html: Full HTML of a store.playstation.com/en-tr/product/... page.
 
     Returns:
-        Price string (e.g. "1.399,00 TL") with non-breaking spaces normalised,
-        or None if the element is absent.
+        List of ``{"name": ..., "price_try": ...}`` dicts, one per edition.
+        Empty list if no offer prices are found.
     """
-    match = re.search(
-        r'data-qa="mfeCtaMain#offer0#finalPrice"[^>]*>(.*?)</span>',
+    price_matches = re.findall(
+        r'data-qa="mfeCtaMain#offer(\d+)#finalPrice"[^>]*>(.*?)</span>',
         html,
         re.DOTALL,
     )
-    if not match:
-        return None
-    price = re.sub(r'<[^>]+>', '', match.group(1)).replace('\xa0', ' ').replace(' ', '.').strip()
-    return price if any(char.isdigit() for char in price) else None
+    if not price_matches:
+        return []
+    editions = []
+    for offer_index, price_html in price_matches:
+        price = (
+            re.sub(r'<[^>]+>', '', price_html)
+            .replace('\xa0', ' ')
+            .replace(' ', '.')
+            .strip()
+        )
+        if not any(char.isdigit() for char in price):
+            continue
+        name = extract_offer_name(html, offer_index)
+        if name is None:
+            name = "Standard Edition" if len(price_matches) == 1 else f"Edition {int(offer_index) + 1}"
+        editions.append({"name": name, "price_try": price})
+    return editions
 
 
 async def fetch_ps_store_product_page_price(product_url: str) -> dict:
-    """Scrape a PS Store product page URL for the current TRY price.
+    """Scrape a PS Store product page URL for all edition prices in TRY.
 
     Args:
         product_url: A store.playstation.com/en-tr/product/... URL.
 
     Returns:
-        Dict with regular_price_try and ps_store_product_url, or empty dict.
+        Dict with ``editions`` list and ``ps_store_product_url``, or empty dict
+        if the page is an add-on or no prices are found.
     """
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
         response = await client.get(
@@ -104,20 +162,25 @@ async def fetch_ps_store_product_page_price(product_url: str) -> dict:
         )
         response.raise_for_status()
 
-    price = scrape_ps_store_final_price(response.text)
-    if not price:
+    if is_ps_store_addon_page(response.text):
         return {}
-    return {"regular_price_try": price, "ps_store_product_url": product_url}
+    editions = scrape_ps_store_editions(response.text)
+    if not editions:
+        return {}
+    return {"editions": editions, "ps_store_product_url": product_url}
 
 
-async def find_ps_store_product_url_via_web_search(game_name: str) -> str | None:
-    """Use web search to find the PS Store TR product page URL for a game.
+async def find_ps_store_product_url_via_web_search(game_name: str) -> list[str]:
+    """Use web search to find PS Store TR product page URLs for a game.
+
+    Returns all matching product URLs from the search results so that callers
+    can iterate and skip addon pages if the first result is not a base game.
 
     Args:
         game_name: Game title to search for.
 
     Returns:
-        A store.playstation.com/en-tr/product URL, or None if not found.
+        List of store.playstation.com/en-tr/product URLs, empty if none found.
     """
     from src.tools.web import web_search
 
@@ -126,42 +189,41 @@ async def find_ps_store_product_url_via_web_search(game_name: str) -> str | None
     results = json.loads(raw)
 
     if not isinstance(results, list):
-        return None
-    for item in results:
-        url = item.get("url", "")
-        if "store.playstation.com/en-tr/product/" in url:
-            return url
-    return None
+        return []
+    return [
+        item.get("url", "")
+        for item in results
+        if "store.playstation.com/en-tr/product/" in item.get("url", "")
+    ]
 
 
 async def fetch_ps_store_price_via_web_search(game_name: str) -> dict:
-    """Locate the PS Store TR product page via web search and scrape its price.
+    """Locate the PS Store TR product page via web search and scrape its prices.
 
-    Uses web search restricted to store.playstation.com/en-tr/product to find
-    the product URL, then fetches that page directly — never trusts aggregator
-    snippet prices.
+    Tries each candidate URL from the web search in order, skipping any that
+    are detected as Add-On pages, until a base-game page with editions is found.
 
     Args:
         game_name: Game title to search for.
 
     Returns:
-        Dict with regular_price_try, ps_store_product_url, and source on
-        success, or empty dict when no product page or price is found.
+        Dict with ``editions``, ``ps_store_product_url``, and ``source`` on
+        success, or empty dict when no product page or prices are found.
     """
-    product_url = await find_ps_store_product_url_via_web_search(game_name)
-    if not product_url:
-        return {}
-    price_data = await fetch_ps_store_product_page_price(product_url)
-    if not price_data:
-        return {}
-    return {**price_data, "source": "web_search"}
+    product_urls = await find_ps_store_product_url_via_web_search(game_name)
+    for product_url in product_urls:
+        price_data = await fetch_ps_store_product_page_price(product_url)
+        if price_data:
+            return {**price_data, "source": "web_search"}
+    return {}
 
 
 @tool
 async def get_ps_store_price_tr(game_name: str) -> str:
     """
-    Get the Turkish PlayStation Store price for a game in TRY.
-    Finds the product page via web search, then scrapes the price directly.
+    Get the Turkish PlayStation Store prices for a game in TRY.
+    Returns all available editions (Standard, Deluxe, Ultimate, etc.) with prices.
+    Finds the product page via web search, then scrapes prices directly.
     Always returns a ps_store_search_url.
     """
     store_url = f"https://store.playstation.com/en-tr/search/{quote(game_name)}"

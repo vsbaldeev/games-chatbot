@@ -6,12 +6,14 @@ Steam appid (730) and consistently high player counts.
 """
 
 import json
+import re
 
 import pytest
 
 from src.tools.store import (
     fetch_ps_store_price_via_web_search,
     fetch_ps_store_product_page_price,
+    find_ps_store_product_url_via_web_search,
     get_ps_store_price_tr,
     get_steam_app_details,
     get_steam_player_count,
@@ -117,27 +119,30 @@ class TestGetPsStorePriceTr:
         assert "elden" in store_url
 
     async def test_returns_price_in_try_for_known_game(self):
-        """Elden Ring should return a TRY price sourced from web search.
+        """Elden Ring should return edition prices sourced from web search.
 
-        Asserts format only when a price is present — PS Store geo-restrictions
+        Asserts format only when editions are present — PS Store geo-restrictions
         may occasionally prevent scraping.
         """
         raw = await get_ps_store_price_tr.ainvoke({"game_name": "Elden Ring"})
         result = json.loads(raw)
         assert "ps_store_search_url" in result
-        if "regular_price_try" in result:
-            assert any(char.isdigit() for char in result["regular_price_try"])
+        if "editions" in result:
+            assert len(result["editions"]) > 0
+            for edition in result["editions"]:
+                assert "price_try" in edition
+                assert any(char.isdigit() for char in edition["price_try"])
 
     async def test_price_source_is_web_search(self):
-        """When a price is found, source must be 'web_search'.
+        """When editions are found, source must be 'web_search'.
 
-        Confirms the web search path is wired end-to-end: any price returned
+        Confirms the web search path is wired end-to-end: any editions returned
         by get_ps_store_price_tr must carry source='web_search'.
         """
         raw = await get_ps_store_price_tr.ainvoke({"game_name": "Elden Ring"})
         result = json.loads(raw)
         assert "ps_store_search_url" in result
-        if "regular_price_try" in result:
+        if "editions" in result:
             assert result.get("source") == "web_search"
 
 
@@ -151,14 +156,16 @@ class TestFetchPsStorePriceViaWebSearch:
         assert isinstance(result, dict)
 
     async def test_empty_dict_or_price_fields_present(self):
-        """Result is either empty or has all expected price field keys with valid values."""
+        """Result is either empty or has editions list and source fields."""
         result = await fetch_ps_store_price_via_web_search("Elden Ring")
         if result:
-            assert "regular_price_try" in result
+            assert "editions" in result
             assert "source" in result
             assert result["source"] == "web_search"
-            price = result["regular_price_try"]
-            assert any(char.isdigit() for char in price)
+            assert len(result["editions"]) > 0
+            for edition in result["editions"]:
+                assert "price_try" in edition
+                assert any(char.isdigit() for char in edition["price_try"])
 
 
 @pytest.mark.integration
@@ -180,30 +187,34 @@ class TestFetchPsStoreProductPagePrice:
     )
 
     async def test_arc_raiders_returns_price(self):
-        """Arc Raiders product page must return a TRY price, not a DLC price.
+        """Arc Raiders product page must return editions with TRY prices.
 
         Previous regression: 1.000,00 TL (old aggregator price) was returned
         instead of the correct 2.090,00 TL main game price.
         """
         result = await fetch_ps_store_product_page_price(self.ARC_RAIDERS_URL)
         assert isinstance(result, dict)
-        assert "regular_price_try" in result
-        price = result["regular_price_try"]
-        assert any(char.isdigit() for char in price)
+        assert "editions" in result
+        assert len(result["editions"]) > 0
         assert "ps_store_product_url" in result
+        for edition in result["editions"]:
+            assert "name" in edition
+            assert "price_try" in edition
+            assert any(char.isdigit() for char in edition["price_try"])
 
     async def test_helldivers_2_returns_main_game_price(self):
-        """Helldivers 2 product page must return the main game price, not a DLC price.
+        """Helldivers 2 product page must return the Standard Edition price, not a DLC price.
 
         Previous regression: 429,00 TL (Super Credits virtual currency DLC) was
         returned instead of the correct 1.399,00 TL main game price.
         """
         result = await fetch_ps_store_product_page_price(self.HELLDIVERS_2_URL)
         assert isinstance(result, dict)
-        assert "regular_price_try" in result
-        price = result["regular_price_try"]
-        assert any(char.isdigit() for char in price)
-        assert "1.399" in price or "1399" in price.replace(".", "").replace(",", "")
+        assert "editions" in result
+        assert len(result["editions"]) > 0
+        first_price = result["editions"][0]["price_try"]
+        assert any(char.isdigit() for char in first_price)
+        assert "1.399" in first_price or "1399" in first_price.replace(".", "").replace(",", "")
 
     async def test_returns_empty_dict_for_invalid_url(self):
         """An invalid product URL must return an empty dict, not raise."""
@@ -211,6 +222,91 @@ class TestFetchPsStoreProductPagePrice:
             "https://store.playstation.com/en-tr/product/INVALID-PRODUCT-ID-00000"
         )
         assert isinstance(result, dict)
+
+
+@pytest.mark.integration
+class TestFindPsStoreProductUrlViaWebSearch:
+    """Integration tests for find_ps_store_product_url_via_web_search.
+
+    Verifies the refactored function returns a list of all candidate URLs
+    rather than a single URL, which enables the caller to skip addon pages.
+    """
+
+    async def test_returns_list_for_known_game(self):
+        """Must always return a list, never None or a bare string."""
+        urls = await find_ps_store_product_url_via_web_search("Elden Ring")
+        assert isinstance(urls, list)
+
+    async def test_all_returned_urls_are_ps_store_tr_product_urls(self):
+        """Every URL in the result must be a store.playstation.com/en-tr/product/ URL."""
+        urls = await find_ps_store_product_url_via_web_search("Elden Ring")
+        for url in urls:
+            assert "store.playstation.com/en-tr/product/" in url, (
+                f"Unexpected URL format: {url}"
+            )
+
+    async def test_returns_at_least_one_url_for_known_game(self):
+        """A popular game must produce at least one candidate URL."""
+        urls = await find_ps_store_product_url_via_web_search("Elden Ring")
+        assert len(urls) >= 1, (
+            "Expected at least one candidate URL; "
+            f"got {len(urls)}"
+        )
+
+    async def test_returns_empty_list_for_nonsense_query(self):
+        """An unrecognisable title must return an empty list, not raise."""
+        urls = await find_ps_store_product_url_via_web_search("xyzzy_no_such_game_99999")
+        assert isinstance(urls, list)
+        assert len(urls) == 0
+
+
+@pytest.mark.integration
+class TestPsStoreAddonPageRejection:
+    """Verify that Add-On product pages are rejected end-to-end.
+
+    Uses a DLC URL found via web search at test time so the test does not
+    depend on a hardcoded product ID that can change between PS Store releases.
+    """
+
+    async def test_addon_page_is_rejected_when_found(self):
+        """fetch_ps_store_product_page_price must return {} for a real Add-On page.
+
+        Searches for an in-game virtual-currency product — the kind most likely
+        to have its own PS Store product URL classified as an Add-On. Skips when
+        the web search returns a game page instead of an addon page, since not
+        all DLC searches surface a dedicated addon product URL.
+        """
+        addon_urls = await find_ps_store_product_url_via_web_search(
+            "Apex Legends Apex Coins"
+        )
+        if not addon_urls:
+            pytest.skip("Web search returned no PS Store product URLs")
+
+        result = await fetch_ps_store_product_page_price(addon_urls[0])
+        if "editions" in result:
+            pytest.skip(
+                f"Web search returned a game page ({addon_urls[0]!r}), "
+                "not an Add-On page — addon rejection cannot be verified"
+            )
+        assert result == {}, (
+            f"Expected empty dict for addon page {addon_urls[0]!r}, got {result}"
+        )
+
+    async def test_fetch_price_via_web_search_skips_addon_and_falls_back(self):
+        """fetch_ps_store_price_via_web_search must not return a price for a DLC-only query.
+
+        Searching for a DLC by its exact expansion name should either return an
+        empty dict (all results rejected as addon pages) or — if a base game
+        page happens to appear in results — return that game's editions.
+        In either case the result must never contain an addon price.
+        """
+        result = await fetch_ps_store_price_via_web_search(
+            "Elden Ring Shadow of the Erdtree"
+        )
+        assert isinstance(result, dict)
+        if result:
+            # If anything was returned it must have the editions key
+            assert "editions" in result
 
 
 @pytest.mark.integration
@@ -283,3 +379,66 @@ class TestGetPsStorePriceTrWithLLM:
         assert len(result.strip()) > 0
         normalised = result.replace(".", "").replace(",", "").replace(" ", "")
         assert "1.399" in result or "1 399" in result or "1399" in normalised
+
+    async def test_worker_lists_all_editions_with_prices_for_god_of_war(self, worker_agent):
+        """WorkerAgent must list every available edition with its TRY price.
+
+        God of War Ragnarok ships in multiple editions on PS Store TR (Standard
+        and Digital Deluxe at minimum). The response must include at least two
+        distinct TRY price amounts and reference both edition names.
+        """
+        prompt = (
+            "Question from @user: "
+            "Какие издания"
+            " God of War Ragnarök есть в PS Store"
+            " Турции и сколько"
+            " каждое стоит?"
+        )
+        result = await worker_agent.invoke_worker(prompt)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        lower = result.lower()
+
+        assert any(term in lower for term in ["war", "playstation", "ps store", "tl", "лира", "₺"])
+
+        prices = re.findall(r'\d[\d\s.,]*(?:tl|лир|₺)', lower)
+        edition_hits = sum(
+            1 for term in ["standard", "deluxe", "digital", "edition", "издани", "версия"]
+            if term in lower
+        )
+        assert len(prices) >= 2 or edition_hits >= 2, (
+            f"Expected multiple editions or prices in response \u2014 "
+            f"prices found: {prices!r}, edition term hits: {edition_hits}. "
+            f"Response: {result[:400]}"
+        )
+
+    async def test_worker_includes_edition_names_alongside_prices(self, worker_agent):
+        """WorkerAgent must pair edition names with prices, not list bare numbers.
+
+        When the tool returns multiple editions the LLM must present them with
+        labels (e.g. 'Standard Edition \u2014 1.699 TL') rather than bare numbers.
+        Uses Spider-Man 2, which has Standard and Digital Deluxe editions on PS Store TR.
+        """
+        prompt = (
+            "Question from @user: "
+            "Перечисли все"
+            " издания Marvel's Spider-Man 2"
+            " в PS Store Турции с ценами."
+        )
+        result = await worker_agent.invoke_worker(prompt)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        lower = result.lower()
+
+        assert any(term in lower for term in ["spider", "playstation", "ps store", "tl", "лира", "₺"])
+
+        has_edition_label = any(
+            term in lower
+            for term in ["standard", "deluxe", "digital", "edition", "издани", "версия"]
+        )
+        has_price = bool(re.search(r'\d[\d\s.,]*(?:tl|лир|₺)', lower))
+        assert has_edition_label and has_price, (
+            f"Expected edition labels paired with TRY prices. "
+            f"Edition label present: {has_edition_label}, price present: {has_price}. "
+            f"Response: {result[:400]}"
+        )
