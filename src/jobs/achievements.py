@@ -17,10 +17,10 @@ async def silence_sweep_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 for ach in new_ones:
                     text = (
                         f"🏆 @{username} получил достижение!\n\n"
-                        f"{ach.emoji} *{ach.title}*\n_{ach.description}_"
+                        f"{ach.emoji} <b>{ach.title}</b>\n<i>{ach.description}</i>"
                     )
                     try:
-                        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+                        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
                     except BadRequest:
                         await context.bot.send_message(
                             chat_id=chat_id,
