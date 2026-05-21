@@ -167,6 +167,28 @@ class TestFetchPsStorePriceViaWebSearch:
                 assert "price_try" in edition
                 assert any(char.isdigit() for char in edition["price_try"])
 
+    async def test_starfield_aggregates_standard_and_premium_editions(self):
+        """Web-search price lookup must return both Starfield editions.
+
+        Regression guard: Starfield has separate product pages for Standard
+        (~1.618 TL) and Premium (~2.265 TL). The old code stopped at the first
+        page with any price, so whichever edition the web search surfaced first
+        was the only one reported. After the aggregation fix, both editions must
+        appear regardless of search-result ordering.
+        """
+        result = await fetch_ps_store_price_via_web_search("Starfield")
+        assert isinstance(result, dict)
+        if not result:
+            pytest.skip("PS Store TR geo-restricted or Starfield not found")
+        assert "editions" in result
+        assert len(result["editions"]) >= 2, (
+            f"Expected Standard and Premium editions; got {result['editions']}"
+        )
+        prices = {edition["price_try"] for edition in result["editions"]}
+        assert len(prices) >= 2, (
+            f"Expected distinct prices for Standard and Premium; got {prices}"
+        )
+
 
 @pytest.mark.integration
 class TestFetchPsStoreProductPagePrice:
@@ -184,6 +206,14 @@ class TestFetchPsStoreProductPagePrice:
     HELLDIVERS_2_URL = (
         "https://store.playstation.com/en-tr/product/"
         "EP9000-PPSA06016_00-HELLDIVERS200000"
+    )
+    REANIMAL_URL = (
+        "https://store.playstation.com/en-tr/product/"
+        "EP4389-PPSA23372_00-ANIMALGAMEGLOBAL"
+    )
+    STARFIELD_URL = (
+        "https://store.playstation.com/en-tr/product/"
+        "UP1003-PPSA24884_00-HELIUM0000000000"
     )
 
     async def test_arc_raiders_returns_price(self):
@@ -215,6 +245,42 @@ class TestFetchPsStoreProductPagePrice:
         first_price = result["editions"][0]["price_try"]
         assert any(char.isdigit() for char in first_price)
         assert "1.399" in first_price or "1399" in first_price.replace(".", "").replace(",", "")
+
+    async def test_reanimal_returns_editions_with_prices(self):
+        """Reanimal product page must return at least one edition with a TRY price.
+
+        Reanimal is a horror adventure game by Tarsier Studios published by THQ
+        Nordic (released February 2026). Guards against the page returning no
+        editions or a price with no digits.
+        """
+        result = await fetch_ps_store_product_page_price(self.REANIMAL_URL)
+        assert isinstance(result, dict)
+        assert "editions" in result, f"Expected editions key; got {result}"
+        assert len(result["editions"]) > 0, "Expected at least one edition"
+        assert "ps_store_product_url" in result
+        for edition in result["editions"]:
+            assert "name" in edition
+            assert "price_try" in edition
+            assert any(char.isdigit() for char in edition["price_try"]), (
+                f"price_try contains no digits: {edition['price_try']!r}"
+            )
+
+    async def test_starfield_standard_edition_returns_correct_price(self):
+        """Starfield standard product page must return the Standard Edition price.
+
+        The base game URL resolves to the Standard Edition page which should
+        return exactly one edition at the standard price (~1.618 TL).
+        Guards against the page returning no price or the wrong product.
+        """
+        result = await fetch_ps_store_product_page_price(self.STARFIELD_URL)
+        assert isinstance(result, dict)
+        assert "editions" in result, f"Expected editions key; got {result}"
+        assert len(result["editions"]) > 0, "Expected at least one edition"
+        assert "ps_store_product_url" in result
+        first_price = result["editions"][0]["price_try"]
+        assert any(char.isdigit() for char in first_price), (
+            f"price_try contains no digits: {first_price!r}"
+        )
 
     async def test_returns_empty_dict_for_invalid_url(self):
         """An invalid product URL must return an empty dict, not raise."""
@@ -408,6 +474,52 @@ class TestGetPsStorePriceTrWithLLM:
         )
         assert len(prices) >= 2 or edition_hits >= 2, (
             f"Expected multiple editions or prices in response \u2014 "
+            f"prices found: {prices!r}, edition term hits: {edition_hits}. "
+            f"Response: {result[:400]}"
+        )
+
+    async def test_worker_returns_price_for_reanimal(self, worker_agent):
+        """WorkerAgent must return a TRY price for Reanimal from PS Store TR.
+
+        Reanimal is a horror adventure game by Tarsier Studios (THQ Nordic, 2026).
+        The response must reference the game and include a price in TRY.
+        """
+        prompt = "Question from @user: Сколько стоит Reanimal в турецком PS Store?"
+        result = await worker_agent.invoke_worker(prompt)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        lower = result.lower()
+        assert any(
+            term in lower
+            for term in ["tl", "try", "₺", "лира", "стоит", "playstation", "reanimal", "реанимал"]
+        )
+
+    async def test_worker_lists_all_starfield_editions(self, worker_agent):
+        """WorkerAgent must list both Standard and Premium Starfield editions with prices.
+
+        Regression guard: previously only the Premium Edition (2.265 TL) was
+        returned because the web search surfaced the dedicated premium product
+        page first. After the fix (return page with most editions), both
+        Standard (~1.618 TL) and Premium (~2.265 TL) must appear in the response.
+        """
+        prompt = (
+            "Question from @user: "
+            "Перечисли все издания Starfield в PS Store Турции с ценами."
+        )
+        result = await worker_agent.invoke_worker(prompt)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        lower = result.lower()
+
+        assert any(term in lower for term in ["starfield", "tl", "лира", "₺", "playstation"])
+
+        prices = re.findall(r'\d[\d\s.,]*(?:tl|лир|₺)', lower)
+        edition_hits = sum(
+            1 for term in ["standard", "premium", "edition", "издани", "версия", "стандарт"]
+            if term in lower
+        )
+        assert len(prices) >= 2 or edition_hits >= 2, (
+            f"Expected both Standard and Premium editions — "
             f"prices found: {prices!r}, edition term hits: {edition_hits}. "
             f"Response: {result[:400]}"
         )

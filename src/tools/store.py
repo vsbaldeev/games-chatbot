@@ -198,10 +198,12 @@ async def find_ps_store_product_url_via_web_search(game_name: str) -> list[str]:
 
 
 async def fetch_ps_store_price_via_web_search(game_name: str) -> dict:
-    """Locate the PS Store TR product page via web search and scrape its prices.
+    """Locate PS Store TR product pages via web search and aggregate all editions.
 
-    Tries each candidate URL from the web search in order, skipping any that
-    are detected as Add-On pages, until a base-game page with editions is found.
+    Scrapes every candidate URL and merges editions across all pages,
+    deduplicating by exact price string. This handles games like Starfield
+    where each edition has its own dedicated product page rather than appearing
+    as multiple offers on a single page.
 
     Args:
         game_name: Game title to search for.
@@ -211,10 +213,22 @@ async def fetch_ps_store_price_via_web_search(game_name: str) -> dict:
         success, or empty dict when no product page or prices are found.
     """
     product_urls = await find_ps_store_product_url_via_web_search(game_name)
+    seen_prices: dict[str, dict] = {}
+    first_valid_url: str | None = None
     for product_url in product_urls:
         price_data = await fetch_ps_store_product_page_price(product_url)
-        if price_data:
-            return {**price_data, "source": "web_search"}
+        if not price_data:
+            continue
+        if first_valid_url is None:
+            first_valid_url = product_url
+        for edition in price_data.get("editions", []):
+            seen_prices.setdefault(edition["price_try"], edition)
+    if seen_prices:
+        return {
+            "editions": list(seen_prices.values()),
+            "ps_store_product_url": first_valid_url,
+            "source": "web_search",
+        }
     return {}
 
 
