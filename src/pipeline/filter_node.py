@@ -51,6 +51,7 @@ class MeaninglessFilterNode:
             api_key=config.GROQ_API_KEY,
             temperature=0.0,
             max_tokens=5,
+            max_retries=0,
         )
 
     async def __call__(self, state: BotState) -> dict:

@@ -84,7 +84,7 @@ async def _extract_facts(
         f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
         f"{exchange}\n\nNew facts to add (JSON array):"
     )
-    llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
+    llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256, max_retries=0)
     result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
     return _parse_facts(result.content.strip())
 
@@ -152,7 +152,7 @@ async def _extract_facts_about(
             f"Наблюдение от @{observer_username}: {observation}\n\n"
             f"Что это говорит нам о @{username}? Новые факты (JSON-массив):"
         )
-        llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256)
+        llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256, max_retries=0)
         result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
         new_facts = _parse_facts(result.content.strip())
         await _dedup_and_save(

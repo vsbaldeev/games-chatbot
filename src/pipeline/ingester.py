@@ -101,7 +101,7 @@ async def describe_photo(file_id: str, bot) -> str:
             mime = "image/jpeg"
 
         b64_image = base64.b64encode(raw_bytes).decode()
-        llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100)
+        llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100, max_retries=0)
         response = await llm.ainvoke([
             HumanMessage(content=[
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
@@ -116,7 +116,7 @@ async def describe_photo(file_id: str, bot) -> str:
 
 async def describe_frame(frame_bytes: bytes) -> str:
     b64_image = base64.b64encode(frame_bytes).decode()
-    llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100)
+    llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100, max_retries=0)
     response = await llm.ainvoke([
         HumanMessage(content=[
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},

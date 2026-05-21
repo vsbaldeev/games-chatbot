@@ -117,7 +117,7 @@ class RoastAgent:
             Configured LangChain agent executor.
         """
         fallback_llms = [
-            ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=100)
+            ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=100, max_retries=0)
             for model in ROAST_MODEL_FALLBACKS[1:]
         ]
         primary_llm = ChatGroq(
@@ -126,6 +126,7 @@ class RoastAgent:
             temperature=0.5,
             top_p=0.9,
             max_tokens=100,
+            max_retries=0,
         )
         return create_agent(
             primary_llm,

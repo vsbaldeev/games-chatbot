@@ -67,7 +67,7 @@ class GuardNode:
 
     async def __classify(self, text: str) -> str:
         try:
-            client = AsyncGroq(api_key=config.GROQ_API_KEY)
+            client = AsyncGroq(api_key=config.GROQ_API_KEY, max_retries=0)
             result = await client.chat.completions.create(
                 model=GUARD_MODEL,
                 messages=[{"role": "user", "content": text}],

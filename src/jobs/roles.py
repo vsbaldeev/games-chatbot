@@ -44,6 +44,7 @@ async def _generate_tags(username_facts: dict[str, list[str]]) -> dict[str, str]
         temperature=0.5,
         top_p=0.9,
         max_tokens=max(512, len(username_facts) * 30),
+        max_retries=0,
     )
     response = await llm.ainvoke([
         SystemMessage(content=SYSTEM_PROMPT),

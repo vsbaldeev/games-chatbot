@@ -117,7 +117,7 @@ class WorkerAgent:
         """
         from src.tools import ALL_TOOLS
         fallback_llms = [
-            ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.3, max_tokens=1024)
+            ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.3, max_tokens=1024, max_retries=0)
             for model in WORKER_MODEL_FALLBACKS[1:]
         ]
         primary_llm = ChatGroq(
@@ -125,6 +125,7 @@ class WorkerAgent:
             api_key=config.GROQ_API_KEY,
             temperature=0.3,
             max_tokens=1024,
+            max_retries=0,
         )
         executor = create_agent(
             primary_llm,

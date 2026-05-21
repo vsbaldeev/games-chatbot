@@ -26,6 +26,7 @@ class ScenarioGenerator:
             api_key=config.GROQ_API_KEY,
             temperature=0.95,
             max_tokens=max_tokens,
+            max_retries=0,
         )
 
     # ------------------------------------------------------------------

@@ -129,7 +129,7 @@ class ResponseAgent:
             Configured LangChain agent executor.
         """
         fallback_llms = [
-            ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=1024)
+            ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=1024, max_retries=0)
             for model in RESPONSE_MODEL_FALLBACKS[1:]
         ]
         primary_llm = ChatGroq(
@@ -137,6 +137,7 @@ class ResponseAgent:
             api_key=config.GROQ_API_KEY,
             temperature=0.7,
             max_tokens=1024,
+            max_retries=0,
         )
         executor = create_agent(
             primary_llm,
