@@ -37,8 +37,10 @@ WHISPER_MODEL = "whisper-large-v3"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 VISION_PROMPT = (
-    "Describe this image in one concise sentence in Russian. "
-    "Focus on what's visible: people, objects, text on screen, game UI, etc."
+    "Опиши изображение кратко по-русски (1–2 предложения). "
+    "Если на изображении узнаваемый человек — назови его имя (знаменитость, актёр, стример, спортсмен, политик и др.). "
+    "Если это скриншот, арт или интерфейс из игры, фильма, сериала или аниме — назови конкретное название. "
+    "Упомяни любой видимый текст, никнеймы или оверлеи, которые помогают определить, кто или что изображено."
 )
 
 FRAME_DURATION_AUDIO_ONLY = 120
@@ -101,7 +103,7 @@ async def describe_photo(file_id: str, bot) -> str:
             mime = "image/jpeg"
 
         b64_image = base64.b64encode(raw_bytes).decode()
-        llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100, max_retries=0)
+        llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=200, max_retries=0)
         response = await llm.ainvoke([
             HumanMessage(content=[
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
@@ -116,7 +118,7 @@ async def describe_photo(file_id: str, bot) -> str:
 
 async def describe_frame(frame_bytes: bytes) -> str:
     b64_image = base64.b64encode(frame_bytes).decode()
-    llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=100, max_retries=0)
+    llm = ChatGroq(model=VISION_MODEL, api_key=config.GROQ_API_KEY, temperature=0.1, max_tokens=200, max_retries=0)
     response = await llm.ainvoke([
         HumanMessage(content=[
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
