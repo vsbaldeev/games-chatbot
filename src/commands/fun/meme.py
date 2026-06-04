@@ -17,7 +17,7 @@ async def cmd_meme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.chat.send_action("upload_photo")
     result = await get_meme(chat_id)
     if result is None:
-        await update.message.reply_text("Мемы закончились — Reddit нас подвёл.")
+        await update.message.reply_text("Мемы закончились — загляни попозже.")
         return
     url, caption = result
     try:
