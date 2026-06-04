@@ -10,7 +10,15 @@ from src.memes.sources.base import BROWSER_HEADERS, MemeCandidate
 
 logger = log.get_logger(__name__)
 
-TELEGRAM_CHANNELS = ("ru2ch", "memes")
+TELEGRAM_CHANNELS = (
+    "pikabu_fun",
+    "ebanutie_otkritki",
+    "mentalchaos",
+    "avansanebudet",
+    "low_content",
+    "thedankestmemes",
+    "sarcasm_orgasm"
+)
 CHANNEL_URL = "https://t.me/s/{channel}"
 BACKGROUND_IMAGE_PATTERN = re.compile(r"background-image:url\('([^']+)'\)")
 
