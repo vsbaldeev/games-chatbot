@@ -216,6 +216,8 @@ async def track_text_stats(
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
+    if update.effective_user and update.effective_user.is_bot:
+        return
 
     bot_id = context.bot.id
     text = update.message.text

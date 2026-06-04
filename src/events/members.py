@@ -19,7 +19,7 @@ async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     user = update.effective_user
     username = user.username or user.first_name or f"user_{user.id}"
-    await achievements.register_member(update.effective_chat.id, user.id, username)
+    await achievements.register_member(update.effective_chat.id, user.id, username, is_bot=user.is_bot)
 
     if update.message and not user.is_bot:
         await achievements.set_message_author(
@@ -32,10 +32,8 @@ async def handle_new_chat_members(update: Update, context: ContextTypes.DEFAULT_
         return
     chat_id = update.effective_chat.id
     for user in update.message.new_chat_members:
-        if user.is_bot:
-            continue
         username = user.username or user.first_name or f"user_{user.id}"
-        await achievements.register_member(chat_id, user.id, username)
+        await achievements.register_member(chat_id, user.id, username, is_bot=user.is_bot)
 
 
 async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -49,10 +47,8 @@ async def handle_bot_added_to_chat(update: Update, context: ContextTypes.DEFAULT
     try:
         admins = await context.bot.get_chat_administrators(chat_id)
         for admin in admins:
-            if admin.user.is_bot:
-                continue
             username = admin.user.username or admin.user.first_name or f"user_{admin.user.id}"
-            await achievements.register_member(chat_id, admin.user.id, username)
+            await achievements.register_member(chat_id, admin.user.id, username, is_bot=admin.user.is_bot)
         logger.info("Seeded %d admins for chat %s on bot join", len(admins), chat_id)
     except Exception as error:
         logger.warning("Failed to seed admins for chat %s: %s", chat_id, error)

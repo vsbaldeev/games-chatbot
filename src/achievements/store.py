@@ -11,11 +11,16 @@ from src.store import db as database
 async def create_core_tables(conn) -> None:
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_members (
-            chat_id  BIGINT NOT NULL,
-            user_id  BIGINT NOT NULL,
+            chat_id  BIGINT   NOT NULL,
+            user_id  BIGINT   NOT NULL,
             username TEXT,
+            is_bot   BOOLEAN  NOT NULL DEFAULT FALSE,
             PRIMARY KEY (chat_id, user_id)
         )
+    """)
+    await conn.execute("""
+        ALTER TABLE chat_members
+        ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT FALSE
     """)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_stats (
@@ -87,21 +92,22 @@ async def init_tables() -> None:
             await create_event_tables(conn)
 
 
-async def register_member(chat_id: int, user_id: int, username: str) -> None:
-    """Add a user to chat_members if not already present (no-op on conflict)."""
+async def register_member(chat_id: int, user_id: int, username: str, is_bot: bool = False) -> None:
+    """Upsert a member into chat_members, updating is_bot on conflict."""
     async with database.acquire() as conn:
         await conn.execute(
-            "INSERT INTO chat_members (chat_id, user_id, username) "
-            "VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-            chat_id, user_id, username,
+            "INSERT INTO chat_members (chat_id, user_id, username, is_bot) "
+            "VALUES ($1, $2, $3, $4) "
+            "ON CONFLICT (chat_id, user_id) DO UPDATE SET is_bot = EXCLUDED.is_bot",
+            chat_id, user_id, username, is_bot,
         )
 
 
 async def get_chat_members(chat_id: int) -> list[tuple[int, str]]:
-    """Return (user_id, username) pairs for every member registered in this chat."""
+    """Return (user_id, username) pairs for every non-bot member registered in this chat."""
     async with database.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT user_id, username FROM chat_members WHERE chat_id = $1",
+            "SELECT user_id, username FROM chat_members WHERE chat_id = $1 AND is_bot = FALSE",
             chat_id,
         )
     return [(row["user_id"], row["username"] or f"user_{row['user_id']}") for row in rows]
