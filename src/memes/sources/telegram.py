@@ -6,16 +6,12 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src import log
-from src.memes.sources.base import MemeCandidate
+from src.memes.sources.base import BROWSER_HEADERS, MemeCandidate
 
 logger = log.get_logger(__name__)
 
 TELEGRAM_CHANNELS = ("ru2ch", "memes")
 CHANNEL_URL = "https://t.me/s/{channel}"
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-}
 BACKGROUND_IMAGE_PATTERN = re.compile(r"background-image:url\('([^']+)'\)")
 
 

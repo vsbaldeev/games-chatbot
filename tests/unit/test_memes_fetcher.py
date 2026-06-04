@@ -3,9 +3,12 @@
 Covers:
   - gather_candidates: fan-out over the SOURCES registry
   - get_meme: per-chat deduplication keyed on the stable candidate key
+  - download_image: byte download used to upload memes Telegram can't fetch
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 
 from src.memes import fetcher
 from src.memes.sources.base import MemeCandidate
@@ -89,3 +92,53 @@ class TestGetMeme:
     async def test_gather_failure_returns_none(self):
         with patch("src.memes.fetcher.gather_candidates", AsyncMock(side_effect=RuntimeError("boom"))):
             assert await fetcher.get_meme(CHAT_ID) is None
+
+
+# ---------------------------------------------------------------------------
+# download_image
+# ---------------------------------------------------------------------------
+
+def image_response(content: bytes, *, raise_error: Exception | None = None) -> MagicMock:
+    """Build a mock httpx.Response with raw ``.content`` bytes."""
+    response = MagicMock()
+    response.content = content
+    response.raise_for_status = MagicMock(side_effect=raise_error)
+    return response
+
+
+def client_context(client: AsyncMock) -> MagicMock:
+    """Wrap a mock client so ``async with httpx.AsyncClient(...)`` yields it."""
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=client)
+    context.__aexit__ = AsyncMock(return_value=False)
+    return context
+
+
+class TestDownloadImage:
+    async def test_returns_bytes_on_success(self):
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=image_response(b"JPEGDATA"))
+        with patch("src.memes.fetcher.httpx.AsyncClient", return_value=client_context(client)):
+            result = await fetcher.download_image("https://cdn4.telesco.pe/file/abc")
+        assert result == b"JPEGDATA"
+
+    async def test_sends_browser_user_agent(self):
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=image_response(b"x"))
+        with patch("src.memes.fetcher.httpx.AsyncClient", return_value=client_context(client)):
+            await fetcher.download_image("https://cdn4.telesco.pe/file/abc")
+        headers = client.get.call_args.kwargs["headers"]
+        assert headers["User-Agent"].startswith("Mozilla/")
+
+    async def test_http_error_returns_none(self):
+        error = httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock())
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=image_response(b"", raise_error=error))
+        with patch("src.memes.fetcher.httpx.AsyncClient", return_value=client_context(client)):
+            assert await fetcher.download_image("https://cdn4.telesco.pe/file/abc") is None
+
+    async def test_network_error_returns_none(self):
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with patch("src.memes.fetcher.httpx.AsyncClient", return_value=client_context(client)):
+            assert await fetcher.download_image("https://cdn4.telesco.pe/file/abc") is None

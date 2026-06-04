@@ -3,15 +3,11 @@
 import httpx
 
 from src import log
-from src.memes.sources.base import MemeCandidate
+from src.memes.sources.base import BROWSER_HEADERS, MemeCandidate
 
 logger = log.get_logger(__name__)
 
 NINEGAG_FEED = "https://9gag.com/v1/group-posts/group/default/type/hot"
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-}
 
 
 def parse_ninegag(payload: dict) -> list[MemeCandidate]:

@@ -11,9 +11,34 @@ import httpx
 
 from src import log
 from src.memes.sources import SOURCES, MemeCandidate
+from src.memes.sources.base import BROWSER_HEADERS
 from src.memes.store import get_seen_urls, mark_seen
 
 logger = log.get_logger(__name__)
+
+
+async def download_image(image_url: str) -> bytes | None:
+    """Download raw image bytes for direct upload to Telegram.
+
+    Telegram's own URL fetcher is rejected by some meme CDNs (notably
+    ``telesco.pe``, which serves Telegram channel media), so the bot downloads
+    the bytes itself with a browser User-Agent and uploads them rather than
+    handing Telegram a URL it cannot fetch.
+
+    Args:
+        image_url: Direct image URL from a meme source.
+
+    Returns:
+        The image bytes, or ``None`` if the download failed.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+            response = await client.get(image_url, headers=BROWSER_HEADERS)
+            response.raise_for_status()
+            return response.content
+    except Exception as error:
+        logger.warning("Failed to download meme image %s: %s", image_url, error)
+        return None
 
 
 async def gather_candidates() -> list[MemeCandidate]:

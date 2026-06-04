@@ -23,3 +23,9 @@ class MemeCandidate(NamedTuple):
 
 SourceFetcher = Callable[[httpx.AsyncClient], Awaitable[list[MemeCandidate]]]
 """An async callable that fetches candidates from one meme source."""
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+}
+"""Browser-like headers; meme CDNs reject default/library User-Agents."""
