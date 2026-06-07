@@ -2,7 +2,7 @@
 Roast feature tests.
 
 Covers four units in isolation:
-  - pick_roast_cluster: pure numpy selection logic
+  - pick_roast_facts: pure numpy selection logic
   - pop_roast_target: shuffle-bag queue against a mocked DB
   - Roaster.generate: LLM + embedding path with all I/O mocked
   - Roaster.cmd_roast: Telegram command edge cases
@@ -11,7 +11,7 @@ Covers four units in isolation:
 import numpy as np
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.commands.fun.roast import ROAST_ANCHORS, ROAST_HEADERS, Roaster, pick_roast_cluster
+from src.commands.fun.roast import ROAST_HEADERS, ROAST_MODES, Roaster, pick_roast_facts
 from src.store.roast_store import pop_roast_target
 
 CHAT_ID = 1000
@@ -47,41 +47,45 @@ def _db_acquire(conn: AsyncMock) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# pick_roast_cluster
+# pick_roast_facts
 # ---------------------------------------------------------------------------
 
-class TestPickRoastCluster:
-    def test_fewer_than_cluster_size_returns_all(self):
+class TestPickRoastFacts:
+    def test_fewer_than_selection_size_returns_all(self):
         facts = [("f1", _unit([1, 0, 0])), ("f2", _unit([0, 1, 0]))]
-        result = pick_roast_cluster(facts, _unit([1, 0, 0]))
+        result = pick_roast_facts(facts, _unit([1, 0, 0]))
         assert set(result) == {"f1", "f2"}
 
-    def test_exactly_cluster_size_returns_all(self):
+    def test_exactly_selection_size_returns_all(self):
         facts = [
             ("f1", _unit([1, 0, 0])),
             ("f2", _unit([0, 1, 0])),
             ("f3", _unit([0, 0, 1])),
         ]
-        result = pick_roast_cluster(facts, _unit([1, 0, 0]))
+        result = pick_roast_facts(facts, _unit([1, 0, 0]))
         assert set(result) == {"f1", "f2", "f3"}
 
-    def test_selects_tightest_cluster_closest_to_anchor(self):
-        # A, B, C: close to anchor [1,0,0,0] and mutually similar.
-        # D, E: far from the anchor and from A/B/C — no triplet containing
-        # them can outscore (A, B, C) on average pairwise similarity.
+    def test_prefers_varied_facts_over_near_duplicates(self):
+        # T1, T2, T3 are near-duplicate facts pointing the same way (a dense
+        # "fandom" cluster); V is a different direction but still embarrassing.
+        # Diversity selection must reach for V instead of stacking all three
+        # near-duplicates, so a single cluster cannot fill every slot.
+        anchor = _unit([1.0, 0.0, 0.0])
         facts = [
-            ("A", np.array([0.9, 0.1, 0.0, 0.0])),
-            ("B", np.array([0.85, 0.15, 0.0, 0.0])),
-            ("C", np.array([0.8, 0.2, 0.0, 0.0])),
-            ("D", np.array([0.0, 0.9, 0.1, 0.0])),
-            ("E", np.array([0.0, 0.1, 0.9, 0.0])),
+            ("T1", _unit([0.99, 0.10, 0.0])),
+            ("T2", _unit([0.98, 0.14, 0.0])),
+            ("T3", _unit([0.97, 0.17, 0.0])),
+            ("V", _unit([0.6, 0.8, 0.0])),
         ]
-        result = pick_roast_cluster(facts, np.array([1.0, 0.0, 0.0, 0.0]))
-        assert set(result) == {"A", "B", "C"}
+        result = pick_roast_facts(facts, anchor)
+        assert "V" in result
+        assert len(result) == 3
+        # The most embarrassing fact is always taken first.
+        assert "T1" in result
 
-    def test_returns_exactly_cluster_size_when_more_facts(self):
+    def test_returns_exactly_selection_size_when_more_facts(self):
         facts = [(f"f{idx}", _unit([float(idx + 1), 0.0])) for idx in range(8)]
-        result = pick_roast_cluster(facts, _unit([1.0, 0.0]))
+        result = pick_roast_facts(facts, _unit([1.0, 0.0]))
         assert len(result) == 3
 
 
@@ -122,25 +126,28 @@ class TestPopRoastTarget:
 # ---------------------------------------------------------------------------
 
 class TestRoasterGenerate:
-    async def test_returns_header_text_anchor_key_tuple(self):
+    async def test_returns_header_text_mode_tuple(self):
         with patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.get_facts", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.roast_agent.invoke_roast", AsyncMock(return_value="прожарка")):
-            header, text, anchor_key = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
+            header, text, mode = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
         assert header in ROAST_HEADERS
         assert text == "прожарка"
-        assert anchor_key in ROAST_ANCHORS
+        assert mode in ROAST_MODES
 
     async def test_uses_embedding_facts_when_available(self):
         fake_emb = np.ones(4)
-        with patch("src.commands.fun.roast.get_facts_with_embeddings",
+        embed_mock = AsyncMock(return_value=list(fake_emb))
+        with patch("src.commands.fun.roast.pick_roast_mode", return_value="shame"), \
+             patch("src.commands.fun.roast.get_facts_with_embeddings",
                    AsyncMock(return_value=[("играет ночью", fake_emb)])), \
-             patch("src.commands.fun.roast.embedder.embed", AsyncMock(return_value=list(fake_emb))), \
+             patch("src.commands.fun.roast.embedder.embed", embed_mock), \
              patch("src.commands.fun.roast.roast_agent.invoke_roast", AsyncMock(return_value="эмбеддинг-прожарка")):
-            header, text, anchor_key = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
+            header, text, mode = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
         assert header in ROAST_HEADERS
         assert text == "эмбеддинг-прожарка"
-        assert anchor_key in ROAST_ANCHORS
+        assert mode == "shame"
+        embed_mock.assert_awaited_once()
 
     async def test_silent_member_gets_silence_fallback_prompt(self):
         """When a user has no facts, the prompt must call out their silence."""

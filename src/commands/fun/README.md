@@ -15,15 +15,27 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
        /roast and weekly job → random.choice(chat_members), bot excluded from the pool
        auto-roast            → the offending user
 
-2. Load context
-       user_memories — all extracted facts for the target in this chat, newest first
+2. Pick mode (random, 1-in-4 each)
+       shame / quirk / boast → embedding-anchored fact selection (step 3a)
+       contradiction         → full-fact-list hypocrisy hunt (step 3b)
+       The chosen mode is returned and logged as the roast's anchor_key.
 
-3. Fact selection (hybrid — skipped if no embeddings stored)
-       a. Anchor retrieval: all facts ranked by cosine similarity to a fixed "embarrassment anchor"
-          embedding; top 8 kept.
-       b. Tightest sub-cluster: all C(8,3)=56 triples scored by avg pairwise similarity;
-          the most internally coherent triple passed to the LLM.
+3a. Anchored fact selection (shame / quirk / boast — skipped if no embeddings stored)
+       i.  Anchor retrieval: all facts ranked by cosine similarity to a fixed "embarrassment anchor"
+           embedding; top 8 kept.
+       ii. Diverse pick (maximal marginal relevance): start with the most embarrassing fact, then
+           greedily add facts scored as EMBARRASSMENT_WEIGHT * anchor_sim − (1−EMBARRASSMENT_WEIGHT)
+           * redundancy (max similarity to an already-chosen fact). EMBARRASSMENT_WEIGHT = 0.3, so a
+           single dense cluster (e.g. one fandom) can't fill all 3 slots — the roast spans varied,
+           universally-understandable angles instead of niche insider facts.
        Falls back to plain get_facts() when no embeddings are available.
+
+3b. Contradiction selection (contradiction mode)
+       The whole recent fact list (newest CONTRADICTION_FACT_LIMIT = 12) is passed to the model
+       intact — no embedding pre-filter. Embeddings can't tell a funny stance clash ("cares about
+       animals" + "eats beef") from a consistent pair ("loves cats" + "has kittens"), so detection
+       is left to the LLM. The prompt asks it to roast the funniest contradiction/hypocrisy, or
+       fall back to the most absurd single fact when none exists.
 
 4. LLM call
        model:       llama-3.3-70b-versatile
@@ -46,8 +58,9 @@ user_memories
     Source:  LLM-extracted facts accumulated over time from all chat messages
     Content: short plain-language sentences about the user, in Russian
     Window:  all facts for the target (max 30 stored per user per chat)
-    Usage:   hybrid selection picks the most thematically coherent embarrassing triple;
-             passed as a bulleted list; LLM crafts a targeted joke around them
+    Usage:   anchor modes pick varied embarrassing facts (anchor retrieval + MMR); contradiction
+             mode passes the full list so the LLM can spot a hypocritical pair; either way the LLM
+             crafts one targeted, universally-understandable joke
 ```
 
 ## Auto-roast detection
