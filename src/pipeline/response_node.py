@@ -90,6 +90,28 @@ def build_user_facts_lines(context) -> list[str]:
     return parts
 
 
+def build_asking_user_tag_lines(context, username: str) -> list[str]:
+    """Return the asker's own weekly-role lines for the response prompt.
+
+    Args:
+        context: AssembledContext dict or None.
+        username: Sender's username (without ``@``).
+
+    Returns:
+        Prompt lines describing the sender's role and why it was assigned,
+        with a trailing blank line, or an empty list when they have no role.
+    """
+    tag_info = (context or {}).get("asking_user_tag")
+    if not tag_info:
+        return []
+    lines = [f"Роль недели для @{username}: {tag_info['tag']}"]
+    reason = tag_info.get("reason")
+    if reason:
+        lines.append(f"За что выдана: {reason}")
+    lines.append("")
+    return lines
+
+
 def build_response_input(
     username: str,
     user_input: str,
@@ -116,6 +138,7 @@ def build_response_input(
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
     parts += build_user_facts_lines(context)
+    parts += build_asking_user_tag_lines(context, username)
 
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     # Skip recent history when thread history is present (thread turns already

@@ -25,10 +25,11 @@ STORE_GET_BY_ID = "src.pipeline.context_builder.unified_messages.get_by_id"
 STORE_UPDATE_CONTENT = "src.pipeline.context_builder.unified_messages.update_content"
 STORE_GET_FACTS_FOR_USERS = "src.pipeline.context_builder.user_memories.get_facts_for_users"
 STORE_GET_FACTS = "src.pipeline.context_builder.user_memories.get_facts"
+STORE_GET_TAG = "src.pipeline.context_builder.user_tags.get_tag"
 DESCRIBE_PHOTO = "src.pipeline.context_builder.describe_photo"
 
 
-def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=None):
+def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=None, tag=None):
     """Enter all store patches into an ExitStack. Returns (mock_chain, mock_get_by_id)."""
     stack.enter_context(patch(STORE_GET_RECENT, new_callable=AsyncMock, return_value=recent or []))
     mock_chain = stack.enter_context(patch(STORE_GET_CHAIN, new_callable=AsyncMock, return_value=chain or []))
@@ -36,6 +37,7 @@ def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=N
     stack.enter_context(patch(STORE_UPDATE_CONTENT, new_callable=AsyncMock))
     stack.enter_context(patch(STORE_GET_FACTS_FOR_USERS, new_callable=AsyncMock, return_value={}))
     stack.enter_context(patch(STORE_GET_FACTS, new_callable=AsyncMock, return_value=[]))
+    stack.enter_context(patch(STORE_GET_TAG, new_callable=AsyncMock, return_value=tag))
     return mock_chain, mock_get_by_id
 
 
@@ -218,6 +220,36 @@ class TestPhotoEnrichmentInReplyChain:
             await context_builder(state)
 
         mock_update.assert_called_once_with(chat_id=1000, message_id=80, content="Описание мема.")
+
+
+class TestAskingUserTag:
+    """The sender's own weekly role + reason must be surfaced into the context so the
+    response LLM can explain "why do I have this role?" — only for the asker."""
+
+    async def test_asking_user_tag_populated_when_present(self, context_builder):
+        incoming = make_incoming(user_id=42, username="alice")
+        state = make_state(incoming)
+        tag_info = {"tag": "Ночной дозор", "reason": "пишет после полуночи"}
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=tag_info)
+            mock_get_tag = stack.enter_context(
+                patch(STORE_GET_TAG, new_callable=AsyncMock, return_value=tag_info)
+            )
+            result = await context_builder(state)
+
+        mock_get_tag.assert_called_once_with(chat_id=1000, user_id=42)
+        assert result["context"]["asking_user_tag"] == tag_info
+
+    async def test_asking_user_tag_none_when_absent(self, context_builder):
+        incoming = make_incoming(user_id=42, username="alice")
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=None)
+            result = await context_builder(state)
+
+        assert result["context"]["asking_user_tag"] is None
 
 
 class TestChainTruncation:

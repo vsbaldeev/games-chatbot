@@ -118,7 +118,8 @@ context_builder
     ├─ find replied_to message (from recent window or get_by_id fallback)
     ├─ get_chain(reply_to_msg_id) → reply_chain (max 10 hops, oldest-first)
     ├─ load user_memories facts for all user_ids visible in recent history
-    └─ load initiating user's facts if not already in recent participants
+    ├─ load initiating user's facts if not already in recent participants
+    └─ load initiating user's weekly role + reason from user_tags → asking_user_tag
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web); primary gpt-oss-120b for quality, Llama/Qwen fallbacks for rate-limit scenarios
@@ -134,8 +135,11 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
 response   personality LLM (ReAct executor, no tools)
     ├─ thread_id = reply-chain root message_id, or chat_id for flat messages
     ├─ prompt: thread_history (last 10 turns, thread-scoped)
-    │            + user facts + recent history (last 10) + replied_to + worker findings + current message
+    │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
+    │            + recent history (last 10) + replied_to + worker findings + current message
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
+    │          when the asker asks why they have their role, the bot explains it from
+    │          the stored reason (only the asker's own role — never other members')
     ├─ saves response_messages to state for LanguageCorrectionNode
     ├─ DailyLimitError / RateLimitError → propagate to top-level handler
     │
@@ -180,6 +184,7 @@ AssembledContext:
     recent_history: list[dict]           # flat window (last 20), newest-first
     replied_to: dict | None              # the specific message being replied to (for annotation)
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
+    asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
 
 BotState:
     incoming: IncomingMessage

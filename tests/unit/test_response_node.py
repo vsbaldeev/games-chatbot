@@ -14,7 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
-from src.pipeline.response_node import ResponseNode, build_response_input
+from src.pipeline.response_node import (
+    ResponseNode,
+    build_asking_user_tag_lines,
+    build_response_input,
+)
 from tests.builders import make_incoming, make_state
 
 THREAD_GET_HISTORY = "src.pipeline.response_node.thread_history.get_history"
@@ -208,6 +212,43 @@ class TestRandomTriggerContext:
         )
 
         assert "Руководство содержит 12 стилей." in result
+
+
+class TestAskingUserTagLines:
+    """The asker's weekly role + reason must be injected so the bot can explain it;
+    nothing is emitted when the asker has no role."""
+
+    def test_emits_role_and_reason_when_present(self):
+        context = {
+            "user_facts": {},
+            "recent_history": [],
+            "replied_to": None,
+            "reply_chain": [],
+            "asking_user_tag": {"tag": "Ночной дозор", "reason": "пишет после полуночи"},
+        }
+        lines = build_asking_user_tag_lines(context, "alice")
+        joined = "\n".join(lines)
+        assert "Ночной дозор" in joined
+        assert "пишет после полуночи" in joined
+        assert "alice" in joined
+
+    def test_emits_nothing_when_absent(self):
+        context = {"user_facts": {}, "recent_history": [], "replied_to": None, "reply_chain": []}
+        assert build_asking_user_tag_lines(context, "alice") == []
+
+    def test_build_response_input_includes_role_block(self):
+        context = {
+            "user_facts": {},
+            "recent_history": [],
+            "replied_to": None,
+            "reply_chain": [],
+            "asking_user_tag": {"tag": "Спидранер", "reason": "проходит за день"},
+        }
+        result = build_response_input(
+            "alice", "почему у меня такая роль?", "", context, response_trigger="explicit"
+        )
+        assert "Спидранер" in result
+        assert "проходит за день" in result
 
 
 class TestErrorPropagation:

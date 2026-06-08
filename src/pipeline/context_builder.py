@@ -15,7 +15,7 @@ Assembles everything the Agent node needs for an enriched prompt:
 from src import log
 from src.pipeline.ingester import describe_photo
 from src.pipeline.state import AssembledContext, BotState
-from src.store import unified_messages, user_memories
+from src.store import unified_messages, user_memories, user_tags
 
 logger = log.get_logger(__name__)
 
@@ -37,12 +37,14 @@ class ContextBuilder:
         user_facts = await self.__collect_user_facts(
             chat_id, msg["user_id"], msg["username"], recent
         )
+        asking_user_tag = await user_tags.get_tag(chat_id=chat_id, user_id=msg["user_id"])
 
         assembled: AssembledContext = {
             "user_facts": user_facts,
             "recent_history": recent,
             "replied_to": replied_to,
             "reply_chain": reply_chain,
+            "asking_user_tag": asking_user_tag,
         }
         return {"context": assembled}
 
