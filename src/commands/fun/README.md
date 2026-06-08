@@ -15,7 +15,10 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
        /roast and weekly job → random.choice(chat_members), bot excluded from the pool
        auto-roast            → the offending user
 
-2. Pick mode (random, 1-in-4 each)
+2. Pick mode (random, avoiding the angle used last time on this target)
+       The target's last RECENT_MODE_WINDOW = 1 anchor_key(s) are read from roast_log and excluded
+       from the random draw, so a back-to-back roast lands a different angle. If exclusion would
+       leave nothing (few past roasts, or all modes recently used), the full set is restored.
        shame / quirk / boast → embedding-anchored fact selection (step 3a)
        contradiction         → full-fact-list hypocrisy hunt (step 3b)
        The chosen mode is returned and logged as the roast's anchor_key.
@@ -23,11 +26,13 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 3a. Anchored fact selection (shame / quirk / boast — skipped if no embeddings stored)
        i.  Anchor retrieval: all facts ranked by cosine similarity to a fixed "embarrassment anchor"
            embedding; top 8 kept.
-       ii. Diverse pick (maximal marginal relevance): start with the most embarrassing fact, then
-           greedily add facts scored as EMBARRASSMENT_WEIGHT * anchor_sim − (1−EMBARRASSMENT_WEIGHT)
+       ii. Stochastic diverse pick: each of the 3 facts is a softmax-weighted random draw
+           (SOFTMAX_TEMPERATURE = 0.15) rather than a deterministic argmax. The first is weighted by
+           anchor_sim; each later pick by EMBARRASSMENT_WEIGHT * anchor_sim − (1−EMBARRASSMENT_WEIGHT)
            * redundancy (max similarity to an already-chosen fact). EMBARRASSMENT_WEIGHT = 0.3, so a
            single dense cluster (e.g. one fandom) can't fill all 3 slots — the roast spans varied,
-           universally-understandable angles instead of niche insider facts.
+           universally-understandable angles. The weighted draw keeps embarrassing facts likely while
+           varying the chosen set across repeat roasts, so the same person doesn't get the same joke.
        Falls back to plain get_facts() when no embeddings are available.
 
 3b. Contradiction selection (contradiction mode)
@@ -58,7 +63,8 @@ user_memories
     Source:  LLM-extracted facts accumulated over time from all chat messages
     Content: short plain-language sentences about the user, in Russian
     Window:  all facts for the target (max 30 stored per user per chat)
-    Usage:   anchor modes pick varied embarrassing facts (anchor retrieval + MMR); contradiction
+    Usage:   anchor modes pick varied embarrassing facts (anchor retrieval + stochastic diverse pick);
+             contradiction
              mode passes the full list so the LLM can spot a hypocritical pair; either way the LLM
              crafts one targeted, universally-understandable joke
 ```

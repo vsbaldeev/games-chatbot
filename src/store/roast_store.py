@@ -112,6 +112,33 @@ async def pop_roast_target(chat_id: int, members: list[tuple[int, str]]) -> tupl
     return target_id, member_map[target_id]
 
 
+async def get_recent_modes(chat_id: int, user_id: int, limit: int) -> list[str]:
+    """Return the anchor keys of this user's most recent roasts, newest first.
+
+    Lets the roast picker avoid repeating the angle used last time. Reads the
+    existing ``roast_log`` table, so no extra state is stored.
+
+    Args:
+        chat_id: Telegram chat ID the roasts belong to.
+        user_id: Telegram user ID of the roast target.
+        limit: Maximum number of recent anchor keys to return.
+
+    Returns:
+        Up to ``limit`` anchor keys ordered from most to least recent.
+    """
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT anchor_key FROM roast_log
+            WHERE chat_id = $1 AND target_user_id = $2
+            ORDER BY created_at DESC
+            LIMIT $3
+            """,
+            chat_id, user_id, limit,
+        )
+    return [row["anchor_key"] for row in rows]
+
+
 async def get_anchor_stats(chat_id: int) -> dict[str, int]:
     """Return total reaction counts per anchor key for a chat."""
     async with database.acquire() as conn:

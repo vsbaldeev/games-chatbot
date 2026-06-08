@@ -15,7 +15,7 @@ from src import achievements, config, log
 from src.achievements import notify_unlocks
 from src.agent import roast_agent
 from src.store import embedder, unified_messages
-from src.store.roast_store import log_roast, pop_roast_target
+from src.store.roast_store import get_recent_modes, log_roast, pop_roast_target
 from src.store.user_memories import get_facts, get_facts_with_embeddings
 
 logger = log.get_logger(__name__)
@@ -31,13 +31,16 @@ ROAST_ANCHORS = {
 ANCHOR_CANDIDATE_COUNT = 8
 SELECTION_SIZE = 3
 EMBARRASSMENT_WEIGHT = 0.3
+SOFTMAX_TEMPERATURE = 0.15
 
 CONTRADICTION_MODE = "contradiction"
 ROAST_MODES = (*ROAST_ANCHORS, CONTRADICTION_MODE)
 CONTRADICTION_FACT_LIMIT = 12
 
+RECENT_MODE_WINDOW = 1
+
 STANDARD_INSTRUCTION = (
-    "Выбери один самый смешной и понятный факт и обыграй его так, "
+    "Обыграй один из этих фактов так, "
     "чтобы засмеялся любой в зале, даже незнакомый с играми и аниме. "
     "Максимум две фразы."
 )
@@ -73,34 +76,49 @@ def rank_by_anchor(
     return scored[:ANCHOR_CANDIDATE_COUNT]
 
 
-def select_diverse(candidates: list[tuple[str, np.ndarray, float]]) -> list[str]:
-    """Greedily pick embarrassing yet topically varied facts (maximal marginal relevance).
+def weighted_choice(items: list, scores: list[float]):
+    """Randomly pick one item, softmax-weighting the given scores.
 
-    Each pick after the first is scored as ``EMBARRASSMENT_WEIGHT * anchor_similarity
-    minus (1 - EMBARRASSMENT_WEIGHT) * redundancy``, where redundancy is the highest
-    similarity to an already-chosen fact. This stops one dense cluster (e.g. a single
-    fandom) from filling every slot, so the roast spans several angles.
+    Higher-scoring items are more likely but never guaranteed, so repeated draws
+    over the same candidates yield varied picks — the source of roast variety.
+
+    Args:
+        items: Candidate items to choose from.
+        scores: Parallel scores; higher means more likely to be chosen.
+
+    Returns:
+        One randomly chosen item.
+    """
+    weights = np.exp((np.array(scores) - np.max(scores)) / SOFTMAX_TEMPERATURE)
+    return random.choices(items, weights=weights.tolist(), k=1)[0]
+
+
+def select_diverse(candidates: list[tuple[str, np.ndarray, float]]) -> list[str]:
+    """Pick embarrassing yet topically varied facts, with run-to-run randomness.
+
+    The first fact is drawn softmax-weighted by anchor similarity; each later pick is
+    drawn softmax-weighted by ``EMBARRASSMENT_WEIGHT * anchor_similarity minus
+    (1 - EMBARRASSMENT_WEIGHT) * redundancy``, where redundancy is the highest
+    similarity to an already-chosen fact. The redundancy penalty stops one dense
+    cluster (e.g. a single fandom) from filling every slot; the weighted draw keeps
+    the chosen set fresh across repeated roasts of the same user.
 
     Args:
         candidates: Anchor-ranked ``(fact, unit_embedding, anchor_similarity)`` tuples.
 
     Returns:
-        ``SELECTION_SIZE`` facts, most embarrassing first then most distinct.
+        ``SELECTION_SIZE`` facts, biased toward embarrassing and distinct ones.
     """
-    chosen = [candidates[0]]
+    chosen = [weighted_choice(candidates, [anchor_sim for _, _, anchor_sim in candidates])]
     while len(chosen) < SELECTION_SIZE and len(chosen) < len(candidates):
         chosen_facts = {fact for fact, _, _ in chosen}
-        best = None
-        best_score = float("-inf")
-        for fact, unit, anchor_sim in candidates:
-            if fact in chosen_facts:
-                continue
-            redundancy = max(float(unit @ picked_unit) for _, picked_unit, _ in chosen)
-            score = EMBARRASSMENT_WEIGHT * anchor_sim - (1.0 - EMBARRASSMENT_WEIGHT) * redundancy
-            if score > best_score:
-                best_score = score
-                best = (fact, unit, anchor_sim)
-        chosen.append(best)
+        remaining = [item for item in candidates if item[0] not in chosen_facts]
+        scores = [
+            EMBARRASSMENT_WEIGHT * anchor_sim
+            - (1.0 - EMBARRASSMENT_WEIGHT) * max(float(unit @ picked) for _, picked, _ in chosen)
+            for _, unit, anchor_sim in remaining
+        ]
+        chosen.append(weighted_choice(remaining, scores))
     return [fact for fact, _, _ in chosen]
 
 
@@ -124,13 +142,21 @@ def pick_roast_facts(
     return select_diverse(candidates)
 
 
-def pick_roast_mode() -> str:
-    """Randomly choose a roast angle.
+def pick_roast_mode(recent_modes: list[str]) -> str:
+    """Randomly choose a roast angle, avoiding recently used ones.
+
+    Excluding the modes used in this user's latest roasts keeps the angle fresh
+    between back-to-back roasts. If exclusion would leave nothing (few past
+    roasts, or all modes recently used), the full mode set is restored.
+
+    Args:
+        recent_modes: Anchor keys from this user's most recent roasts.
 
     Returns:
         One of the embarrassment anchor keys or ``CONTRADICTION_MODE``.
     """
-    return random.choice(ROAST_MODES)
+    available = [mode for mode in ROAST_MODES if mode not in recent_modes]
+    return random.choice(available or list(ROAST_MODES))
 
 
 async def select_roast_facts(chat_id: int, user_id: int, mode: str) -> list[str]:
@@ -192,7 +218,8 @@ class Roaster:
             Tuple of ``(header_emoji, roast_text, mode)``, where ``mode`` is an
             embarrassment anchor key or ``CONTRADICTION_MODE``.
         """
-        mode = pick_roast_mode()
+        recent_modes = await get_recent_modes(chat_id, user_id, RECENT_MODE_WINDOW)
+        mode = pick_roast_mode(recent_modes)
         selected = await select_roast_facts(chat_id, user_id, mode)
         user_prompt = build_roast_prompt(mode, target_username, selected)
         header = random.choice(ROAST_HEADERS)

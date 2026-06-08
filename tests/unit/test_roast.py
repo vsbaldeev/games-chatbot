@@ -1,8 +1,9 @@
 """
 Roast feature tests.
 
-Covers four units in isolation:
-  - pick_roast_facts: pure numpy selection logic
+Covers five units in isolation:
+  - pick_roast_facts: stochastic numpy selection logic
+  - pick_roast_mode: recent-mode-avoiding angle picker
   - pop_roast_target: shuffle-bag queue against a mocked DB
   - Roaster.generate: LLM + embedding path with all I/O mocked
   - Roaster.cmd_roast: Telegram command edge cases
@@ -11,7 +12,14 @@ Covers four units in isolation:
 import numpy as np
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.commands.fun.roast import ROAST_HEADERS, ROAST_MODES, Roaster, pick_roast_facts
+from src.commands.fun.roast import (
+    ROAST_HEADERS,
+    ROAST_MODES,
+    SELECTION_SIZE,
+    Roaster,
+    pick_roast_facts,
+    pick_roast_mode,
+)
 from src.store.roast_store import pop_roast_target
 
 CHAT_ID = 1000
@@ -65,11 +73,12 @@ class TestPickRoastFacts:
         result = pick_roast_facts(facts, _unit([1, 0, 0]))
         assert set(result) == {"f1", "f2", "f3"}
 
-    def test_prefers_varied_facts_over_near_duplicates(self):
+    def test_reaches_for_varied_facts_over_near_duplicates(self):
         # T1, T2, T3 are near-duplicate facts pointing the same way (a dense
         # "fandom" cluster); V is a different direction but still embarrassing.
-        # Diversity selection must reach for V instead of stacking all three
-        # near-duplicates, so a single cluster cannot fill every slot.
+        # The redundancy penalty must make the distinct fact V a frequent pick
+        # rather than stacking all three near-duplicates, so a single cluster
+        # cannot reliably fill every slot.
         anchor = _unit([1.0, 0.0, 0.0])
         facts = [
             ("T1", _unit([0.99, 0.10, 0.0])),
@@ -77,16 +86,45 @@ class TestPickRoastFacts:
             ("T3", _unit([0.97, 0.17, 0.0])),
             ("V", _unit([0.6, 0.8, 0.0])),
         ]
-        result = pick_roast_facts(facts, anchor)
-        assert "V" in result
-        assert len(result) == 3
-        # The most embarrassing fact is always taken first.
-        assert "T1" in result
+        results = [tuple(pick_roast_facts(facts, anchor)) for _ in range(200)]
+        assert all(len(set(result)) == SELECTION_SIZE for result in results)
+        # V is distinct, so the diversity penalty makes it a common pick.
+        assert sum("V" in result for result in results) > 100
+
+    def test_selection_varies_across_runs(self):
+        # Stochastic selection is the whole point: the same candidates must not
+        # always yield the same set, otherwise repeat roasts stay stale.
+        anchor = _unit([1.0, 0.0])
+        facts = [(f"f{idx}", _unit([float(idx + 1), 1.0])) for idx in range(8)]
+        seen = {tuple(sorted(pick_roast_facts(facts, anchor))) for _ in range(200)}
+        assert len(seen) > 1
 
     def test_returns_exactly_selection_size_when_more_facts(self):
         facts = [(f"f{idx}", _unit([float(idx + 1), 0.0])) for idx in range(8)]
         result = pick_roast_facts(facts, _unit([1.0, 0.0]))
-        assert len(result) == 3
+        assert len(result) == SELECTION_SIZE
+
+
+# ---------------------------------------------------------------------------
+# pick_roast_mode
+# ---------------------------------------------------------------------------
+
+class TestPickRoastMode:
+    def test_excludes_recent_mode_when_alternatives_exist(self):
+        excluded = ROAST_MODES[0]
+        picks = {pick_roast_mode([excluded]) for _ in range(200)}
+        assert excluded not in picks
+        assert picks.issubset(set(ROAST_MODES))
+
+    def test_falls_back_to_full_set_when_all_modes_recent(self):
+        # If every mode was used recently, exclusion would leave nothing — the
+        # picker must still return a valid mode rather than failing.
+        result = pick_roast_mode(list(ROAST_MODES))
+        assert result in ROAST_MODES
+
+    def test_empty_history_allows_any_mode(self):
+        picks = {pick_roast_mode([]) for _ in range(200)}
+        assert picks == set(ROAST_MODES)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +165,8 @@ class TestPopRoastTarget:
 
 class TestRoasterGenerate:
     async def test_returns_header_text_mode_tuple(self):
-        with patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
+        with patch("src.commands.fun.roast.get_recent_modes", AsyncMock(return_value=[])), \
+             patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.get_facts", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.roast_agent.invoke_roast", AsyncMock(return_value="прожарка")):
             header, text, mode = await Roaster().generate(CHAT_ID, USER_ID, "vasya")
@@ -138,7 +177,8 @@ class TestRoasterGenerate:
     async def test_uses_embedding_facts_when_available(self):
         fake_emb = np.ones(4)
         embed_mock = AsyncMock(return_value=list(fake_emb))
-        with patch("src.commands.fun.roast.pick_roast_mode", return_value="shame"), \
+        with patch("src.commands.fun.roast.get_recent_modes", AsyncMock(return_value=[])), \
+             patch("src.commands.fun.roast.pick_roast_mode", return_value="shame"), \
              patch("src.commands.fun.roast.get_facts_with_embeddings",
                    AsyncMock(return_value=[("играет ночью", fake_emb)])), \
              patch("src.commands.fun.roast.embedder.embed", embed_mock), \
@@ -152,7 +192,8 @@ class TestRoasterGenerate:
     async def test_silent_member_gets_silence_fallback_prompt(self):
         """When a user has no facts, the prompt must call out their silence."""
         mock_invoke = AsyncMock(return_value="молчун")
-        with patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
+        with patch("src.commands.fun.roast.get_recent_modes", AsyncMock(return_value=[])), \
+             patch("src.commands.fun.roast.get_facts_with_embeddings", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.get_facts", AsyncMock(return_value=[])), \
              patch("src.commands.fun.roast.roast_agent.invoke_roast", mock_invoke):
             await Roaster().generate(CHAT_ID, USER_ID, "silentuser")
