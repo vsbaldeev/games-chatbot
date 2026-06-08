@@ -10,6 +10,7 @@ Job managers live in src/bot/jobs.py. Implementations live here, one file per jo
 10:00 UTC   silence_sweep_job      achievements.py award silence achievements (7/14/30 days inactive)
 12:00 UTC   weekly_roast_job       roast.py        roast one random chat member (one day per week)
 14:00 UTC   weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
+15:00 UTC   daily_meme_job         meme.py         send one fresh unseen meme to every chat (every day)
 ```
 
 ## Roast day selection
