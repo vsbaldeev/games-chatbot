@@ -27,7 +27,7 @@ Tools        MCP (stdio) via langchain-mcp-adapters
 LLM (agent)  Groq llama-3.3-70b-versatile → qwen3-32b → gpt-oss-20b → llama-4-scout-17b (fallback chain)
 LLM (memory) Groq meta-llama/llama-4-scout-17b-16e-instruct
 Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, local)
-LLM (roast)  Groq llama-3.3-70b-versatile
+LLM (roast)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → llama-4-scout (fallback chain)
 LLM (roles)  Groq llama-3.1-8b-instant
 STT          Groq whisper-large-v3
 Vision       Groq llama-4-scout-17b-16e-instruct

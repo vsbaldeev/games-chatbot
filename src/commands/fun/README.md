@@ -18,36 +18,35 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 2. Pick mode (random, avoiding the angle used last time on this target)
        The target's last RECENT_MODE_WINDOW = 1 anchor_key(s) are read from roast_log and excluded
        from the random draw, so a back-to-back roast lands a different angle. If exclusion would
-       leave nothing (few past roasts, or all modes recently used), the full set is restored.
-       shame / quirk / boast → embedding-anchored fact selection (step 3a)
-       contradiction         → full-fact-list hypocrisy hunt (step 3b)
-       The chosen mode is returned and logged as the roast's anchor_key.
+       leave nothing, the full set is restored.
+       Modes are pure angle hints (ROAST_MODE_INSTRUCTIONS): shame / contradiction. (quirk and boast
+       were dropped — they produced absurd output and, lacking a matching fact, made boast fabricate
+       a "thinks he's smart" premise.) The chosen mode is returned and logged as the roast's anchor_key.
 
-3a. Anchored fact selection (shame / quirk / boast — skipped if no embeddings stored)
-       i.  Anchor retrieval: all facts ranked by cosine similarity to a fixed "embarrassment anchor"
-           embedding; top 8 kept.
-       ii. Stochastic diverse pick: each of the 3 facts is a softmax-weighted random draw
-           (SOFTMAX_TEMPERATURE = 0.15) rather than a deterministic argmax. The first is weighted by
-           anchor_sim; each later pick by EMBARRASSMENT_WEIGHT * anchor_sim − (1−EMBARRASSMENT_WEIGHT)
-           * redundancy (max similarity to an already-chosen fact). EMBARRASSMENT_WEIGHT = 0.3, so a
-           single dense cluster (e.g. one fandom) can't fill all 3 slots — the roast spans varied,
-           universally-understandable angles. The weighted draw keeps embarrassing facts likely while
-           varying the chosen set across repeat roasts, so the same person doesn't get the same joke.
-       Falls back to plain get_facts() when no embeddings are available.
-
-3b. Contradiction selection (contradiction mode)
-       The whole recent fact list (newest CONTRADICTION_FACT_LIMIT = 12) is passed to the model
-       intact — no embedding pre-filter. Embeddings can't tell a funny stance clash ("cares about
-       animals" + "eats beef") from a consistent pair ("loves cats" + "has kittens"), so detection
-       is left to the LLM. The prompt asks it to roast the funniest contradiction/hypocrisy, or
-       fall back to the most absurd single fact when none exists.
+3. Fact selection — none
+       The whole stored fact list is passed to the model intact (get_facts, newest first). There is
+       no embedding retrieval and no pre-filtering: the pool is already capped (MAX_FACTS_PER_USER =
+       30) and each fact is a short sentence, so the entire list fits the context comfortably. The
+       model is the better judge of which fact is funniest, and pre-selecting risks hiding the very
+       fact that makes the joke land. The mode instruction tells the model which angle to take.
 
 4. LLM call
-       model:       llama-3.3-70b-versatile
-       temperature: 0.5   (controlled — specificity beats randomness for humor)
+       model:       openai/gpt-oss-120b  → llama-3.3-70b-versatile → llama-4-scout (fallback chain)
+                    gpt-oss-120b is primary: better world-knowledge/fact-comprehension, and it draws
+                    on a SEPARATE Groq token budget from llama-3.3 (the main agent model), so heavy
+                    roasting does not starve the bot's regular replies.
+       temperature: 0.5
        top_p:       0.9
-       max_tokens:  100
-       constraint:  ≤ 2 sentences, Russian only, no joke explanation
+       max_tokens:  1024  (gpt-oss is a reasoning model — hidden reasoning eats output tokens before
+                    the answer, so a tight cap leaves visible content empty; trim_to_single_roast
+                    clamps the final text to 2 sentences regardless)
+       style:       blunt and crude — state the real fact/contradiction plainly, then a short
+                    dismissive jab. NO invented imagery, metaphors or similes (these read as absurd
+                    Russian). Few-shot examples in ROAST_SYSTEM_PROMPT teach the register. Profanity
+                    allowed; never appearance, illness, or family.
+       post-trim:   trim_to_single_roast() keeps the first substantial paragraph, max 2 sentences —
+                    a deterministic guard, because the model does not reliably self-limit length.
+       constraint:  Russian only, no joke explanation
 
 5. Fallback (no facts at all)
        → mock them for never writing anything ("@username вообще ничего не пишет в чате")
@@ -63,10 +62,8 @@ user_memories
     Source:  LLM-extracted facts accumulated over time from all chat messages
     Content: short plain-language sentences about the user, in Russian
     Window:  all facts for the target (max 30 stored per user per chat)
-    Usage:   anchor modes pick varied embarrassing facts (anchor retrieval + stochastic diverse pick);
-             contradiction
-             mode passes the full list so the LLM can spot a hypocritical pair; either way the LLM
-             crafts one targeted, universally-understandable joke
+    Usage:   the full fact list is handed to the LLM, which picks the funniest fact (or contradicting
+             pair) for the chosen mode's angle and crafts one short, blunt jab
 ```
 
 ## Auto-roast detection

@@ -7,139 +7,40 @@ Module-level wrappers preserve the public API that bot.py and handlers.py import
 
 import random
 
-import numpy as np
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
 from src.achievements import notify_unlocks
 from src.agent import roast_agent
-from src.store import embedder, unified_messages
+from src.store import unified_messages
 from src.store.roast_store import get_recent_modes, log_roast, pop_roast_target
-from src.store.user_memories import get_facts, get_facts_with_embeddings
+from src.store.user_memories import get_facts
 
 logger = log.get_logger(__name__)
 
 ROAST_HEADERS = ("💀", "😤", "🎮", "🔥", "💢")
 
-ROAST_ANCHORS = {
-    "shame": "провал поражение слабость позор неловкость плохая привычка стыд проигрыш",
-    "quirk": "странность привычка особенность манера поведение повторяет всегда никогда",
-    "boast": "хвастовство преувеличение самолюбование заявил гордится переоценивает",
+CONTRADICTION_MODE = "contradiction"
+
+# Each mode is an angle hint appended to the fact list. The model receives every
+# stored fact and chooses the funniest one itself — there is no pre-filtering, so a
+# punchline fact can never be hidden behind a retrieval window. Brevity and the
+# one-punch structure live in ROAST_SYSTEM_PROMPT; each line here only picks the angle.
+ROAST_MODE_INSTRUCTIONS = {
+    "shame": "Зацепись за факт, где он опозорился или сглупил, и врежь по нему.",
+    CONTRADICTION_MODE: (
+        "Найди ОДНО настоящее противоречие между его фактами (например, кайфует от мотоцикла, "
+        "но экономит на такси) и врежь по нему. Не сваливай несколько противоречий в кучу. "
+        "Если явного противоречия нет — высмей самый нелепый факт."
+    ),
 }
 
-ANCHOR_CANDIDATE_COUNT = 8
-SELECTION_SIZE = 3
-EMBARRASSMENT_WEIGHT = 0.3
-SOFTMAX_TEMPERATURE = 0.15
-
-CONTRADICTION_MODE = "contradiction"
-ROAST_MODES = (*ROAST_ANCHORS, CONTRADICTION_MODE)
-CONTRADICTION_FACT_LIMIT = 12
+ROAST_MODES = tuple(ROAST_MODE_INSTRUCTIONS)
 
 RECENT_MODE_WINDOW = 1
 
-STANDARD_INSTRUCTION = (
-    "Обыграй один из этих фактов так, "
-    "чтобы засмеялся любой в зале, даже незнакомый с играми и аниме. "
-    "Максимум две фразы."
-)
-CONTRADICTION_INSTRUCTION = (
-    "Среди фактов найди самое смешное противоречие или лицемерие "
-    "(например, переживает за животных, но ест говядину) и построй прожарку "
-    "на этом контрасте. Если явного противоречия нет — высмей самый нелепый факт. "
-    "Максимум две фразы."
-)
 SILENCE_INSTRUCTION = "вообще ничего не пишет в чате. Затроль его за молчание."
-
-
-def rank_by_anchor(
-    facts_with_embeddings: list[tuple[str, np.ndarray]],
-    anchor: np.ndarray,
-) -> list[tuple[str, np.ndarray, float]]:
-    """Rank facts by how embarrassing they are, keeping the strongest candidates.
-
-    Args:
-        facts_with_embeddings: Facts paired with their raw embedding vectors.
-        anchor: Unit-normalized "embarrassment" anchor embedding.
-
-    Returns:
-        Up to ``ANCHOR_CANDIDATE_COUNT`` tuples of ``(fact, unit_embedding,
-        anchor_similarity)``, ordered from most to least embarrassing.
-    """
-    scored = []
-    for fact, embedding in facts_with_embeddings:
-        norm = np.linalg.norm(embedding)
-        unit = embedding / norm if norm > 0 else embedding
-        scored.append((fact, unit, float(anchor @ unit)))
-    scored.sort(key=lambda item: item[2], reverse=True)
-    return scored[:ANCHOR_CANDIDATE_COUNT]
-
-
-def weighted_choice(items: list, scores: list[float]):
-    """Randomly pick one item, softmax-weighting the given scores.
-
-    Higher-scoring items are more likely but never guaranteed, so repeated draws
-    over the same candidates yield varied picks — the source of roast variety.
-
-    Args:
-        items: Candidate items to choose from.
-        scores: Parallel scores; higher means more likely to be chosen.
-
-    Returns:
-        One randomly chosen item.
-    """
-    weights = np.exp((np.array(scores) - np.max(scores)) / SOFTMAX_TEMPERATURE)
-    return random.choices(items, weights=weights.tolist(), k=1)[0]
-
-
-def select_diverse(candidates: list[tuple[str, np.ndarray, float]]) -> list[str]:
-    """Pick embarrassing yet topically varied facts, with run-to-run randomness.
-
-    The first fact is drawn softmax-weighted by anchor similarity; each later pick is
-    drawn softmax-weighted by ``EMBARRASSMENT_WEIGHT * anchor_similarity minus
-    (1 - EMBARRASSMENT_WEIGHT) * redundancy``, where redundancy is the highest
-    similarity to an already-chosen fact. The redundancy penalty stops one dense
-    cluster (e.g. a single fandom) from filling every slot; the weighted draw keeps
-    the chosen set fresh across repeated roasts of the same user.
-
-    Args:
-        candidates: Anchor-ranked ``(fact, unit_embedding, anchor_similarity)`` tuples.
-
-    Returns:
-        ``SELECTION_SIZE`` facts, biased toward embarrassing and distinct ones.
-    """
-    chosen = [weighted_choice(candidates, [anchor_sim for _, _, anchor_sim in candidates])]
-    while len(chosen) < SELECTION_SIZE and len(chosen) < len(candidates):
-        chosen_facts = {fact for fact, _, _ in chosen}
-        remaining = [item for item in candidates if item[0] not in chosen_facts]
-        scores = [
-            EMBARRASSMENT_WEIGHT * anchor_sim
-            - (1.0 - EMBARRASSMENT_WEIGHT) * max(float(unit @ picked) for _, picked, _ in chosen)
-            for _, unit, anchor_sim in remaining
-        ]
-        chosen.append(weighted_choice(remaining, scores))
-    return [fact for fact, _, _ in chosen]
-
-
-def pick_roast_facts(
-    facts_with_embeddings: list[tuple[str, np.ndarray]],
-    anchor_embedding: np.ndarray,
-) -> list[str]:
-    """Surface embarrassing facts, then spread the final pick across topics.
-
-    Args:
-        facts_with_embeddings: Facts paired with their raw embedding vectors.
-        anchor_embedding: The "embarrassment" anchor embedding for this roast.
-
-    Returns:
-        Up to ``SELECTION_SIZE`` facts to hand the roast model.
-    """
-    anchor = anchor_embedding / (np.linalg.norm(anchor_embedding) or 1.0)
-    candidates = rank_by_anchor(facts_with_embeddings, anchor)
-    if len(candidates) <= SELECTION_SIZE:
-        return [fact for fact, _, _ in candidates]
-    return select_diverse(candidates)
 
 
 def pick_roast_mode(recent_modes: list[str]) -> str:
@@ -159,29 +60,21 @@ def pick_roast_mode(recent_modes: list[str]) -> str:
     return random.choice(available or list(ROAST_MODES))
 
 
-async def select_roast_facts(chat_id: int, user_id: int, mode: str) -> list[str]:
-    """Select the facts to feed the roast model for the given mode.
+async def select_roast_facts(chat_id: int, user_id: int) -> list[str]:
+    """Fetch every stored fact for the roast target, newest first.
 
-    Contradiction mode hands over the recent fact list whole so the model can spot a
-    hypocritical pair (e.g. cares about animals yet eats beef); embeddings cannot tell
-    a funny stance clash from a consistent one, so no pre-filtering is applied. Anchor
-    modes use embedding retrieval plus diverse selection.
+    All facts are handed to the roast model so it can choose the funniest one itself.
+    The pool is already capped (``MAX_FACTS_PER_USER``) and each fact is a short
+    sentence, so the whole list fits comfortably in the model's context. Selecting
+    here would risk hiding the very fact that makes the joke land.
 
     Args:
         chat_id: Telegram chat ID used to look up user facts.
         user_id: Telegram user ID of the roast target.
-        mode: The chosen roast mode.
 
     Returns:
         Facts to hand the roast model (possibly empty if the user has none).
     """
-    if mode == CONTRADICTION_MODE:
-        facts = await get_facts(chat_id=chat_id, user_id=user_id)
-        return facts[:CONTRADICTION_FACT_LIMIT]
-    facts_with_embs = await get_facts_with_embeddings(chat_id=chat_id, user_id=user_id)
-    if facts_with_embs:
-        anchor_emb = np.array(await embedder.embed(ROAST_ANCHORS[mode]))
-        return pick_roast_facts(facts_with_embs, anchor_emb)
     return await get_facts(chat_id=chat_id, user_id=user_id)
 
 
@@ -189,9 +82,9 @@ def build_roast_prompt(mode: str, target_username: str, facts: list[str]) -> str
     """Assemble the user prompt for the roast model.
 
     Args:
-        mode: The chosen roast mode (selects the instruction line).
+        mode: The chosen roast mode (selects the angle instruction line).
         target_username: Username of the roast target (without ``@``).
-        facts: Selected facts; empty triggers the silent-member fallback.
+        facts: The target's facts; empty triggers the silent-member fallback.
 
     Returns:
         Formatted prompt string for the roast model.
@@ -199,7 +92,7 @@ def build_roast_prompt(mode: str, target_username: str, facts: list[str]) -> str
     if not facts:
         return f"@{target_username} {SILENCE_INSTRUCTION}"
     facts_text = "\n".join(f"- {fact}" for fact in facts)
-    instruction = CONTRADICTION_INSTRUCTION if mode == CONTRADICTION_MODE else STANDARD_INSTRUCTION
+    instruction = ROAST_MODE_INSTRUCTIONS[mode]
     return f"Факты о @{target_username}:\n{facts_text}\n\n{instruction}"
 
 
@@ -220,7 +113,7 @@ class Roaster:
         """
         recent_modes = await get_recent_modes(chat_id, user_id, RECENT_MODE_WINDOW)
         mode = pick_roast_mode(recent_modes)
-        selected = await select_roast_facts(chat_id, user_id, mode)
+        selected = await select_roast_facts(chat_id, user_id)
         user_prompt = build_roast_prompt(mode, target_username, selected)
         header = random.choice(ROAST_HEADERS)
         roast_text = await roast_agent.invoke_roast(user_prompt)
