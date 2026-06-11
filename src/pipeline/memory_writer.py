@@ -2,7 +2,8 @@
 MemoryWriter — fires fact extraction and upsert in the background.
 
 Runs in two modes:
-  - Active (bot replied): fed the full exchange (user message + bot reply).
+  - Active (bot replied): fed the full exchange (user message + bot reply)
+    plus the recent conversation context from state["context"].
   - Passive (no reply): fed the user message alone — the bot "overheard" it.
 
 The module-level extract_and_save is also called directly from the router
@@ -39,9 +40,17 @@ SIMILARITY_THRESHOLD = 0.85
 
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
+CONTEXT_SNIPPET_LIMIT = 10
+CONTEXT_MSG_CHAR_LIMIT = 120
+
 EXTRACTION_SYSTEM = (
-    "Ты извлекаешь краткие факты о человеке из одного обмена сообщениями в чате. "
+    "Ты извлекаешь краткие факты о конкретном пользователе из обмена сообщениями в групповом чате. "
     "Возвращай JSON-массив коротких строк на русском языке (не более 15 слов каждая). "
+    "ВАЖНО — правильно определяй субъект: извлекай факт только если пользователь описывает самого себя, "
+    "или его действия/качества описывает бот. "
+    "Если пользователь говорит о ком-то другом, используя местоимения «он», «она», «они», «его», «её», «им» и т.д., "
+    "— это факт о третьем лице, а не о самом пользователе; не приписывай его пользователю. "
+    "Если предоставлен контекст предыдущих сообщений — используй его, чтобы понять, о ком именно речь. "
     "Включай только факты, которых ещё нет или которые обновляют уже известные. "
     "Извлекай только отличительные факты — то, что выделяет этого человека среди других: "
     "игровые предпочтения, привычки, мнения, события, достижения, странности. "
@@ -52,6 +61,16 @@ EXTRACTION_SYSTEM = (
     "характеристики бота — это не черты личности человека. "
     "Если ничего отличительного не узнано — верни []. Без пояснений, без markdown — только сырой JSON."
 )
+
+
+def _format_recent_context(recent: list[dict]) -> str:
+    """Format the last N messages as a readable conversation snippet."""
+    lines = []
+    for row in recent[-CONTEXT_SNIPPET_LIMIT:]:
+        username = row.get("username", "?")
+        content = (row.get("content") or "")[:CONTEXT_MSG_CHAR_LIMIT]
+        lines.append(f"@{username}: {content}")
+    return "\n".join(lines)
 
 
 def _parse_facts(raw: str) -> list[str]:
@@ -75,17 +94,23 @@ def _parse_facts(raw: str) -> list[str]:
 
 
 async def _extract_facts(
-    *, username: str, user_message: str, bot_reply: str, existing: list[str]
+    *, username: str, user_message: str, bot_reply: str, existing: list[str],
+    recent_history: list[dict] | None = None,
 ) -> list[str]:
+    """Call the LLM to extract new facts about the user from the given exchange."""
     existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
     exchange = (
         f"Exchange:\n@{username}: {user_message}\nBot: {bot_reply}"
         if bot_reply
         else f"Message (bot was not addressed):\n@{username}: {user_message}"
     )
+    context_section = (
+        f"Recent conversation context:\n{_format_recent_context(recent_history)}\n\n"
+        if recent_history else ""
+    )
     prompt = (
         f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
-        f"{exchange}\n\nNew facts to add (JSON array):"
+        f"{context_section}{exchange}\n\nNew facts to add (JSON array):"
     )
     llm = ChatGroq(model=MEMORY_MODEL, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256, max_retries=0)
     result = await llm.ainvoke([SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)])
@@ -126,7 +151,8 @@ async def _check_and_insert(
 
 
 async def extract_and_save(
-    *, chat_id: int, user_id: int, username: str, user_message: str, bot_reply: str = ""
+    *, chat_id: int, user_id: int, username: str, user_message: str, bot_reply: str = "",
+    recent_history: list[dict] | None = None,
 ) -> None:
     """Extract facts about the sender and any @mentioned users. Safe to use with create_task."""
     try:
@@ -134,6 +160,7 @@ async def extract_and_save(
         new_facts = await _extract_facts(
             username=username, user_message=user_message,
             bot_reply=bot_reply, existing=existing,
+            recent_history=recent_history,
         )
         await _dedup_and_save(
             chat_id=chat_id, user_id=user_id, username=username, new_facts=new_facts,
@@ -201,6 +228,7 @@ class MemoryWriter:
     """Fires background fact-extraction and upsert; returns immediately."""
 
     async def __call__(self, state: BotState) -> dict:
+        """Fire background fact extraction; returns immediately."""
         msg = state["incoming"]
         response = state.get("response") or ""
         user_message = msg["processed_text"] or msg["raw_text"] or ""
@@ -212,6 +240,9 @@ class MemoryWriter:
         if passive and len(user_message.strip()) < MIN_PASSIVE_LENGTH:
             return {}
 
+        assembled = state.get("context")
+        recent_history = assembled["recent_history"] if assembled else None
+
         asyncio.create_task(
             extract_and_save(
                 chat_id=msg["chat_id"],
@@ -219,6 +250,7 @@ class MemoryWriter:
                 username=msg["username"],
                 user_message=user_message,
                 bot_reply=response,
+                recent_history=recent_history,
             )
         )
         return {}
