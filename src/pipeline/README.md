@@ -119,7 +119,9 @@ context_builder
     ├─ get_chain(reply_to_msg_id) → reply_chain (max 10 hops, oldest-first)
     ├─ load user_memories facts for all user_ids visible in recent history
     ├─ load initiating user's facts if not already in recent participants
-    └─ load initiating user's weekly role + reason from user_tags → asking_user_tag
+    ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
+    └─ resolve @mentions (in the question + replied_to) to members and load their
+       weekly role + reason from user_tags → mentioned_tags
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web); primary gpt-oss-120b for quality, Llama/Qwen fallbacks for rate-limit scenarios
@@ -136,10 +138,11 @@ response   personality LLM (ReAct executor, no tools)
     ├─ thread_id = reply-chain root message_id, or chat_id for flat messages
     ├─ prompt: thread_history (last 10 turns, thread-scoped)
     │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
+    │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
     │            + recent history (last 10) + replied_to + worker findings + current message
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
-    │          when the asker asks why they have their role, the bot explains it from
-    │          the stored reason (only the asker's own role — never other members')
+    │          when someone asks why they (or an @mentioned member) have a role, the
+    │          bot explains it from the stored reason
     ├─ saves response_messages to state for LanguageCorrectionNode
     ├─ DailyLimitError / RateLimitError → propagate to top-level handler
     │
@@ -185,6 +188,7 @@ AssembledContext:
     replied_to: dict | None              # the specific message being replied to (for annotation)
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
     asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
+    mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
 
 BotState:
     incoming: IncomingMessage

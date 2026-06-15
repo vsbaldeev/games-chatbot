@@ -35,6 +35,7 @@ class AssembledContext(TypedDict):
     replied_to: dict | None            # the specific message being replied to, for annotation
     reply_chain: list[dict]            # full reply chain from root to replied-to message, oldest-first
     asking_user_tag: dict | None       # {"tag", "reason"} weekly role of the message sender, if any
+    mentioned_tags: dict[str, dict]    # username → {"tag", "reason"} for members @mentioned in the question
 
 
 class BotState(TypedDict):

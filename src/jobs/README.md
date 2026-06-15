@@ -39,7 +39,8 @@ members who share a name can never collapse into one entry.
    distinct alternatives; a deterministic suffix pass guarantees strict uniqueness
 6. Persist every role + reason to the user_tags table (upsert by chat_id, user_id)
 7. announce_roles: message is built from the decided role map (NOT from API success),
-   so a member is never dropped from the list
+   so a member is never dropped from the list; the sent announcement is recorded in
+   unified_messages so a reply to it carries the role list as replied-to context
 8. apply_telegram_tags: best-effort bot.set_chat_member_tag per member — failures
    (e.g. Chat_creator_required) are swallowed and do not affect the announcement
 ```

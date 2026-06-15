@@ -19,7 +19,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
-from src.store import user_tags
+from src.store import unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users
 
 logger = log.get_logger(__name__)
@@ -274,17 +274,36 @@ async def announce_roles(
     roles: dict[int, dict],
     names_by_uid: dict[int, str],
 ) -> None:
-    """Post the weekly roles, built from the decided map (not from API success)."""
+    """Post the weekly roles, built from the decided map (not from API success).
+
+    The sent message is recorded in ``unified_messages`` so that when a member
+    replies to the announcement to ask about a role, the chat pipeline can load
+    the announcement text as the replied-to context.
+    """
     if not roles:
         return
     lines = "\n".join(
         f"@{names_by_uid.get(user_id, user_id)} — {entry['role']}"
         for user_id, entry in roles.items()
     )
+    text = f"🏷 Роли недели:\n\n{lines}"
     try:
-        await context.bot.send_message(chat_id=chat_id, text=f"🏷 Роли недели:\n\n{lines}")
+        sent = await context.bot.send_message(chat_id=chat_id, text=text)
     except Exception as error:
         logger.warning("Failed to announce roles for chat %s: %s", chat_id, error)
+        return
+    try:
+        await unified_messages.insert(
+            chat_id=chat_id,
+            message_id=sent.message_id,
+            user_id=context.bot.id,
+            username=config.BOT_USERNAME,
+            content=text,
+            media_type="text",
+            reply_to_msg_id=None,
+        )
+    except Exception as error:
+        logger.warning("Failed to record roles announcement for chat %s: %s", chat_id, error)
 
 
 async def set_member_tag(

@@ -48,6 +48,28 @@ async def get_tag(*, chat_id: int, user_id: int) -> dict | None:
     return {"tag": row["tag"], "reason": row["reason"]}
 
 
+async def get_tags_for_users(*, chat_id: int, user_ids: list[int]) -> dict[int, dict]:
+    """Return the current role and reason for several members in one query.
+
+    Args:
+        chat_id: Group chat the roles belong to.
+        user_ids: Members whose roles are requested. An empty list is a no-op.
+
+    Returns:
+        Mapping of user_id to a dict with ``tag`` and ``reason`` keys, containing
+        only the members that actually have a stored role.
+    """
+    if not user_ids:
+        return {}
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id, tag, reason FROM user_tags "
+            "WHERE chat_id = $1 AND user_id = ANY($2)",
+            chat_id, user_ids,
+        )
+    return {row["user_id"]: {"tag": row["tag"], "reason": row["reason"]} for row in rows}
+
+
 async def get_latest_assignment_time() -> float | None:
     """Return the newest ``assigned_at`` across all stored roles, or None.
 

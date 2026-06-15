@@ -12,7 +12,9 @@ Assembles everything the Agent node needs for an enriched prompt:
                        so WorkerNode and ResponseNode see real descriptions, not placeholders.
 """
 
-from src import log
+import re
+
+from src import achievements, log
 from src.pipeline.ingester import describe_photo
 from src.pipeline.state import AssembledContext, BotState
 from src.store import unified_messages, user_memories, user_tags
@@ -21,6 +23,7 @@ logger = log.get_logger(__name__)
 
 RECENT_HISTORY_LIMIT = 20
 CHAIN_MSG_CHAR_LIMIT = 400
+MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
 
 class ContextBuilder:
@@ -38,6 +41,9 @@ class ContextBuilder:
             chat_id, msg["user_id"], msg["username"], recent
         )
         asking_user_tag = await user_tags.get_tag(chat_id=chat_id, user_id=msg["user_id"])
+        mentioned_tags = await self.__collect_mentioned_tags(
+            chat_id, msg, replied_to, asker_username=msg["username"]
+        )
 
         assembled: AssembledContext = {
             "user_facts": user_facts,
@@ -45,8 +51,48 @@ class ContextBuilder:
             "replied_to": replied_to,
             "reply_chain": reply_chain,
             "asking_user_tag": asking_user_tag,
+            "mentioned_tags": mentioned_tags,
         }
         return {"context": assembled}
+
+    async def __collect_mentioned_tags(
+        self, chat_id: int, msg: dict, replied_to: dict | None, asker_username: str
+    ) -> dict[str, dict]:
+        """Load weekly roles for members @mentioned in the question or replied to.
+
+        Lets the bot explain another member's role (e.g. "why does @x have this
+        tag") by resolving the mentioned usernames to their stored tag + reason.
+        The asker's own role is excluded — it is carried separately.
+
+        Args:
+            chat_id: Group chat the message belongs to.
+            msg: The incoming message dict.
+            replied_to: The message being replied to, if any.
+            asker_username: Sender's username, excluded from the result.
+
+        Returns:
+            Mapping of username to ``{"tag", "reason"}`` for resolvable members.
+        """
+        text = " ".join(filter(None, [
+            msg.get("processed_text"), msg.get("raw_text"),
+            (replied_to or {}).get("content"),
+        ]))
+        mentioned = {mention.lower() for mention in MENTION_RE.findall(text)}
+        mentioned.discard(asker_username.lower())
+        if not mentioned:
+            return {}
+        members = await achievements.get_chat_members(chat_id)
+        username_by_id = {
+            uid: uname for uid, uname in members if uname.lower() in mentioned
+        }
+        if not username_by_id:
+            return {}
+        tags_by_id = await user_tags.get_tags_for_users(
+            chat_id=chat_id, user_ids=list(username_by_id)
+        )
+        return {
+            username_by_id[uid]: tag for uid, tag in tags_by_id.items()
+        }
 
     async def __get_recent(self, chat_id: int, current_message_id: int) -> list[dict]:
         all_recent = await unified_messages.get_recent(

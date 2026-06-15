@@ -112,6 +112,31 @@ def build_asking_user_tag_lines(context, username: str) -> list[str]:
     return lines
 
 
+def build_mentioned_tags_lines(context) -> list[str]:
+    """Return weekly-role lines for other members the question @mentions.
+
+    Lets the bot explain why another member got their role, using the stored
+    justification rather than improvising.
+
+    Args:
+        context: AssembledContext dict or None.
+
+    Returns:
+        Prompt lines naming each mentioned member's role and why it was
+        assigned, with a trailing blank line, or an empty list when none apply.
+    """
+    mentioned_tags = (context or {}).get("mentioned_tags") or {}
+    if not mentioned_tags:
+        return []
+    lines = ["Роли недели других участников:"]
+    for username, tag_info in mentioned_tags.items():
+        reason = tag_info.get("reason")
+        suffix = f" — {reason}" if reason else ""
+        lines.append(f"@{username}: {tag_info['tag']}{suffix}")
+    lines.append("")
+    return lines
+
+
 def build_response_input(
     username: str,
     user_input: str,
@@ -139,6 +164,7 @@ def build_response_input(
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
     parts += build_user_facts_lines(context)
     parts += build_asking_user_tag_lines(context, username)
+    parts += build_mentioned_tags_lines(context)
 
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     # Skip recent history when thread history is present (thread turns already
