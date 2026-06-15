@@ -46,3 +46,13 @@ members who share a name can never collapse into one entry.
 
 Reasons stored in `user_tags` let the response pipeline explain a member's role
 when they ask "why do I have this role?" (see `src/pipeline/README.md`).
+
+### Startup catch-up
+
+`weekly_roles_job` only does work on Sundays, so a Sunday spent down (e.g. a
+network outage at 14:00 UTC) means members go a whole week with no roles. To
+recover, `RolesJobManager` also registers a one-off `catch_up_roles_job` shortly
+after startup. It compares the newest `user_tags.assigned_at` against the most
+recent scheduled Sunday run (`last_scheduled_roles_run`): if nothing was assigned
+at or after that run, it runs the assignment once now. When the latest run is
+already covered it logs and skips, so a normal restart never re-runs the job.

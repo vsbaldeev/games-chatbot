@@ -48,6 +48,21 @@ async def get_tag(*, chat_id: int, user_id: int) -> dict | None:
     return {"tag": row["tag"], "reason": row["reason"]}
 
 
+async def get_latest_assignment_time() -> float | None:
+    """Return the newest ``assigned_at`` across all stored roles, or None.
+
+    Used by the startup catch-up to tell whether the most recent scheduled
+    roles run actually produced any tags.
+
+    Returns:
+        The maximum ``assigned_at`` epoch timestamp over every row, or ``None``
+        when no roles have ever been assigned.
+    """
+    async with database.acquire() as conn:
+        latest = await conn.fetchval("SELECT MAX(assigned_at) FROM user_tags")
+    return latest
+
+
 async def upsert_tags(*, chat_id: int, assignments: dict[int, dict]) -> None:
     """Insert or replace the roles for several members in one batch.
 

@@ -28,6 +28,13 @@ TAG_MODEL = "llama-3.3-70b-versatile"
 TAG_MAX_CHARS = 16
 MAX_TOKENS = 2048
 
+# The roles job is scheduled daily but only acts on Sundays, so the one
+# meaningful run each week is Sunday at this UTC time. The startup catch-up
+# relies on this matching the schedule registered in src/bot/jobs.py.
+ROLES_RUN_TIME = datetime.time(hour=14, minute=0, tzinfo=datetime.timezone.utc)
+# Delay before the startup catch-up fires, to let initialisation settle.
+CATCH_UP_DELAY_SECONDS = 30
+
 FALLBACK_ROLE = "Тёмная лошадка"
 FALLBACK_REASON = "Пока загадка — фактов маловато, но роль ещё впереди."
 
@@ -329,12 +336,58 @@ async def assign_roles_for_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int
     await apply_telegram_tags(context, chat_id, roles)
 
 
-async def weekly_roles_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Run the role assignment for every known chat, but only on Sundays."""
-    if datetime.datetime.now(datetime.timezone.utc).weekday() != 6:  # 6 = Sunday
-        return
+async def run_roles_for_all_chats(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Decide, persist, announce, and apply roles for every known chat.
+
+    Args:
+        context: Telegram context used to send messages and set tags.
+    """
     chat_ids = await achievements.get_all_chat_ids()
     await asyncio.gather(
         *[assign_roles_for_chat(context, chat_id) for chat_id in chat_ids],
         return_exceptions=True,
     )
+
+
+async def weekly_roles_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the role assignment for every known chat, but only on Sundays."""
+    if datetime.datetime.now(datetime.timezone.utc).weekday() != 6:  # 6 = Sunday
+        return
+    await run_roles_for_all_chats(context)
+
+
+def last_scheduled_roles_run(now: datetime.datetime) -> datetime.datetime:
+    """Return the most recent Sunday :data:`ROLES_RUN_TIME` at or before ``now``.
+
+    Args:
+        now: Current timezone-aware UTC moment.
+
+    Returns:
+        The timezone-aware datetime of the latest scheduled roles run.
+    """
+    days_since_sunday = (now.weekday() + 1) % 7  # Monday=0 … Sunday=6
+    last_sunday = (now - datetime.timedelta(days=days_since_sunday)).date()
+    candidate = datetime.datetime.combine(last_sunday, ROLES_RUN_TIME)
+    if candidate > now:  # today is Sunday but before the run time
+        candidate -= datetime.timedelta(days=7)
+    return candidate
+
+
+async def catch_up_roles_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """On startup, run the roles assignment if the last scheduled run was missed.
+
+    Compares the newest stored tag timestamp against the most recent scheduled
+    Sunday run. If no tags were assigned at or after that run (e.g. the bot was
+    down at the time), the assignment is run once now to recover.
+
+    Args:
+        context: Telegram context used to send messages and set tags.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_run = last_scheduled_roles_run(now)
+    latest_assigned = await user_tags.get_latest_assignment_time()
+    if latest_assigned is not None and latest_assigned >= last_run.timestamp():
+        logger.info("Roles up to date (last run %s); skipping startup catch-up", last_run.date())
+        return
+    logger.info("Missed scheduled roles run (%s); running startup catch-up", last_run.date())
+    await run_roles_for_all_chats(context)
