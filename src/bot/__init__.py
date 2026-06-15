@@ -49,4 +49,12 @@ def main() -> None:
         job_manager.add_jobs(app)
 
     logger.info("Starting polling...")
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    # bootstrap_retries=-1 lets the startup handshake (get_me/delete_webhook) retry
+    # indefinitely with backoff instead of crashing on a transient network/DNS failure
+    # — e.g. when the container starts before networking is ready. This mirrors the
+    # polling loop, which already retries indefinitely.
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+        bootstrap_retries=-1,
+    )

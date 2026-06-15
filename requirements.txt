@@ -1,4 +1,4 @@
-python-telegram-bot[job-queue]==22.7
+python-telegram-bot[job-queue]==22.8
 langchain>=1.0.0,<2.0.0
 langchain-groq>=1.1.0
 langchain-core>=0.3.0,<2.0.0
