@@ -61,10 +61,6 @@ class CommandHandlerManager(HandlerManagerInterface):
         app.add_handler(CommandHandler("meme", fun.cmd_meme, filters=group_only))
         app.add_handler(CommandHandler("duel", games.cmd_duel, filters=group_only))
         app.add_handler(CallbackQueryHandler(games.handle_duel_callback, pattern=games.DUEL_CALLBACK_PATTERN))
-        app.add_handler(CommandHandler("dnd_pvp", games.cmd_dnd_pvp, filters=group_only))
-        app.add_handler(CommandHandler("dnd_coop", games.cmd_dnd_coop, filters=group_only))
-        app.add_handler(CommandHandler("dnd_heist", games.cmd_dnd_heist, filters=group_only))
-        app.add_handler(CallbackQueryHandler(games.handle_dnd_callback, pattern=games.DND_CALLBACK_PATTERN))
         app.add_handler(CommandHandler("achievements", statistics.cmd_achievements, filters=group_only))
         app.add_handler(CommandHandler("top", statistics.cmd_top, filters=group_only))
 

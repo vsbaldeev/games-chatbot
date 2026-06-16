@@ -1,12 +1,5 @@
-"""Game command handlers — D&D and duel."""
+"""Game command handlers — duel."""
 
-from src.commands.games.dnd import (
-    cmd_dnd_pvp,
-    cmd_dnd_coop,
-    cmd_dnd_heist,
-    handle_dnd_callback,
-    DND_CALLBACK_PATTERN,
-)
 from src.commands.games.duel import (
     cmd_duel,
     handle_duel_callback,
@@ -14,11 +7,6 @@ from src.commands.games.duel import (
 )
 
 __all__ = [
-    "cmd_dnd_pvp",
-    "cmd_dnd_coop",
-    "cmd_dnd_heist",
-    "handle_dnd_callback",
-    "DND_CALLBACK_PATTERN",
     "cmd_duel",
     "handle_duel_callback",
     "DUEL_CALLBACK_PATTERN",

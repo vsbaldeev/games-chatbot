@@ -21,7 +21,4 @@ fun/
 
 games/
     /duel           — see src/commands/games/README.md
-    /dnd_pvp
-    /dnd_coop
-    /dnd_heist      — see src/commands/games/dnd/README.md
 ```

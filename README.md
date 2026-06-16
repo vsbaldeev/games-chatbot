@@ -13,7 +13,7 @@ typed LangGraph pipeline.
 | [src/pipeline/](src/pipeline/README.md) | LangGraph StateGraph — message processing nodes and graph wiring |
 | [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
-| [src/commands/](src/commands/README.md) | Command handlers — /duel, /dnd_*, /top, /achievements |
+| [src/commands/](src/commands/README.md) | Command handlers — /duel, /top, /achievements |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, silence sweep, cleanup |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
@@ -78,9 +78,6 @@ and **admin rights** with `can_manage_tags` for weekly member roles.
 ## BotFather commands
 
 ```
-dnd_pvp - D&D приключение, 1 раунд, все против всех
-dnd_coop - D&D кооп, 2 раунда против босса
-dnd_heist - Великое Ограбление — 3 фазы
 duel - эмодзи-дуэль между двумя участниками
 achievements - последние достижения
 top - топ чата по достижениям

@@ -18,12 +18,8 @@ CommandHandlerManager
     /achievements   — last 3 earned achievements with total count
     /top            — top-3 leaderboard by achievement count
     /duel           — emoji duel picker
-    /dnd_pvp        — D&D PvP adventure
-    /dnd_coop       — D&D co-op adventure
-    /dnd_heist      — D&D heist
     /meme           — random image meme from Reddit
     CallbackQueryHandler(duel_*)   — duel inline buttons
-    CallbackQueryHandler(dnd_*)    — D&D lobby/action buttons
 
 MessageHandlerManager
     text        → handle_message        — main pipeline entry point
