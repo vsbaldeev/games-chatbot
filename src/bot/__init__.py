@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, ApplicationBuilder
 
 from src import achievements, log
-from src.agent import worker_agent, response_agent, roast_agent
+from src.agent import worker_agent, response_agent, roast_agent, comedian_agent
 from src.bot.jobs import RolesJobManager, SilenceSweepJobManager, ResetModelJobManager, MessageCleanupJobManager, MemeJobManager
 from src.memes import store as meme_store
 from src.store import db as database, unified_messages as msg_store, user_memories as memory_store, thread_history as thread_history_store
@@ -22,6 +22,7 @@ async def __on_startup(application: Application) -> None:
     await worker_agent.init()
     await response_agent.init()
     await roast_agent.init()
+    await comedian_agent.init()
     await achievements.init_tables()
     await msg_store.init_table()
     await memory_store.init_table()
