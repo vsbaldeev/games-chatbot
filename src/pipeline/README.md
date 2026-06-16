@@ -8,6 +8,7 @@ nodes. Each node reads BotState and returns a partial update dict.
 ```
 router ──► ingester ──► filter ──► guard ──► context_builder ──► worker ──► response ─┬─► memory_writer ──► END
                                                                                         └─► language_correction ──► memory_writer ──► END
+   └─► humor ──► memory_writer ──► END   (autonomous joke when the humor gate fires)
 ```
 
 Conditional exits exist at every node — see the detailed diagrams below.
@@ -39,14 +40,27 @@ incoming message
     │
     └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
     │
+    ├─ every text message → humor_gate.observe(chat_id)   [counts toward joke cadence]
+    │
     ├─ should_respond=False + non-forwarded text (≥ 20 chars)
     │       → asyncio.create_task(extract_and_save)   [passive memory, background]
     │         forwarded messages are skipped — channel content must not be
     │         attributed as facts about the person who forwarded it
     │
-    ├─ should_respond=False → END
+    ├─ should_respond=False + humor gate fires → humor   [autonomous joke]
+    ├─ should_respond=False → memory_writer (long text) or END
     └─ should_respond=True  → ingester
 ```
+
+### Autonomous humor gate
+
+`humor_gate` (no LLM) decides whether an un-addressed message is worth handing to
+the comedian, keeping the model off the per-message hot path. It fires only when
+all hold: joke-worthy plain text, ≥ `MIN_MESSAGES_SINCE_JOKE` messages since the
+last joke, the `COOLDOWN_SECONDS` window elapsed since the last *sent* joke, and a
+low probability roll — tuned for "rare & sharp" so the bot opens lulls and never
+spams. When it fires, routing goes to the `humor` node (a pass-through stub until
+Part 5 wires the real `HumorNode`).
 
 ---
 

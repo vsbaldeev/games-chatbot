@@ -17,6 +17,7 @@ import random
 from typing import Any
 
 from src import log
+from src.pipeline import humor_gate
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
@@ -39,6 +40,9 @@ class MessageRouter:
         message = update.message
 
         await self.__store_message(msg)
+
+        if msg["media_type"] == "text":
+            humor_gate.observe(msg["chat_id"])
 
         should_respond, response_trigger = self.__decide(msg, message)
 
