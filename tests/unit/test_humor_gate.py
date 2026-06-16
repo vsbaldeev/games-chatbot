@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from src.pipeline import humor_gate
-from src.pipeline.graph import humor_stub, route_after_router
+from src.pipeline.graph import route_after_router
 
 CHAT_ID = 555
 
@@ -143,12 +143,3 @@ class TestRouteAfterRouter:
         state = self.make_state(should_respond=False, text="hi")
         with patch("src.pipeline.humor_gate.should_consider", return_value=False):
             assert route_after_router(state) == END
-
-
-class TestHumorStub:
-    async def test_marks_considered_and_returns_empty(self):
-        humor_gate.messages_since_joke[CHAT_ID] = 20
-        state = {"incoming": make_msg()}
-        result = await humor_stub(state)
-        assert result == {}
-        assert humor_gate.messages_since_joke[CHAT_ID] == 0

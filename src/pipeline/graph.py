@@ -21,9 +21,10 @@ Graph edges:
 from langgraph.graph import END, START, StateGraph
 
 from src import config, log
-from src.agent import FOREIGN_SCRIPT_RE
+from src.agent import FOREIGN_SCRIPT_RE, comedian_agent
 from src.pipeline import humor_gate
 from src.pipeline.context_builder import ContextBuilder
+from src.pipeline.humor_node import HumorNode
 from src.pipeline.filter_node import MeaninglessFilterNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
@@ -35,23 +36,6 @@ from src.pipeline.state import BotState
 from src.pipeline.worker_node import WorkerNode
 
 logger = log.get_logger(__name__)
-
-
-async def humor_stub(state: BotState) -> dict:
-    """Placeholder humor node (Part 3): consume the gate slot without joking.
-
-    Resets the gate so the comedian is not re-considered on the next message.
-    Part 5 replaces this with the real ``HumorNode`` that generates and sets a
-    joke into ``state["response"]``.
-
-    Args:
-        state: Current pipeline state.
-
-    Returns:
-        An empty update — no response is produced.
-    """
-    humor_gate.mark_considered(state["incoming"]["chat_id"])
-    return {}
 
 
 def route_after_router(state: BotState) -> str:
@@ -100,7 +84,7 @@ def build_pipeline(worker_agent, response_agent) -> StateGraph:
     graph.add_node("response", ResponseNode(response_agent))
     graph.add_node("language_correction", LanguageCorrectionNode(response_agent))
     graph.add_node("memory_writer", MemoryWriter())
-    graph.add_node("humor", humor_stub)
+    graph.add_node("humor", HumorNode(comedian_agent))
 
     graph.add_edge(START, "router")
     graph.add_conditional_edges(

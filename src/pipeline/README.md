@@ -59,8 +59,16 @@ the comedian, keeping the model off the per-message hot path. It fires only when
 all hold: joke-worthy plain text, ≥ `MIN_MESSAGES_SINCE_JOKE` messages since the
 last joke, the `COOLDOWN_SECONDS` window elapsed since the last *sent* joke, and a
 low probability roll — tuned for "rare & sharp" so the bot opens lulls and never
-spams. When it fires, routing goes to the `humor` node (a pass-through stub until
-Part 5 wires the real `HumorNode`).
+spams.
+
+When it fires, the `HumorNode` (`humor_node.py`) renders the recent conversation,
+gathers participant material (`src/agent/roast_material.py`), and asks the
+`ComedianAgent` (`src/agent/comedian.py`) for a strict-JSON decision. On `act` it
+sets `state["response"]` (so `run_pipeline` sends it like any reply) and stamps
+the cooldown via `mark_joke_sent`; on an abstain or any error it stays silent and
+calls `mark_considered`. Either way the graph continues to `memory_writer`. The
+comedian defaults to silence and only acts when it has a conversation-spawning
+hook (light by default, roast sparingly).
 
 ---
 

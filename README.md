@@ -1,8 +1,10 @@
 Telegram group chat bot for a Russian-speaking PS5 friend group.
 
-Friendly and sarcastic personality — jokes around, roasts chat members, answers game
-questions with dry humour. Tracks per-user stats, extracts long-term memories, and
-routes every message through a typed LangGraph pipeline.
+Friendly and sarcastic personality — answers game questions with dry humour and
+decides on its own when to drop a joke into the chat (a conversation-spawning hook,
+gentle by default, roasting only when someone invites it) or to stay quiet. Tracks
+per-user stats, extracts long-term memories, and routes every message through a
+typed LangGraph pipeline.
 
 ## Architecture
 
