@@ -11,8 +11,8 @@ routes every message through a typed LangGraph pipeline.
 | [src/pipeline/](src/pipeline/README.md) | LangGraph StateGraph — message processing nodes and graph wiring |
 | [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
-| [src/commands/](src/commands/README.md) | Command handlers — /duel, /dnd_*, /roast, /top, /achievements |
-| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roast, weekly roles, silence sweep, cleanup |
+| [src/commands/](src/commands/README.md) | Command handlers — /duel, /dnd_*, /top, /achievements |
+| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, silence sweep, cleanup |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
 | [src/achievements/](src/achievements/README.md) | Achievement system — stat rules, unlock checks, announcements |
@@ -79,7 +79,6 @@ dnd_pvp - D&D приключение, 1 раунд, все против всех
 dnd_coop - D&D кооп, 2 раунда против босса
 dnd_heist - Великое Ограбление — 3 фазы
 duel - эмодзи-дуэль между двумя участниками
-roast - случайный участник получает по заслугам
 achievements - последние достижения
 top - топ чата по достижениям
 help - помощь

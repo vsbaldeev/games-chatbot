@@ -1,11 +1,10 @@
 """
 Roast feature tests.
 
-Covers four units in isolation:
+Covers three units in isolation:
   - pick_roast_mode: recent-mode-avoiding angle picker
   - pop_roast_target: shuffle-bag queue against a mocked DB
-  - Roaster.generate: LLM path with all I/O mocked
-  - Roaster.cmd_roast: Telegram command edge cases
+  - Roaster.generate: LLM path with all I/O mocked (used by the offense auto-roast)
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -135,41 +134,3 @@ class TestRoasterGenerate:
         user_prompt = mock_invoke.call_args[0][0]
         assert "silentuser" in user_prompt
         assert "ничего не пишет" in user_prompt
-
-
-# ---------------------------------------------------------------------------
-# Roaster.cmd_roast
-# ---------------------------------------------------------------------------
-
-class TestCmdRoast:
-    def _make_update(self) -> MagicMock:
-        update = MagicMock()
-        update.message.reply_text = AsyncMock(return_value=MagicMock(message_id=999))
-        update.message.chat.send_action = AsyncMock()
-        update.effective_chat.id = CHAT_ID
-        return update
-
-    def _make_context(self, bot_id: int = 999) -> MagicMock:
-        context = MagicMock()
-        context.bot.id = bot_id
-        return context
-
-    async def test_no_members_sends_empty_chat_message(self):
-        update = self._make_update()
-        with patch("src.commands.fun.roast.achievements.get_chat_members", AsyncMock(return_value=[])):
-            await Roaster().cmd_roast(update, self._make_context())
-        update.message.reply_text.assert_called_once_with(
-            "В базе нет участников. Пусть сначала кто-нибудь напишет в чат."
-        )
-
-    async def test_generate_exception_sends_error_message(self):
-        roaster = Roaster()
-        update = self._make_update()
-        with patch("src.commands.fun.roast.achievements.get_chat_members",
-                   AsyncMock(return_value=[(1, "alice")])), \
-             patch("src.commands.fun.roast.pop_roast_target", AsyncMock(return_value=(1, "alice"))), \
-             patch.object(roaster, "generate", AsyncMock(side_effect=RuntimeError("groq down"))):
-            await roaster.cmd_roast(update, self._make_context())
-        update.message.reply_text.assert_called_once_with(
-            "Прожарка не задалась. Groq на перекуре — попробуй позже."
-        )

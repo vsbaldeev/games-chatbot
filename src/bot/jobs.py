@@ -9,21 +9,12 @@ from src.jobs.achievements import silence_sweep_job
 from src.jobs.agent import reset_model_job
 from src.jobs.cleanup import cleanup_messages_job
 from src.jobs.meme import daily_meme_job
-from src.jobs.roast import weekly_roast_job
 from src.jobs.roles import CATCH_UP_DELAY_SECONDS, ROLES_RUN_TIME, catch_up_roles_job, weekly_roles_job
 
 
 class JobManagerInterface(ABC):
     @abstractmethod
     def add_jobs(self, app: Application) -> None: ...
-
-
-class RoastJobManager(JobManagerInterface):
-    def add_jobs(self, app: Application) -> None:
-        app.job_queue.run_daily(
-            weekly_roast_job,
-            time=datetime.time(hour=12, minute=0, tzinfo=datetime.timezone.utc),
-        )
 
 
 class RolesJobManager(JobManagerInterface):

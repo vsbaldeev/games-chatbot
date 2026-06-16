@@ -1,23 +1,16 @@
 """
-"Прожарка" (roast) feature.
+"Прожарка" (roast) feature — roast text generation.
 
-Roaster encapsulates LLM-based roast generation and the /roast command handler.
-Module-level wrappers preserve the public API that bot.py and handlers.py import.
+Roaster encapsulates LLM-based roast generation. The offense auto-roast in
+``src.events.messages`` calls ``generate_roast_text`` to clap back when a user
+insults the bot; target selection (``pop_roast_target``) lives at the call site.
 """
 
 import random
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
-from src import achievements, config, log
-from src.achievements import notify_unlocks
 from src.agent import roast_agent
-from src.store import unified_messages
-from src.store.roast_store import get_recent_modes, log_roast, pop_roast_target
+from src.store.roast_store import get_recent_modes
 from src.store.user_memories import get_facts
-
-logger = log.get_logger(__name__)
 
 ROAST_HEADERS = ("💀", "😤", "🎮", "🔥", "💢")
 
@@ -97,7 +90,7 @@ def build_roast_prompt(mode: str, target_username: str, facts: list[str]) -> str
 
 
 class Roaster:
-    """Generates LLM-powered roasts and handles the /roast Telegram command."""
+    """Generates LLM-powered roasts from assembled user facts."""
 
     async def generate(self, chat_id: int, user_id: int, target_username: str) -> tuple[str, str, str]:
         """Generate a roast for the target user.
@@ -119,43 +112,9 @@ class Roaster:
         roast_text = await roast_agent.invoke_roast(user_prompt)
         return header, roast_text, mode
 
-    async def cmd_roast(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message:
-            return
-        chat_id = update.effective_chat.id
-        members = await achievements.get_chat_members(chat_id)
-        if not members:
-            await update.message.reply_text(
-                "В базе нет участников. Пусть сначала кто-нибудь напишет в чат."
-            )
-            return
-        target_id, target_username = await pop_roast_target(chat_id, members)
-        await update.message.chat.send_action("typing")
-        try:
-            header, roast_text, anchor_key = await self.generate(chat_id, target_id, target_username)
-            full_text = f"{header} #прожарка @{target_username}\n\n{roast_text}"
-            sent = await update.message.reply_text(full_text)
-            await log_roast(message_id=sent.message_id, chat_id=chat_id, target_user_id=target_id, anchor_key=anchor_key)
-            await unified_messages.insert(
-                chat_id=chat_id,
-                message_id=sent.message_id,
-                user_id=context.bot.id,
-                username=config.BOT_USERNAME,
-                content=full_text,
-                media_type="text",
-                reply_to_msg_id=update.message.message_id,
-            )
-            await achievements.increment_stat(target_id, chat_id, target_username, "roasted_count")
-            await notify_unlocks(context, chat_id, target_id, target_username)
-        except Exception as error:
-            logger.error("Roast failed for %s in chat %s: %s", target_username, chat_id, error)
-            await update.message.reply_text(
-                "Прожарка не задалась. Groq на перекуре — попробуй позже."
-            )
-
 
 # ---------------------------------------------------------------------------
-# Module-level singleton + backward-compatible wrappers
+# Module-level singleton + public wrapper used by the offense auto-roast
 # ---------------------------------------------------------------------------
 
 roaster = Roaster()
@@ -163,7 +122,3 @@ roaster = Roaster()
 
 async def generate_roast_text(chat_id: int, user_id: int, target_username: str) -> tuple[str, str, str]:
     return await roaster.generate(chat_id, user_id, target_username)
-
-
-async def cmd_roast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await roaster.cmd_roast(update, context)

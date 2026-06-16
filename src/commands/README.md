@@ -16,8 +16,8 @@ statistics.py
     /top            — top-3 leaderboard by achievement count, with medal emojis
 
 fun/
-    /roast          — see src/commands/fun/README.md
     /meme           — see src/commands/fun/README.md
+    (roast generation lives here too — no command; used by the offense auto-roast)
 
 games/
     /duel           — see src/commands/games/README.md

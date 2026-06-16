@@ -21,7 +21,6 @@ CommandHandlerManager
     /dnd_pvp        — D&D PvP adventure
     /dnd_coop       — D&D co-op adventure
     /dnd_heist      — D&D heist
-    /roast          — on-demand прожарка
     /meme           — random image meme from Reddit
     CallbackQueryHandler(duel_*)   — duel inline buttons
     CallbackQueryHandler(dnd_*)    — D&D lobby/action buttons
@@ -39,7 +38,6 @@ MessageHandlerManager
 ## Scheduled jobs
 
 ```
-RoastJobManager          daily 12:00 UTC   weekly_roast_job       (exits early unless it is this week's roast day)
 RolesJobManager          daily 14:00 UTC   weekly_roles_job        (exits early unless Sunday)
 SilenceSweepJobManager   daily 10:00 UTC   silence_sweep_job       (awards silence achievements)
 ResetModelJobManager     daily 00:05 UTC   reset_model_job         (resets LLM fallback index to 0)

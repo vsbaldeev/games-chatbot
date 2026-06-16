@@ -1,19 +1,20 @@
-Fun commands: roast ("прожарка") and meme.
+Roast ("прожарка") text generation and the /meme command.
 
-## Trigger modes
+The `/roast` command and the weekly scheduled roast were retired in favour of
+autonomous humor (see `src/pipeline/` HumorNode). Roast generation
+(`Roaster.generate` / `generate_roast_text`) is kept solely for the **offense
+auto-roast**: when a user insults the bot twice in a row, the bot claps back.
+
+## Trigger mode
 
 ```
-/roast command    — on-demand; caller picks no target — random member from chat_members
-weekly job        — one random day per week (deterministic per ISO week); fires at 12:00 UTC
 auto-roast        — two consecutive offensive replies to bot → immediate roast of the offender
 ```
 
 ## Generation pipeline
 
 ```
-1. Pick target
-       /roast and weekly job → random.choice(chat_members), bot excluded from the pool
-       auto-roast            → the offending user
+1. Target — the offending user (chosen by the caller in src/events/messages.py)
 
 2. Pick mode (random, avoiding the angle used last time on this target)
        The target's last RECENT_MODE_WINDOW = 1 anchor_key(s) are read from roast_log and excluded
@@ -51,8 +52,8 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 5. Fallback (no facts at all)
        → mock them for never writing anything ("@username вообще ничего не пишет в чате")
 
-6. Store roast to unified_messages (/roast only, not weekly job)
-       → sent message inserted so users can reply to the roast and the bot has context
+6. The offense handler (src/events/messages.py) sends the roast and stores it to
+   unified_messages so users can reply to it and the bot has context.
 ```
 
 ## What information the roast reads
@@ -78,14 +79,6 @@ handle_message (src/events/messages.py)
     → OFFENSE_RE matches text + message is a reply to the bot
     → offense_reply_counts[chat_id][user_id] += 1
     → if count >= 2: reset counter, generate roast, increment roasted_count
-```
-
-## Weekly day selection
-
-```python
-# Stateless — survives restarts, varies per ISO week, same day all day
-year, week, _ = datetime.date.today().isocalendar()
-roast_day = random.Random(year * 1000 + week).randint(0, 6)
 ```
 
 ---

@@ -58,7 +58,6 @@ class CommandHandlerManager(HandlerManagerInterface):
         group_only = filters.ChatType.GROUPS
         app.add_handler(CommandHandler("start", general.cmd_start, filters=group_only))
         app.add_handler(CommandHandler("help", general.cmd_help, filters=group_only))
-        app.add_handler(CommandHandler("roast", fun.cmd_roast, filters=group_only))
         app.add_handler(CommandHandler("meme", fun.cmd_meme, filters=group_only))
         app.add_handler(CommandHandler("duel", games.cmd_duel, filters=group_only))
         app.add_handler(CallbackQueryHandler(games.handle_duel_callback, pattern=games.DUEL_CALLBACK_PATTERN))

@@ -18,7 +18,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Что умею:\n"
         "/dnd_pvp, /dnd_coop, /dnd_heist — D&D-приключение (PvP, кооп с боссом, великое ограбление)\n"
         "/duel — эмодзи-дуэль между двумя участниками\n"
-        "/roast — прожарка случайного участника (также раз в неделю автоматически)\n"
         "/achievements — твои достижения\n"
         "/top — топ чата\n\n"
         "Ещё отвечаю на вопросы про игры — упомяни меня через @.\n"

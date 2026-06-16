@@ -8,17 +8,8 @@ Job managers live in src/bot/jobs.py. Implementations live here, one file per jo
 00:05 UTC   reset_model_job        agent.py        reset LLM fallback index to 0
 03:00 UTC   cleanup_messages_job   cleanup.py      prune unified_messages and thread_history rows older than 60 days
 10:00 UTC   silence_sweep_job      achievements.py award silence achievements (7/14/30 days inactive)
-12:00 UTC   weekly_roast_job       roast.py        roast one random chat member (one day per week)
 14:00 UTC   weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
 15:00 UTC   daily_meme_job         meme.py         send one fresh unseen meme to every chat (every day)
-```
-
-## Roast day selection
-
-```python
-# Stateless — survives restarts, varies per ISO week
-year, week, _ = datetime.date.today().isocalendar()
-roast_day = random.Random(year * 1000 + week).randint(0, 6)
 ```
 
 ## Roles job
