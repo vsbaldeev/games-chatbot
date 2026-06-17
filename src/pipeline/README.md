@@ -162,6 +162,8 @@ response   personality LLM (ReAct executor, no tools)
     │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
     │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
     │            + recent history (last 10) + replied_to + worker findings + current message
+    │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
+    │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
     │          when someone asks why they (or an @mentioned member) have a role, the
     │          bot explains it from the stored reason

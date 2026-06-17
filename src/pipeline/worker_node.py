@@ -7,6 +7,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 
 from src import log
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.pipeline.response_node import row_speaker
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -139,10 +140,14 @@ class WorkerNode:
 
     @staticmethod
     def __render_row(row: dict) -> str:
-        """Format a message row as ``@username: content`` for the worker prompt.
+        """Format a message row as ``speaker: content`` for the worker prompt.
+
+        The bot's own past messages are labelled ``Ты (бот)`` rather than
+        ``@username`` so the worker never treats them as another participant.
 
         Args:
-            row: Message row dict with ``username``, ``content``, and ``media_type`` keys.
+            row: Message row dict with ``user_id``, ``username``, ``content``,
+                and ``media_type`` keys.
 
         Returns:
             Formatted string representation of the message.
@@ -150,4 +155,4 @@ class WorkerNode:
         content = row["content"]
         if row["media_type"] == "photo":
             content = unified_messages.display_photo_content(content)
-        return f"@{row['username']}: {content}"
+        return f"{row_speaker(row)}: {content}"

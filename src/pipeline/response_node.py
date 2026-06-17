@@ -14,6 +14,29 @@ logger = log.get_logger(__name__)
 RECENT_FILL_LIMIT = 10
 TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
+# Label used for the bot's own past messages in rendered history, so the model
+# recognises them as its own turns instead of treating them as another
+# participant and @mentioning itself.
+SELF_SPEAKER = "Ты (бот)"
+
+
+def row_speaker(row: dict) -> str:
+    """Return the speaker label for a message row.
+
+    The bot's own messages (identified by ``user_id``) are labelled ``Ты (бот)``
+    so the model never mistakes them for another participant; everyone else is
+    shown as ``@username``.
+
+    Args:
+        row: Message row dict with ``user_id`` and ``username`` keys.
+
+    Returns:
+        ``"Ты (бот)"`` for the bot's own messages, otherwise ``"@username"``.
+    """
+    if row.get("user_id") == config.BOT_ID:
+        return SELF_SPEAKER
+    return f"@{row['username']}"
+
 
 def strip_markdown(text: str) -> str:
     """Strip common Markdown formatting characters from text.
@@ -35,10 +58,14 @@ def strip_markdown(text: str) -> str:
 
 
 def render_row(row: dict) -> str:
-    """Format a message row as ``@username [media_type]: content``.
+    """Format a message row as ``speaker [media_type]: content``.
+
+    The speaker is ``@username`` for other participants and ``Ты (бот)`` for the
+    bot's own past messages (see :func:`row_speaker`).
 
     Args:
-        row: Message dict with ``username``, ``media_type``, and ``content`` keys.
+        row: Message dict with ``user_id``, ``username``, ``media_type``, and
+            ``content`` keys.
 
     Returns:
         Formatted string representation of the message.
@@ -48,7 +75,7 @@ def render_row(row: dict) -> str:
     if media_type == "photo":
         content = unified_messages.display_photo_content(content)
     media_label = f" [{media_type}]" if media_type != "text" else ""
-    return f"@{row['username']}{media_label}: {content}"
+    return f"{row_speaker(row)}{media_label}: {content}"
 
 
 def build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
@@ -188,7 +215,7 @@ def build_response_input(
         parts.append(f"[Собранные данные]:\n{worker_output}\n")
 
     if replied_to:
-        trigger = f"@{username} (↳ @{replied_to['username']}): {user_input}"
+        trigger = f"@{username} (↳ {row_speaker(replied_to)}): {user_input}"
     else:
         trigger = f"@{username}: {user_input}"
     parts.append(trigger)
