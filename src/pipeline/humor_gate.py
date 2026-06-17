@@ -19,9 +19,9 @@ import time
 
 from src.pipeline.state import IncomingMessage
 
-MIN_MESSAGE_LEN = 20            # message must carry some substance to be joke-worthy
+MIN_MESSAGE_LEN = 30            # message must carry some substance to be joke-worthy
 MIN_MESSAGES_SINCE_JOKE = 15    # let the chat breathe between jokes
-COOLDOWN_SECONDS = 45 * 60      # at most ~one joke per 45 min per chat
+COOLDOWN_SECONDS = 120 * 60      # at most ~one joke per 2 hours per chat
 CONSIDER_PROBABILITY = 0.15     # even when eligible, usually stay quiet
 
 messages_since_joke: dict[int, int] = {}
