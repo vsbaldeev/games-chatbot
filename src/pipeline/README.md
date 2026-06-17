@@ -162,6 +162,10 @@ response   personality LLM (ReAct executor, no tools)
     │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
     │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
     │            + recent history (last 10) + replied_to + worker findings + current message
+    │          when the current message is media (photo/voice/video), its trigger line is
+    │            framed as "@user прислал фото. Ниже — его описание… Отреагируй, не пересказывай"
+    │            (build_trigger_line) so the model reacts to the vision/transcript description
+    │            instead of retelling it as if it were the user's own words
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
     │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor

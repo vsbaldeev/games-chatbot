@@ -14,6 +14,16 @@ logger = log.get_logger(__name__)
 RECENT_FILL_LIMIT = 10
 TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
+# Russian labels for the kind of media the triggering message carried. Used to
+# mark the current turn as media (not the user's typed words) so the response
+# model reacts to it instead of retelling the vision/transcript description.
+MEDIA_TRIGGER_LABELS = {
+    "photo": "фото",
+    "voice": "голосовое",
+    "video_note": "видеокружок",
+    "video": "видео",
+}
+
 # Label used for the bot's own past messages in rendered history, so the model
 # recognises them as its own turns instead of treating them as another
 # participant and @mentioning itself.
@@ -164,6 +174,40 @@ def build_mentioned_tags_lines(context) -> list[str]:
     return lines
 
 
+def build_trigger_line(
+    username: str, user_input: str, media_type: str, replied_to: dict | None
+) -> str:
+    """Build the final user-turn line, marking media so the model reacts to it.
+
+    For a plain text message this is just ``@username: text`` (optionally noting
+    the message it replies to). For a photo/voice/video the line frames
+    ``user_input`` as a description the model must *react* to rather than retell,
+    because in the chat everyone already sees the original media.
+
+    Args:
+        username: Sender's username (without ``@``).
+        user_input: Triggering message text — the user's words for ``text``, or a
+            vision/transcript description for media.
+        media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"`` or
+            ``"video"``.
+        replied_to: The message being replied to, or ``None``.
+
+    Returns:
+        The trigger line to append as the final human turn.
+    """
+    speaker = f"@{username}"
+    if replied_to:
+        speaker = f"{speaker} (↳ {row_speaker(replied_to)})"
+    label = MEDIA_TRIGGER_LABELS.get(media_type)
+    if label:
+        return (
+            f"{speaker} прислал {label}. Ниже — его описание для тебя "
+            f"(не дословные слова автора; оригинал в чате все и так видят). "
+            f"Отреагируй и пошути, не пересказывай:\n{user_input}"
+        )
+    return f"{speaker}: {user_input}"
+
+
 def build_response_input(
     username: str,
     user_input: str,
@@ -171,6 +215,7 @@ def build_response_input(
     context,
     response_trigger: str = "explicit",
     has_thread_history: bool = False,
+    media_type: str = "text",
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
 
@@ -183,6 +228,9 @@ def build_response_input(
             to; ``"random"`` for unprompted triggers.
         has_thread_history: ``True`` when per-thread turn history is available;
             suppresses recent chat history to avoid double-context.
+        media_type: Media kind of the triggering message; non-text values mark
+            the trigger line as a media description to react to (see
+            :func:`build_trigger_line`).
 
     Returns:
         Prompt string ready to pass as the final human turn to the response LLM.
@@ -214,11 +262,7 @@ def build_response_input(
     if worker_output:
         parts.append(f"[Собранные данные]:\n{worker_output}\n")
 
-    if replied_to:
-        trigger = f"@{username} (↳ {row_speaker(replied_to)}): {user_input}"
-    else:
-        trigger = f"@{username}: {user_input}"
-    parts.append(trigger)
+    parts.append(build_trigger_line(username, user_input, media_type, replied_to))
     return "\n".join(parts)
 
 
@@ -253,6 +297,7 @@ class ResponseNode:
         past_messages = build_past_messages(history)
 
         user_input = msg["processed_text"] or msg["raw_text"] or ""
+        media_type = msg["media_type"]
         enriched = build_response_input(
             msg["username"],
             user_input,
@@ -260,15 +305,22 @@ class ResponseNode:
             state.get("context"),
             state.get("response_trigger") or "explicit",
             has_thread_history=bool(past_messages),
+            media_type=media_type,
         )
         messages = past_messages + [HumanMessage(content=enriched)]
         response_text = await self.__generate(messages)
 
         if response_text.strip():
+            media_label = MEDIA_TRIGGER_LABELS.get(media_type)
+            speaker = f"@{msg['username']}"
+            human_content = (
+                f"{speaker} [{media_label}]: {user_input}" if media_label
+                else f"{speaker}: {user_input}"
+            )
             await thread_history.append_turn(
                 thread_id=thread_id,
                 chat_id=msg["chat_id"],
-                human_content=f"@{msg['username']}: {user_input}",
+                human_content=human_content,
                 ai_content=strip_markdown(response_text),
             )
 
