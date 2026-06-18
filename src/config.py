@@ -1,6 +1,4 @@
 import os
-from pathlib import Path
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,12 +15,23 @@ def __require(name: str) -> str:
 
 
 TELEGRAM_TOKEN: str = __require("TELEGRAM_TOKEN")
+BOT_ID: int = int(TELEGRAM_TOKEN.split(":")[0])
 GROQ_API_KEY: str = __require("GROQ_API_KEY")
 TWITCH_CLIENT_ID: str = __require("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET: str = __require("TWITCH_CLIENT_SECRET")
 BOT_USERNAME: str = __require("BOT_USERNAME")
 
-SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "data/chat_history.db")
+DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://chatbot:changeme@localhost:5432/chatbot")
+# SQLAlchemy sync URL for LangChain (psycopg2 driver)
+SQLALCHEMY_DB_URL: str = (
+    DATABASE_URL
+    .replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    .replace("postgresql://", "postgresql+psycopg2://")
+    .replace("postgres://", "postgresql+psycopg2://")
+)
 MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 
-MCP_SERVER_PATH: str = str(Path(__file__).parent / "mcp_server.py")
+# Optional — leave empty to disable the respective service
+TMDB_API_KEY: str = os.getenv("TMDB_API_KEY", "")
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+
