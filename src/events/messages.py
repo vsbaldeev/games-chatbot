@@ -1,0 +1,402 @@
+"""Message handlers — text, voice, photo, sticker, video."""
+
+import datetime
+import re
+from src import log
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+import asyncio
+
+from src import achievements, config
+from src.agent import worker_agent, response_agent, ContextLengthError, DailyLimitError, RateLimitError
+from src.pipeline.graph import build_pipeline
+from src.achievements import notify_unlocks
+from src.events.members import get_username
+from src.pipeline.ingester import transcribe_voice
+from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
+from src.store import unified_messages
+from src.store.roast_store import log_roast
+
+PIPELINE = build_pipeline(worker_agent, response_agent)
+
+OFFENSE_RE = re.compile(
+    r"(тупой|тупая|тупит|идиот|дебил|мудак|г[ао]вн[оа]|хуйн[яе]|нахуй|пиздец|"
+    r"отстой|бесполезн|сломан|не работает|глупый|глупая|дерьм[оа]|придур|долбо|"
+    r"ёбан|еба[нл]|заткн|иди нах|иди в|stupid|useless|broken|dumb|trash|"
+    r"garbage|sucks|piece of shit|fuck)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
+
+
+def is_night_message(update: Update) -> bool:
+    if not update.message or not update.message.date:
+        return False
+    return 0 <= update.message.date.astimezone(MOSCOW_TZ).hour < 5
+
+
+def is_reply_to_game_message(update: Update) -> bool:
+    reply = update.message.reply_to_message
+    if not reply:
+        return False
+    text = reply.text or ""
+    return text.startswith(("⚔️", "🎩", "🔫", "💀"))
+
+
+from src.pipeline.response_node import strip_markdown
+from src.pipeline.state import BotState, IncomingMessage
+from src.commands.fun.roast import generate_roast_text
+
+
+async def derive_thread_id(chat_id: int, reply_to_msg_id: int | None) -> str:
+    """Return a thread_id scoped to the reply chain root, or chat_id for flat messages."""
+    if reply_to_msg_id is None:
+        return str(chat_id)
+    chain = await unified_messages.get_chain(chat_id=chat_id, message_id=reply_to_msg_id)
+    if not chain:
+        return str(chat_id)
+    root = chain[0]  # get_chain returns oldest-first
+    return f"{chat_id}_{root['message_id']}"
+
+logger = log.get_logger(__name__)
+
+WHISPER_MODEL = "whisper-large-v3"
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001F9FF\U00002600-\U000027FF\U0001FA00-\U0001FAFF]",
+    re.UNICODE,
+)
+URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+
+# {chat_id: {user_id: count}} — tracks consecutive offensive replies toward the bot
+offense_reply_counts: dict[int, dict[int, int]] = {}
+
+
+def build_pipeline_state(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    media_type: str,
+    file_id: str | None,
+) -> BotState:
+    msg = update.message
+    user = update.effective_user
+    chat = update.effective_chat
+    username = get_username(update)
+
+    reply_to_msg_id: int | None = None
+    if msg.reply_to_message:
+        reply_to_msg_id = msg.reply_to_message.message_id
+
+    incoming: IncomingMessage = {
+        "update": update,
+        "chat_id": chat.id,
+        "user_id": user.id,
+        "username": username,
+        "raw_text": msg.text or msg.caption or None,
+        "processed_text": None,
+        "media_type": media_type,
+        "message_id": msg.message_id,
+        "reply_to_msg_id": reply_to_msg_id,
+        "file_id": file_id,
+        "is_forwarded": msg.forward_origin is not None,
+        "media_group_id": msg.media_group_id,
+    }
+    return {
+        "incoming": incoming,
+        "should_respond": False,
+        "response_trigger": "random",
+        "blocked": False,
+        "context": None,
+        "response": None,
+        "context_types": context,
+    }
+
+
+async def run_pipeline(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    media_type: str,
+    file_id: str | None = None,
+) -> bool:
+    """Run the LangGraph pipeline and return True if the bot sent a response."""
+    msg = update.message
+    chat = update.effective_chat
+    reply_to_msg_id = msg.reply_to_message.message_id if msg.reply_to_message else None
+    thread_id = await derive_thread_id(chat.id, reply_to_msg_id)
+    initial_state = build_pipeline_state(update, context, media_type, file_id)
+    initial_state["thread_id"] = thread_id
+
+    try:
+        final_state = await PIPELINE.ainvoke(initial_state)
+        response = final_state.get("response") or ""
+        if response.strip():
+            clean = strip_markdown(response)
+            notification_msg = final_state.get("search_notification_msg")
+            if notification_msg:
+                await notification_msg.edit_text(clean)
+                sent_id = notification_msg.message_id
+            else:
+                await msg.chat.send_action("typing")
+                sent = await msg.reply_text(clean)
+                sent_id = sent.message_id
+            await unified_messages.insert(
+                chat_id=chat.id,
+                message_id=sent_id,
+                user_id=context.bot.id,
+                username=config.BOT_USERNAME,
+                content=clean,
+                media_type="text",
+                reply_to_msg_id=msg.message_id,
+            )
+            return True
+    except DailyLimitError:
+        logger.warning("Daily token quota exhausted for chat %s", chat.id)
+        await msg.reply_text(
+            "📵 Суточный лимит токенов Groq исчерпан. Бот ушёл спать до завтра. "
+            "Статья на Луркоморье: «Бесплатный тариф — он такой»."
+        )
+    except ContextLengthError:
+        logger.warning("Context length exceeded for chat %s", chat.id)
+        await msg.reply_text(
+            "Цепочка ответов слишком длинная — не влезает в контекст модели. "
+            "Начни новое сообщение вместо ответа на старое."
+        )
+    except RateLimitError:
+        logger.warning("Rate limit reached for chat %s", chat.id)
+        await msg.reply_text(
+            "⏳ Groq не завезли лимитов. Бот временно на перекуре — слишком много запросов. "
+            "Попробуйте через минуту, анончики."
+        )
+    except Exception as error:
+        logger.error("Pipeline error for chat %s: %s", chat.id, error)
+        await msg.reply_text(
+            "Что-то сломалось. Скорее всего, Groq опять тупит. Попробуй позже."
+        )
+    return False
+
+
+async def passive_voice_extract(
+    *, file_id: str, media_type: str, bot,
+    chat_id: int, user_id: int, username: str,
+) -> None:
+    transcript = await transcribe_voice(file_id, media_type, bot)
+    if transcript and len(transcript.strip()) >= MIN_PASSIVE_LENGTH:
+        await extract_and_save(
+            chat_id=chat_id, user_id=user_id, username=username,
+            user_message=transcript,
+        )
+
+
+async def track_text_stats(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    chat_id: int,
+    username: str,
+    text: str,
+) -> None:
+    if is_night_message(update):
+        await achievements.increment_stat(user_id, chat_id, username, "night_messages")
+    if EMOJI_RE.search(text):
+        await achievements.increment_stat(user_id, chat_id, username, "emoji_messages")
+    if URL_RE.search(text):
+        await achievements.increment_stat(user_id, chat_id, username, "link_messages")
+    if update.message.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+    await achievements.update_max_stat(user_id, chat_id, username, "long_message_max", len(text))
+    await notify_unlocks(context, chat_id, user_id, username)
+
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.text:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+
+    bot_id = context.bot.id
+    text = update.message.text
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    await track_text_stats(update, context, user_id, chat_id, username, text)
+
+    if is_reply_to_game_message(update):
+        return
+
+    reply = update.message.reply_to_message
+    is_reply_to_bot = reply and reply.from_user and reply.from_user.id == bot_id
+
+    # Offense auto-roast: if user insults the bot twice in a row.
+    if OFFENSE_RE.search(text) and is_reply_to_bot:
+        counts = offense_reply_counts.setdefault(chat_id, {})
+        counts[user_id] = counts.get(user_id, 0) + 1
+        if counts[user_id] >= 2:
+            counts[user_id] = 0
+            await update.message.chat.send_action("typing")
+            try:
+                header, roast_text, anchor_key = await generate_roast_text(chat_id, user_id, username)
+                full_text = f"{header} #прожарка @{username}\n\n{strip_markdown(roast_text)}"
+                sent = await update.message.reply_text(full_text)
+                await log_roast(message_id=sent.message_id, chat_id=chat_id, target_user_id=user_id, anchor_key=anchor_key)
+                await unified_messages.insert(
+                    chat_id=chat_id,
+                    message_id=sent.message_id,
+                    user_id=context.bot.id,
+                    username=config.BOT_USERNAME,
+                    content=full_text,
+                    media_type="text",
+                    reply_to_msg_id=update.message.message_id,
+                )
+                await achievements.increment_stat(user_id, chat_id, username, "roasted_count")
+                await notify_unlocks(context, chat_id, user_id, username)
+            except Exception as error:
+                logger.error("Offense roast failed for %s in chat %s: %s", username, chat_id, error)
+            return
+
+    await run_pipeline(update, context, media_type="text")
+
+
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    logger.info("Voice/video_note from @%s in chat %s", username, chat_id)
+
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        if msg.voice:
+            await run_pipeline(update, context, media_type="voice", file_id=msg.voice.file_id)
+        elif msg.video_note:
+            await run_pipeline(update, context, media_type="video_note", file_id=msg.video_note.file_id)
+        return
+
+    if msg.voice:
+        media_type = "voice"
+        file_id = msg.voice.file_id
+        await achievements.increment_stat(user_id, chat_id, username, "voice_messages")
+        await achievements.update_max_stat(user_id, chat_id, username, "voice_max_duration", msg.voice.duration)
+    elif msg.video_note:
+        media_type = "video_note"
+        file_id = msg.video_note.file_id
+        await achievements.increment_stat(user_id, chat_id, username, "video_note_messages")
+    else:
+        return
+
+    await notify_unlocks(context, chat_id, user_id, username)
+    responded = await run_pipeline(update, context, media_type=media_type, file_id=file_id)
+    if not responded:
+        asyncio.create_task(passive_voice_extract(
+            file_id=file_id, media_type=media_type, bot=context.bot,
+            chat_id=chat_id, user_id=user_id, username=username,
+        ))
+
+
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.photo:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    photo = msg.photo[-1]
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
+        return
+
+    await achievements.increment_stat(user_id, chat_id, username, "photo_messages")
+    await notify_unlocks(context, chat_id, user_id, username)
+    await run_pipeline(update, context, media_type="photo", file_id=photo.file_id)
+
+
+async def handle_sticker_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.sticker:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="sticker", file_id=msg.sticker.file_id)
+        return
+    await achievements.increment_stat(user_id, chat_id, username, "sticker_messages")
+    await notify_unlocks(context, chat_id, user_id, username)
+    await run_pipeline(update, context, media_type="sticker", file_id=msg.sticker.file_id)
+
+
+async def handle_animation_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.animation:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="animation", file_id=msg.animation.file_id)
+        return
+    await achievements.increment_stat(user_id, chat_id, username, "animation_messages")
+    await notify_unlocks(context, chat_id, user_id, username)
+    await run_pipeline(update, context, media_type="animation", file_id=msg.animation.file_id)
+
+
+async def handle_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.audio:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
+        return
+    await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
+
+
+async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.video:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    username = get_username(update)
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if msg.forward_origin is not None:
+        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
+        await notify_unlocks(context, chat_id, user_id, username)
+        await run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)
+        return
+    await achievements.increment_stat(user_id, chat_id, username, "video_messages")
+    await notify_unlocks(context, chat_id, user_id, username)
+    await run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)

@@ -1,0 +1,233 @@
+LangGraph StateGraph pipeline — processes every incoming Telegram message through typed
+nodes. Each node reads BotState and returns a partial update dict.
+
+---
+
+## Overview
+
+```
+router ──► ingester ──► filter ──► guard ──► context_builder ──► worker ──► response ─┬─► memory_writer ──► END
+                                                                                        └─► language_correction ──► memory_writer ──► END
+   └─► humor ──► memory_writer ──► END   (autonomous joke when the humor gate fires)
+```
+
+Conditional exits exist at every node — see the detailed diagrams below.
+
+---
+
+## Router
+
+Stores every message and decides whether the bot should respond.
+
+```
+incoming message
+    │
+    ├─ always: insert into unified_messages
+    │              text   → content = raw_text
+    │              photo  → content = "[photo]" or "[photo]\n<caption>" (placeholder marks
+    │                       row as still needing vision description; caption preserved)
+    │              voice / video_note / video → content = placeholder, file_id stored
+    │
+    ├─ text
+    │     ├─ @bot_username in text    → should_respond=True,  trigger="explicit"
+    │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
+    │     └─ otherwise               → should_respond=False, trigger="random"
+    │
+    ├─ voice / video_note / video / photo
+    │     ├─ @bot_username in caption → should_respond=True,  trigger="explicit"
+    │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
+    │     └─ otherwise               → random.random() < 0.25
+    │
+    └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
+    │
+    ├─ every text message → humor_gate.observe(chat_id)   [counts toward joke cadence]
+    │
+    ├─ should_respond=False + non-forwarded text (≥ 20 chars)
+    │       → asyncio.create_task(extract_and_save)   [passive memory, background]
+    │         forwarded messages are skipped — channel content must not be
+    │         attributed as facts about the person who forwarded it
+    │
+    ├─ should_respond=False + humor gate fires → humor   [autonomous joke]
+    ├─ should_respond=False → memory_writer (long text) or END
+    └─ should_respond=True  → ingester
+```
+
+### Autonomous humor gate
+
+`humor_gate` (no LLM) decides whether an un-addressed message is worth handing to
+the comedian, keeping the model off the per-message hot path. It fires only when
+all hold: joke-worthy plain text, ≥ `MIN_MESSAGES_SINCE_JOKE` messages since the
+last joke, the `COOLDOWN_SECONDS` window elapsed since the last *sent* joke, and a
+low probability roll — tuned for "rare & sharp" so the bot opens lulls and never
+spams.
+
+When it fires, the `HumorNode` (`humor_node.py`) renders the recent conversation,
+gathers participant material (`src/agent/roast_material.py`), and asks the
+`ComedianAgent` (`src/agent/comedian.py`) for a strict-JSON decision. On `act` it
+sets `state["response"]` (so `run_pipeline` sends it like any reply) and stamps
+the cooldown via `mark_joke_sent`; on an abstain or any error it stays silent and
+calls `mark_considered`. Either way the graph continues to `memory_writer`. The
+comedian defaults to silence and only acts when it has a conversation-spawning
+hook (light by default, roast sparingly).
+
+---
+
+## Media processing
+
+Two places process media into text. The ingester handles the current message;
+the context builder lazily processes media found in reply chains.
+
+```
+ingester (current message, should_respond=True only)
+    ├─ text       → processed_text = raw_text
+    ├─ voice      → Groq Whisper → transcript
+    ├─ video_note → Groq Whisper + frame extraction (see below)
+    ├─ video      → Groq Whisper + frame extraction (see below)
+    └─ photo      → vision LLM description; combined with caption when present
+                    "<description>\n(подпись: <caption>)" form
+                    all non-text results: update unified_messages content
+
+frame extraction (PyAV)
+    duration < 15s   → 1 keyframe at 50%
+    15s – 120s       → 3 keyframes at 25%, 50%, 75%
+    > 120s           → audio only, no frames
+    output: "[Аудио]: <transcript>\n[Видео 1/N]: <desc>\n[Видео 2/N]: <desc>…"
+
+context_builder lazy enrichment (reply chain, on demand)
+    for each photo row in the reply chain that still holds a placeholder:
+    [photo] / [photo]\n<caption> → describe_photo(file_id) → combined with caption
+                                   → update unified_messages (cached for future replies)
+    Detection: content.startswith("[photo]"); after enrichment content begins with the
+    description so re-enrichment is skipped automatically.
+    Rows without file_id (e.g. old records) are left as-is.
+```
+
+---
+
+## Safety (filter → guard)
+
+```
+filter  (runs after ingester)
+    ├─ media message, processed_text empty
+    │       → should_respond=False + asyncio.create_task(react with random emoji)
+    ├─ media message, processed_text non-empty → pass through
+    ├─ text, raw_text empty  → should_respond=False (silent)
+    ├─ text, LLM → MEANINGLESS
+    │       → should_respond=False + asyncio.create_task(react with random emoji)
+    ├─ text, LLM → MEANINGFUL → should_respond=True
+    └─ text, LLM error       → should_respond=True (fails open)
+    │
+    ├─ should_respond=False → END
+    └─ should_respond=True  → guard
+
+guard   llama-prompt-guard-2-86m
+    ├─ text empty / BENIGN   → blocked=False → context_builder
+    ├─ MALICIOUS + trigger="explicit"
+    │       → blocked=True, response = random refusal (pool of 10)
+    │       → asyncio.create_task(record_hack_attempt → user_memories)  → END
+    ├─ MALICIOUS + trigger="random"
+    │       → blocked=True, response=None (silent drop)  → END
+    └─ API error             → blocked=False (fails open) → context_builder
+```
+
+---
+
+## Response pipeline (context_builder → worker → response → memory_writer)
+
+```
+context_builder
+    ├─ get_recent(limit=20), excluding the current message — always loaded
+    ├─ find replied_to message (from recent window or get_by_id fallback)
+    ├─ get_chain(reply_to_msg_id) → reply_chain (max 10 hops, oldest-first)
+    ├─ load user_memories facts for all user_ids visible in recent history
+    ├─ load initiating user's facts if not already in recent participants
+    ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
+    └─ resolve @mentions (in the question + replied_to) to members and load their
+       weekly role + reason from user_tags → mentioned_tags
+    │
+    ▼
+worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web); primary gpt-oss-120b for quality, Llama/Qwen fallbacks for rate-limit scenarios
+    ├─ CONTEXT FIRST: if reply chain already contains the answer, no tools called
+    ├─ prompt: reply chain (or recent history for explicit triggers) + current question
+    │          random triggers receive only the reply chain — no recent history bleed
+    ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search
+    ├─ DailyLimitError → advance_model(), retry with next fallback
+    ├─ ContextLengthError → worker_output="" (response node still runs)
+    └─ any other error   → worker_output="" (response node still runs)
+    │
+    ▼
+response   personality LLM (ReAct executor, no tools)
+    ├─ thread_id = reply-chain root message_id, or chat_id for flat messages
+    ├─ prompt: thread_history (last 10 turns, thread-scoped)
+    │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
+    │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
+    │            + recent history (last 10) + replied_to + worker findings + current message
+    │          when the current message is media (photo/voice/video), its trigger line is
+    │            framed as "@user прислал фото. Ниже — его описание… Отреагируй, не пересказывай"
+    │            (build_trigger_line) so the model reacts to the vision/transcript description
+    │            instead of retelling it as if it were the user's own words
+    │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
+    │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
+    │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
+    │          when someone asks why they (or an @mentioned member) have a role, the
+    │          bot explains it from the stored reason
+    ├─ saves response_messages to state for LanguageCorrectionNode
+    ├─ DailyLimitError / RateLimitError → propagate to top-level handler
+    │
+    ├─ CJK/Hangul/Thai/Arabic/Hebrew detected in response → language_correction
+    └─ otherwise → memory_writer
+    │
+    ▼ (foreign script path)
+language_correction
+    ├─ re-invokes ResponseAgent with original response_messages + correction instruction
+    ├─ DailyLimitError / RateLimitError → propagate
+    └─ any other error → keep original response (silent fallback)
+    │
+    ▼
+memory_writer
+    ├─ is_forwarded=True → skip entirely
+    ├─ passive (no response): skip if user_message < 20 chars
+    └─ asyncio.create_task() — does NOT block the reply
+          → llama-4-scout-17b extracts up to 3 new facts
+          → dedup via cosine similarity (fastembed MiniLM-L12, threshold 0.85)
+            duplicate → refresh updated_at; new → insert with embedding
+          → cap: 30 facts per user per chat, oldest pruned on overflow
+          → facts written in Russian
+          → cross-user extraction for any @mentioned users (if stripped message ≥ 20 chars)
+```
+
+---
+
+## BotState
+
+```python
+IncomingMessage:
+    chat_id, user_id, username
+    raw_text: str | None          # original text or caption
+    processed_text: str | None    # transcript / vision description, set by ingester
+    media_type: "text" | "voice" | "video_note" | "video" | "photo"
+    message_id, reply_to_msg_id, file_id
+    is_forwarded: bool            # True when message.forward_origin is set
+    media_group_id: str | None    # Telegram album group id
+
+AssembledContext:
+    user_facts: dict[str, list[str]]     # username → extracted fact strings
+    recent_history: list[dict]           # flat window (last 20), newest-first
+    replied_to: dict | None              # the specific message being replied to (for annotation)
+    reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
+    asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
+    mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
+
+BotState:
+    incoming: IncomingMessage
+    should_respond: bool
+    response_trigger: "explicit" | "random"
+    blocked: bool
+    context: AssembledContext | None
+    thread_id: str | None              # reply-chain root message_id or chat_id; scopes LLM history
+    worker_output: str | None
+    search_notification_msg: Any | None  # Telegram Message used as search indicator
+    response: str | None
+    response_messages: list | None     # LangChain messages passed from response → language_correction
+    context_types: ContextTypes        # Telegram context for sending replies
+```

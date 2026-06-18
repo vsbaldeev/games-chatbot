@@ -1,0 +1,41 @@
+Telegram Application wiring: handler registration, scheduled job setup, and startup lifecycle.
+
+bot/__init__.py builds the Application, registers all HandlerManagers and JobManagers,
+initialises DB tables, and calls application.run_polling().
+
+## Handler managers
+
+```
+EventHandlerManager
+    TypeHandler(Update, track_member)           — register every active user in chat_members
+    MessageHandler(new_chat_members)            — greet new members
+    ChatMemberHandler(bot_added)                — handle bot being added to a new group
+    MessageReactionHandler(handle_reaction)     — track emoji reactions → user_stats
+
+CommandHandlerManager
+    /start          — welcome message
+    /help           — command list
+    /achievements   — last 3 earned achievements with total count
+    /top            — top-3 leaderboard by achievement count
+    /duel           — emoji duel picker
+    /meme           — random image meme from Reddit
+    CallbackQueryHandler(duel_*)   — duel inline buttons
+
+MessageHandlerManager
+    text        → handle_message        — main pipeline entry point
+    voice       → handle_voice_message
+    video_note  → handle_voice_message  (same handler, different media_type)
+    photo       → handle_photo_message
+    sticker     → handle_sticker_message
+    video       → handle_video_message
+    animation   → handle_animation_message
+```
+
+## Scheduled jobs
+
+```
+RolesJobManager          daily 14:00 UTC   weekly_roles_job        (exits early unless Sunday)
+SilenceSweepJobManager   daily 10:00 UTC   silence_sweep_job       (awards silence achievements)
+ResetModelJobManager     daily 00:05 UTC   reset_model_job         (resets LLM fallback index to 0)
+MessageCleanupJobManager daily 03:00 UTC   cleanup_messages_job    (prunes unified_messages and thread_history, 60-day retention)
+```

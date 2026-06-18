@@ -1,0 +1,31 @@
+"""Shared types for meme sources."""
+
+from typing import Awaitable, Callable, NamedTuple
+
+import httpx
+
+
+class MemeCandidate(NamedTuple):
+    """A single meme candidate produced by a source.
+
+    Attributes:
+        key: Stable deduplication identifier, e.g. ``"9gag:aBcDe"`` or
+            ``"tg:ru2ch/171337"``. Used to remember what was already sent to a
+            chat; deliberately not the CDN image URL, which can rotate.
+        image_url: Direct, publicly fetchable image URL sent via Telegram.
+        caption: Caption or title text for the meme; may be an empty string.
+    """
+
+    key: str
+    image_url: str
+    caption: str
+
+
+SourceFetcher = Callable[[httpx.AsyncClient], Awaitable[list[MemeCandidate]]]
+"""An async callable that fetches candidates from one meme source."""
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+}
+"""Browser-like headers; meme CDNs reject default/library User-Agents."""
