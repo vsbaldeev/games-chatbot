@@ -20,35 +20,9 @@ from src.store import db as database
 
 MAX_FACTS_PER_USER = 30
 
-
-async def init_table() -> None:
-    """Create the user_memories table, indexes, and embedding column if they do not exist."""
-    async with database.acquire() as conn:
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        async with conn.transaction():
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_memories (
-                    id         BIGSERIAL        PRIMARY KEY,
-                    chat_id    BIGINT           NOT NULL,
-                    user_id    BIGINT           NOT NULL,
-                    username   TEXT             NOT NULL,
-                    fact       TEXT             NOT NULL,
-                    updated_at DOUBLE PRECISION NOT NULL
-                )
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_user_memories_lookup
-                ON user_memories (chat_id, user_id)
-            """)
-            await conn.execute("""
-                ALTER TABLE user_memories
-                    ADD COLUMN IF NOT EXISTS embedding vector(384)
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_user_memories_hnsw
-                ON user_memories USING hnsw (embedding vector_cosine_ops)
-                WHERE embedding IS NOT NULL
-            """)
+# Facts untouched for this long are stale residue: real, current facts get
+# their updated_at refreshed by the dedup path whenever they are re-observed.
+FACT_RETENTION_DAYS = 90
 
 
 async def get_facts(*, chat_id: int, user_id: int) -> list[str]:
@@ -125,38 +99,79 @@ async def refresh_updated_at(fact_id: int) -> None:
         )
 
 
-def format_hack_fact(count: int) -> str:
+def pluralize_times(count: int) -> str:
+    """Return the Russian plural form of «раз» for the given count.
+
+    Args:
+        count: Number the word agrees with.
+
+    Returns:
+        ``"раз"`` or ``"раза"`` depending on Russian pluralization rules.
+    """
     last_two = count % 100
     last_one = count % 10
     if 11 <= last_two <= 19:
-        suffix = "раз"
-    elif last_one == 1:
-        suffix = "раз"
-    elif 2 <= last_one <= 4:
-        suffix = "раза"
-    else:
-        suffix = "раз"
-    return f"Пытался взломать бота {count} {suffix}"
+        return "раз"
+    if last_one == 1:
+        return "раз"
+    if 2 <= last_one <= 4:
+        return "раза"
+    return "раз"
 
 
-async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> None:
-    """Increment (or create) the hack-attempt counter fact for this user."""
+def format_hack_fact(count: int) -> str:
+    """Format the hack-attempt counter fact text.
+
+    Args:
+        count: Total number of recorded hack attempts.
+
+    Returns:
+        Fact string, e.g. ``"Пытался взломать бота 3 раза"``.
+    """
+    return f"Пытался взломать бота {count} {pluralize_times(count)}"
+
+
+def format_insult_fact(count: int) -> str:
+    """Format the bot-insult counter fact text.
+
+    Args:
+        count: Total number of recorded insults aimed at the bot.
+
+    Returns:
+        Fact string, e.g. ``"Оскорблял бота 5 раз"``.
+    """
+    return f"Оскорблял бота {count} {pluralize_times(count)}"
+
+
+async def upsert_counter_fact(
+    *, chat_id: int, user_id: int, username: str,
+    like_pattern: str, format_fact,
+) -> None:
+    """Increment (or create) a counter-style fact matched by ``like_pattern``.
+
+    Args:
+        chat_id: Chat the fact belongs to.
+        user_id: User the fact is about.
+        username: Current username of the user.
+        like_pattern: SQL LIKE pattern identifying the counter fact row.
+        format_fact: Callable mapping a count to the fact string.
+    """
     now = time.time()
     async with database.acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch(
                 """
                 SELECT id, fact FROM user_memories
-                WHERE chat_id = $1 AND user_id = $2 AND fact LIKE 'Пытался взломать бота%'
+                WHERE chat_id = $1 AND user_id = $2 AND fact LIKE $3
                 """,
-                chat_id, user_id,
+                chat_id, user_id, like_pattern,
             )
             if rows:
                 match = re.search(r"(\d+)", rows[0]["fact"])
                 count = int(match.group(1)) + 1 if match else 2
                 await conn.execute(
                     "UPDATE user_memories SET fact = $1, updated_at = $2 WHERE id = $3",
-                    format_hack_fact(count), now, rows[0]["id"],
+                    format_fact(count), now, rows[0]["id"],
                 )
             else:
                 await conn.execute(
@@ -164,8 +179,24 @@ async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> N
                     INSERT INTO user_memories (chat_id, user_id, username, fact, updated_at)
                     VALUES ($1, $2, $3, $4, $5)
                     """,
-                    chat_id, user_id, username, format_hack_fact(1), now,
+                    chat_id, user_id, username, format_fact(1), now,
                 )
+
+
+async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> None:
+    """Increment (or create) the hack-attempt counter fact for this user."""
+    await upsert_counter_fact(
+        chat_id=chat_id, user_id=user_id, username=username,
+        like_pattern="Пытался взломать бота%", format_fact=format_hack_fact,
+    )
+
+
+async def upsert_insult_attempt(*, chat_id: int, user_id: int, username: str) -> None:
+    """Increment (or create) the bot-insult counter fact for this user."""
+    await upsert_counter_fact(
+        chat_id=chat_id, user_id=user_id, username=username,
+        like_pattern="Оскорблял бота%", format_fact=format_insult_fact,
+    )
 
 
 
@@ -202,3 +233,26 @@ async def upsert_facts(
                 """,
                 chat_id, user_id, MAX_FACTS_PER_USER,
             )
+
+
+async def cleanup_stale(*, days: int = FACT_RETENTION_DAYS) -> int:
+    """Delete facts whose ``updated_at`` is older than ``days`` days.
+
+    Applies to every fact, counter facts (insults, hack attempts) included —
+    a counter untouched for the whole window is stale by the same standard.
+    Genuinely repeated facts survive because the dedup path refreshes
+    ``updated_at`` on every re-observation.
+
+    Args:
+        days: Retention window in days.
+
+    Returns:
+        Number of deleted rows.
+    """
+    cutoff = time.time() - days * 86400
+    async with database.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM user_memories WHERE updated_at < $1",
+            cutoff,
+        )
+    return int(result.split()[-1])

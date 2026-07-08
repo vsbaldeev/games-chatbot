@@ -6,12 +6,20 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config, log
+from src.agent import needs_russian_correction, normalize_homoglyphs
+from src.config.prompts import SHORTS_TRIGGER_INSTRUCTION
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
 logger = log.get_logger(__name__)
 
 RECENT_FILL_LIMIT = 10
+
+# Random (unprompted) triggers get a thin recent-history slice: enough to
+# catch an obvious topic mismatch, not enough to drown a spontaneous
+# reaction in chat noise.
+RANDOM_TRIGGER_CONTEXT_LIMIT = 3
+
 TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 # Russian labels for the kind of media the triggering message carried. Used to
@@ -68,24 +76,25 @@ def strip_markdown(text: str) -> str:
 
 
 def render_row(row: dict) -> str:
-    """Format a message row as ``speaker [media_type]: content``.
+    """Format a message row as ``speaker [переслал] [media_type]: content``.
 
     The speaker is ``@username`` for other participants and ``Ты (бот)`` for the
-    bot's own past messages (see :func:`row_speaker`).
+    bot's own past messages (see :func:`row_speaker`). Forwarded rows carry a
+    ``[переслал]`` marker so LLM prompts can tell shared channel content from
+    the participant's own words.
 
     Args:
         row: Message dict with ``user_id``, ``username``, ``media_type``, and
-            ``content`` keys.
+            ``content`` keys; ``is_forwarded`` is optional (absent means own words).
 
     Returns:
         Formatted string representation of the message.
     """
     media_type = row["media_type"]
-    content = row["content"]
-    if media_type == "photo":
-        content = unified_messages.display_photo_content(content)
+    content = unified_messages.display_media_content(media_type, row["content"])
+    forwarded_label = " [переслал]" if row.get("is_forwarded") else ""
     media_label = f" [{media_type}]" if media_type != "text" else ""
-    return f"{row_speaker(row)}{media_label}: {content}"
+    return f"{row_speaker(row)}{forwarded_label}{media_label}: {content}"
 
 
 def build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
@@ -175,22 +184,26 @@ def build_mentioned_tags_lines(context) -> list[str]:
 
 
 def build_trigger_line(
-    username: str, user_input: str, media_type: str, replied_to: dict | None
+    username: str, user_input: str, media_type: str, replied_to: dict | None,
+    response_trigger: str = "explicit",
 ) -> str:
     """Build the final user-turn line, marking media so the model reacts to it.
 
-    For a plain text message this is just ``@username: text`` (optionally noting
-    the message it replies to). For a photo/voice/video the line frames
-    ``user_input`` as a description the model must *react* to rather than retell,
-    because in the chat everyone already sees the original media.
+    Plain text renders as ``@username: text``. Photo/voice/video frame
+    ``user_input`` as a description to *react* to, not retell — the chat
+    already sees the original. A YouTube Shorts trigger inverts that: nobody
+    has watched the video, so the model must retell it and summarize the
+    audience reaction from the top comments.
 
     Args:
         username: Sender's username (without ``@``).
-        user_input: Triggering message text — the user's words for ``text``, or a
-            vision/transcript description for media.
-        media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"`` or
-            ``"video"``.
+        user_input: The user's words for ``text``, or a vision/transcript
+            description for media.
+        media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"``
+            or ``"video"``.
         replied_to: The message being replied to, or ``None``.
+        response_trigger: Routing trigger; ``"youtube_short"`` selects the
+            retell-and-comments-summary framing.
 
     Returns:
         The trigger line to append as the final human turn.
@@ -198,12 +211,17 @@ def build_trigger_line(
     speaker = f"@{username}"
     if replied_to:
         speaker = f"{speaker} (↳ {row_speaker(replied_to)})"
+    if response_trigger == "youtube_short":
+        return f"{speaker} {SHORTS_TRIGGER_INSTRUCTION}:\n{user_input}"
     label = MEDIA_TRIGGER_LABELS.get(media_type)
     if label:
         return (
             f"{speaker} прислал {label}. Ниже — его описание для тебя "
             f"(не дословные слова автора; оригинал в чате все и так видят). "
-            f"Отреагируй и пошути, не пересказывай:\n{user_input}"
+            f"Отреагируй и пошути, не пересказывай. "
+            f"Описание может ошибаться в именах и названиях: не строй шутку "
+            f"целиком на конкретном имени или названии, если его не "
+            f"подтверждает подпись или разговор:\n{user_input}"
         )
     return f"{speaker}: {user_input}"
 
@@ -216,6 +234,8 @@ def build_response_input(
     response_trigger: str = "explicit",
     has_thread_history: bool = False,
     media_type: str = "text",
+    is_bot_insult: bool = False,
+    worker_tools_used: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
 
@@ -231,6 +251,11 @@ def build_response_input(
         media_type: Media kind of the triggering message; non-text values mark
             the trigger line as a media description to react to (see
             :func:`build_trigger_line`).
+        is_bot_insult: ``True`` when the filter classified the message as an
+            insult aimed at the bot; adds a hint telling the model to clap back.
+        worker_tools_used: ``True`` when the worker actually ran a tool;
+            selects the tool-verified data frame instead of the unverified
+            context-derived frame.
 
     Returns:
         Prompt string ready to pass as the final human turn to the response LLM.
@@ -243,9 +268,13 @@ def build_response_input(
 
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     # Skip recent history when thread history is present (thread turns already
-    # provide conversational context, group chat would just confuse the model)
-    # or when the trigger is random (bot should focus only on the triggering media).
-    if recent and response_trigger != "random" and not has_thread_history:
+    # provide conversational context, group chat would just confuse the model).
+    # Random and Shorts triggers keep a thin slice — enough to catch topic
+    # mismatch without turning a spontaneous reaction into a reply to the
+    # discussion.
+    if response_trigger in ("random", "youtube_short"):
+        recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
+    if recent and not has_thread_history:
         parts.append("Недавние сообщения чата:")
         for row in reversed(recent):
             parts.append(render_row(row))
@@ -260,10 +289,59 @@ def build_response_input(
             parts.append("")
 
     if worker_output:
-        parts.append(f"[Собранные данные]:\n{worker_output}\n")
+        if worker_tools_used:
+            parts.append(f"[Собранные данные (проверено через инструменты)]:\n{worker_output}\n")
+        else:
+            parts.append(
+                f"[Данные из контекста разговора (во внешних источниках НЕ проверялись)]:\n{worker_output}\n"
+            )
 
-    parts.append(build_trigger_line(username, user_input, media_type, replied_to))
+    if is_bot_insult:
+        parts.append(
+            "[Это сообщение — наезд на тебя. Не отмалчивайся и не обижайся: "
+            "ответь дерзкой, хлёсткой подколкой. Правила: бей по самому наезду, "
+            "а не по больным местам человека; держи примерно тот же уровень грубости, "
+            "что и он — не жёстче; один удар — и всё: без встречных вопросов "
+            "и без приглашений продолжить перепалку.]\n"
+        )
+
+    parts.append(build_trigger_line(username, user_input, media_type, replied_to, response_trigger))
     return "\n".join(parts)
+
+
+async def persist_thread_turn(state: BotState, response_text: str) -> None:
+    """Append the finished exchange to thread history.
+
+    Must be called with the reply the chat actually saw — after language
+    correction when it runs. Flat (non-reply) exchanges are stored under the
+    prospective chain root (the triggering message id), so a follow-up reply
+    to the bot's answer derives a thread pre-seeded with this exchange;
+    reply-chain exchanges keep their derived thread id.
+
+    Args:
+        state: Current pipeline state.
+        response_text: Final reply text as sent to the chat.
+    """
+    if not response_text.strip():
+        return
+    msg = state["incoming"]
+    if state.get("is_flat_thread"):
+        thread_id = thread_history.thread_id_for_root(msg["chat_id"], msg["message_id"])
+    else:
+        thread_id = state.get("thread_id") or str(msg["chat_id"])
+    user_input = msg["processed_text"] or msg["raw_text"] or ""
+    media_label = MEDIA_TRIGGER_LABELS.get(msg["media_type"])
+    speaker = f"@{msg['username']}"
+    human_content = (
+        f"{speaker} [{media_label}]: {user_input}" if media_label
+        else f"{speaker}: {user_input}"
+    )
+    await thread_history.append_turn(
+        thread_id=thread_id,
+        chat_id=msg["chat_id"],
+        human_content=human_content,
+        ai_content=strip_markdown(response_text),
+    )
 
 
 class ResponseNode:
@@ -289,12 +367,17 @@ class ResponseNode:
             carries the assembled LangChain message list for the correction node.
         """
         msg = state["incoming"]
-        thread_id = state.get("thread_id") or str(msg["chat_id"])
 
-        history = await thread_history.get_history(
-            thread_id=thread_id, limit=config.MAX_HISTORY_MESSAGES
-        )
-        past_messages = build_past_messages(history)
+        if state.get("is_flat_thread"):
+            # Flat mentions are answered from recent chat context; the old
+            # flat bucket held only the bot's own stale exchanges.
+            past_messages: list[HumanMessage | AIMessage] = []
+        else:
+            thread_id = state.get("thread_id") or str(msg["chat_id"])
+            history = await thread_history.get_history(
+                thread_id=thread_id, limit=config.MAX_HISTORY_MESSAGES
+            )
+            past_messages = build_past_messages(history)
 
         user_input = msg["processed_text"] or msg["raw_text"] or ""
         media_type = msg["media_type"]
@@ -306,23 +389,16 @@ class ResponseNode:
             state.get("response_trigger") or "explicit",
             has_thread_history=bool(past_messages),
             media_type=media_type,
+            is_bot_insult=bool(state.get("is_bot_insult")),
+            worker_tools_used=bool(state.get("worker_tools_used")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
-        response_text = await self.__generate(messages)
+        response_text = normalize_homoglyphs(await self.__generate(messages))
 
-        if response_text.strip():
-            media_label = MEDIA_TRIGGER_LABELS.get(media_type)
-            speaker = f"@{msg['username']}"
-            human_content = (
-                f"{speaker} [{media_label}]: {user_input}" if media_label
-                else f"{speaker}: {user_input}"
-            )
-            await thread_history.append_turn(
-                thread_id=thread_id,
-                chat_id=msg["chat_id"],
-                human_content=human_content,
-                ai_content=strip_markdown(response_text),
-            )
+        # Foreign-script responses are persisted by LanguageCorrectionNode
+        # after the retry, so history stores the reply the chat actually saw.
+        if not needs_russian_correction(response_text or ""):
+            await persist_thread_turn(state, response_text)
 
         return {"response": response_text, "response_messages": messages}
 

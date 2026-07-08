@@ -11,19 +11,16 @@ from src.achievements.definitions import (
     ALL_ACHIEVEMENTS,
     ACHIEVEMENT_MAP,
     ACHIEVEMENT_RULES,
-    SILENCE_THRESHOLDS,
     TRACKABLE_STATS,
     MAX_TRACKABLE_STATS,
 )
 from src.achievements.store import (
-    init_tables,
     register_member,
     get_chat_members,
     get_all_chat_ids,
     increment_stat,
     update_max_stat,
     get_user_stats,
-    get_announced_keys,
     mark_and_get_new,
     set_message_author,
     get_message_author,
@@ -32,9 +29,6 @@ from src.achievements.store import (
 from src.achievements.checker import (
     compute_earned,
     check_new_achievements,
-    check_silence_achievements,
-    get_user_achievements,
-    get_chat_achievements_summary,
     notify_unlocks,
 )
 
@@ -44,18 +38,15 @@ __all__ = [
     "ALL_ACHIEVEMENTS",
     "ACHIEVEMENT_MAP",
     "ACHIEVEMENT_RULES",
-    "SILENCE_THRESHOLDS",
     "TRACKABLE_STATS",
     "MAX_TRACKABLE_STATS",
     # store
-    "init_tables",
     "register_member",
     "get_chat_members",
     "get_all_chat_ids",
     "increment_stat",
     "update_max_stat",
     "get_user_stats",
-    "get_announced_keys",
     "mark_and_get_new",
     "set_message_author",
     "get_message_author",
@@ -63,8 +54,5 @@ __all__ = [
     # checker
     "compute_earned",
     "check_new_achievements",
-    "check_silence_achievements",
-    "get_user_achievements",
-    "get_chat_achievements_summary",
     "notify_unlocks",
 ]

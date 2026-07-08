@@ -6,7 +6,18 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.agent import DailyLimitError, RateLimitError
-from src.pipeline.language_correction_node import CORRECTION_PROMPT, LanguageCorrectionNode
+from src.config.prompts import LANGUAGE_CORRECTION_PROMPT
+from src.pipeline.language_correction_node import LanguageCorrectionNode
+
+
+@pytest.fixture(autouse=True)
+def stub_persist_thread_turn(monkeypatch):
+    """Stub the post-correction history write — these tests use minimal states."""
+    stub = AsyncMock()
+    monkeypatch.setattr(
+        "src.pipeline.language_correction_node.persist_thread_turn", stub
+    )
+    return stub
 
 
 def make_node(*, response=None, error=None):
@@ -34,7 +45,7 @@ class TestLanguageCorrectionNode:
         called_with = agent.invoke_response.call_args[0][0]
         assert called_with[0] is original_messages[0]
         assert isinstance(called_with[-1], HumanMessage)
-        assert called_with[-1].content == CORRECTION_PROMPT
+        assert called_with[-1].content == LANGUAGE_CORRECTION_PROMPT
 
     async def test_original_messages_not_mutated(self):
         agent = MagicMock()
@@ -51,7 +62,7 @@ class TestLanguageCorrectionNode:
         await node({"response_messages": None, "response": "こんにちは"})
         called_with = agent.invoke_response.call_args[0][0]
         assert len(called_with) == 1
-        assert called_with[0].content == CORRECTION_PROMPT
+        assert called_with[0].content == LANGUAGE_CORRECTION_PROMPT
 
     async def test_daily_limit_error_propagates(self):
         node = make_node(error=DailyLimitError("quota"))

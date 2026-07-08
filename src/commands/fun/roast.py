@@ -1,14 +1,17 @@
 """
 "Прожарка" (roast) feature — roast text generation.
 
-Roaster encapsulates LLM-based roast generation. The offense auto-roast in
-``src.events.messages`` calls ``generate_roast_text`` to clap back when a user
-insults the bot; target selection (``pop_roast_target``) lives at the call site.
+Roaster encapsulates LLM-based roast generation. Insults aimed at the bot are
+now handled by the insult ladder in ``src.pipeline.filter_node`` /
+``src.pipeline.insult_gate``, so this generator currently has no automatic
+trigger — it is kept as a reusable building block (e.g. for future commands,
+jobs or engagement features).
 """
 
 import random
 
 from src.agent import roast_agent
+from src.config.prompts import ROAST_MODE_INSTRUCTIONS, SILENCE_INSTRUCTION
 from src.store.roast_store import get_recent_modes
 from src.store.user_memories import get_facts
 
@@ -16,24 +19,9 @@ ROAST_HEADERS = ("💀", "😤", "🎮", "🔥", "💢")
 
 CONTRADICTION_MODE = "contradiction"
 
-# Each mode is an angle hint appended to the fact list. The model receives every
-# stored fact and chooses the funniest one itself — there is no pre-filtering, so a
-# punchline fact can never be hidden behind a retrieval window. Brevity and the
-# one-punch structure live in ROAST_SYSTEM_PROMPT; each line here only picks the angle.
-ROAST_MODE_INSTRUCTIONS = {
-    "shame": "Зацепись за факт, где он опозорился или сглупил, и врежь по нему.",
-    CONTRADICTION_MODE: (
-        "Найди ОДНО настоящее противоречие между его фактами (например, кайфует от мотоцикла, "
-        "но экономит на такси) и врежь по нему. Не сваливай несколько противоречий в кучу. "
-        "Если явного противоречия нет — высмей самый нелепый факт."
-    ),
-}
-
 ROAST_MODES = tuple(ROAST_MODE_INSTRUCTIONS)
 
 RECENT_MODE_WINDOW = 1
-
-SILENCE_INSTRUCTION = "вообще ничего не пишет в чате. Затроль его за молчание."
 
 
 def pick_roast_mode(recent_modes: list[str]) -> str:

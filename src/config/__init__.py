@@ -1,0 +1,76 @@
+"""Configuration package — credentials, model registry and LLM prompts.
+
+Prompt texts live in :mod:`src.config.prompts`; import them directly via
+``from src.config.prompts import ...`` (they are intentionally not re-exported
+here to keep the flat ``config.*`` namespace small).
+"""
+
+from src.config.credentials import (
+    BOT_ID,
+    BOT_USERNAME,
+    DATABASE_URL,
+    GROQ_API_KEY,
+    MAX_HISTORY_MESSAGES,
+    SQLALCHEMY_DB_URL,
+    TAVILY_API_KEY,
+    TELEGRAM_TOKEN,
+    TMDB_API_KEY,
+    TTS_MODEL_PATH,
+    TWITCH_CLIENT_ID,
+    TWITCH_CLIENT_SECRET,
+)
+from src.config.models import (
+    COMEDIAN_MODEL_FALLBACKS,
+    FILTER_MODEL,
+    GUARD_MODEL,
+    INSULT_CONFIRM_MODEL,
+    MEMORY_MODEL,
+    RESPONSE_MODEL_FALLBACKS,
+    ROAST_MODEL_FALLBACKS,
+    TAG_MODEL,
+    TTS_MAX_CHARS,
+    TTS_MODEL_URL,
+    TTS_SAMPLE_RATE,
+    TTS_SPEAKER,
+    TTS_TIMEOUT_SECONDS,
+    TTS_TORCH_THREADS,
+    VISION_MODEL,
+    WHISPER_LANGUAGE,
+    WHISPER_MODEL,
+    WORKER_MODEL_FALLBACKS,
+)
+
+__all__ = [
+    # credentials
+    "BOT_ID",
+    "BOT_USERNAME",
+    "DATABASE_URL",
+    "GROQ_API_KEY",
+    "MAX_HISTORY_MESSAGES",
+    "SQLALCHEMY_DB_URL",
+    "TAVILY_API_KEY",
+    "TELEGRAM_TOKEN",
+    "TMDB_API_KEY",
+    "TTS_MODEL_PATH",
+    "TWITCH_CLIENT_ID",
+    "TWITCH_CLIENT_SECRET",
+    # models
+    "COMEDIAN_MODEL_FALLBACKS",
+    "FILTER_MODEL",
+    "GUARD_MODEL",
+    "INSULT_CONFIRM_MODEL",
+    "MEMORY_MODEL",
+    "RESPONSE_MODEL_FALLBACKS",
+    "ROAST_MODEL_FALLBACKS",
+    "TAG_MODEL",
+    "TTS_MAX_CHARS",
+    "TTS_MODEL_URL",
+    "TTS_SAMPLE_RATE",
+    "TTS_SPEAKER",
+    "TTS_TIMEOUT_SECONDS",
+    "TTS_TORCH_THREADS",
+    "VISION_MODEL",
+    "WHISPER_LANGUAGE",
+    "WHISPER_MODEL",
+    "WORKER_MODEL_FALLBACKS",
+]

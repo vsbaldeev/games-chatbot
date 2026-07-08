@@ -62,37 +62,26 @@ def display_photo_content(content: str) -> str:
     return content
 
 
-async def init_table() -> None:
-    """Create the unified_messages table and its indexes if they do not exist."""
-    async with database.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS unified_messages (
-                    message_id      BIGINT           NOT NULL,
-                    chat_id         BIGINT           NOT NULL,
-                    user_id         BIGINT           NOT NULL,
-                    username        TEXT             NOT NULL,
-                    content         TEXT             NOT NULL,
-                    media_type      TEXT             NOT NULL DEFAULT 'text',
-                    reply_to_msg_id BIGINT,
-                    file_id         TEXT,
-                    created_at      DOUBLE PRECISION NOT NULL,
-                    PRIMARY KEY (chat_id, message_id)
-                )
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_unified_messages_chat_time
-                ON unified_messages (chat_id, created_at DESC)
-            """)
-            await conn.execute("""
-                ALTER TABLE unified_messages
-                ADD COLUMN IF NOT EXISTS media_group_id TEXT
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_unified_messages_media_group
-                ON unified_messages (chat_id, media_group_id)
-                WHERE media_group_id IS NOT NULL
-            """)
+def display_media_content(media_type: str, content: str) -> str:
+    """Render stored content for prompt display, hiding un-enriched placeholders.
+
+    Prompt renderers already label rows with their media type, so a bare
+    placeholder as content is pure noise (``@user [sticker]: [sticker]``).
+
+    Args:
+        media_type: The row's media type.
+        content: The stored row content.
+
+    Returns:
+        For photos, the caption without the placeholder prefix (or the
+        enriched description as-is); for stickers still in placeholder form,
+        an empty string; any other content unchanged.
+    """
+    if media_type == "photo":
+        return display_photo_content(content)
+    if media_type == "sticker" and content == STICKER_PLACEHOLDER:
+        return ""
+    return content
 
 
 async def insert(
@@ -106,6 +95,7 @@ async def insert(
     reply_to_msg_id: int | None = None,
     file_id: str | None = None,
     media_group_id: str | None = None,
+    is_forwarded: bool = False,
 ) -> None:
     """Insert a new message row. Silently ignores duplicate (chat_id, message_id) pairs."""
     async with database.acquire() as conn:
@@ -113,12 +103,14 @@ async def insert(
             """
             INSERT INTO unified_messages
                 (message_id, chat_id, user_id, username, content,
-                 media_type, reply_to_msg_id, file_id, media_group_id, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 media_type, reply_to_msg_id, file_id, media_group_id,
+                 is_forwarded, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (chat_id, message_id) DO NOTHING
             """,
             message_id, chat_id, user_id, username, content,
-            media_type, reply_to_msg_id, file_id, media_group_id, time.time(),
+            media_type, reply_to_msg_id, file_id, media_group_id,
+            is_forwarded, time.time(),
         )
 
 
@@ -148,7 +140,7 @@ async def get_chain(*, chat_id: int, message_id: int) -> list[dict]:
             row = await conn.fetchrow(
                 """
                 SELECT message_id, user_id, username, content, media_type,
-                       reply_to_msg_id, file_id, media_group_id
+                       reply_to_msg_id, file_id, media_group_id, is_forwarded
                 FROM unified_messages
                 WHERE chat_id = $1 AND message_id = $2
                 """,
@@ -169,7 +161,7 @@ async def get_media_group(*, chat_id: int, media_group_id: str) -> list[dict]:
         rows = await conn.fetch(
             """
             SELECT message_id, user_id, username, content, media_type,
-                   reply_to_msg_id, file_id, media_group_id
+                   reply_to_msg_id, file_id, media_group_id, is_forwarded
             FROM unified_messages
             WHERE chat_id = $1 AND media_group_id = $2
             ORDER BY message_id ASC
@@ -215,7 +207,7 @@ async def get_by_id(*, chat_id: int, message_id: int) -> dict | None:
         row = await conn.fetchrow(
             """
             SELECT message_id, user_id, username, content, media_type,
-                   reply_to_msg_id, file_id, media_group_id
+                   reply_to_msg_id, file_id, media_group_id, is_forwarded
             FROM unified_messages
             WHERE chat_id = $1 AND message_id = $2
             """,
@@ -229,7 +221,8 @@ async def get_recent(*, chat_id: int, limit: int = 20) -> list[dict]:
     async with database.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT message_id, user_id, username, content, media_type, created_at
+            SELECT message_id, user_id, username, content, media_type,
+                   is_forwarded, created_at
             FROM unified_messages
             WHERE chat_id = $1
             ORDER BY created_at DESC

@@ -390,7 +390,7 @@ class TestGetPsStorePriceTrWithLLM:
         non-empty string that references PlayStation, a price, or the store URL.
         """
         prompt = "Question from @user: Сколько стоит Elden Ring в турецком PS Store?"
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         lower = result.lower()
@@ -407,7 +407,7 @@ class TestGetPsStorePriceTrWithLLM:
         common price-aggregator sites — a good stress test for the fallback path.
         """
         prompt = "Question from @user: Сколько стоит God of War Ragnarök в PS Store Турции?"
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         lower = result.lower()
@@ -427,7 +427,7 @@ class TestGetPsStorePriceTrWithLLM:
         price) instead of the 2.090 TL shown on the PS Store TR product page.
         """
         prompt = "Question from @user: Сколько стоит Arc Raiders в турецком PS Store?"
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         normalised = result.replace(".", "").replace(",", "").replace(" ", "")
@@ -440,7 +440,7 @@ class TestGetPsStorePriceTrWithLLM:
         virtual-currency DLC) instead of the 1.399 TL main game price.
         """
         prompt = "Question from @user: Сколько стоит Helldivers 2 в PS Store Турции?"
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         normalised = result.replace(".", "").replace(",", "").replace(" ", "")
@@ -460,7 +460,7 @@ class TestGetPsStorePriceTrWithLLM:
             " Турции и сколько"
             " каждое стоит?"
         )
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         lower = result.lower()
@@ -485,7 +485,7 @@ class TestGetPsStorePriceTrWithLLM:
         The response must reference the game and include a price in TRY.
         """
         prompt = "Question from @user: Сколько стоит Reanimal в турецком PS Store?"
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         lower = result.lower()
@@ -506,7 +506,7 @@ class TestGetPsStorePriceTrWithLLM:
             "Question from @user: "
             "Перечисли все издания Starfield в PS Store Турции с ценами."
         )
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         lower = result.lower()
@@ -537,7 +537,7 @@ class TestGetPsStorePriceTrWithLLM:
             " издания Marvel's Spider-Man 2"
             " в PS Store Турции с ценами."
         )
-        result = await worker_agent.invoke_worker(prompt)
+        result, tools_used = await worker_agent.invoke_worker(prompt)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
         lower = result.lower()

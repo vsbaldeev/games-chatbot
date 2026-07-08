@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent.language import FOREIGN_SCRIPT_RE
+from src.agent.language import needs_russian_correction, normalize_homoglyphs
 from src.agent.middleware import (
     GroqContextGuard,
     ThinkingStripper,
@@ -26,51 +26,12 @@ from src.agent.middleware import (
     strip_thinking,
 )
 from src.agent.roast import trim_to_single_roast
+from src.config.prompts import COMEDIAN_SYSTEM_PROMPT
 
 logger = log.get_logger(__name__)
 
 JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 VALID_REGISTERS = ("light", "roast")
-
-# gpt-oss-120b is primary for the same reasons as the roast agent: strong world
-# knowledge for memes/wordplay/era references, and a SEPARATE Groq token budget
-# from the main response model, so autonomous humor never starves normal replies.
-COMEDIAN_MODEL_FALLBACKS = [
-    "openai/gpt-oss-120b",
-    "llama-3.3-70b-versatile",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-]
-
-COMEDIAN_SYSTEM_PROMPT = (
-    "Ты — свой в чате друзей. Вы выросли в 90-х, 2000-х и 2010-х: гоняли в Dendy и "
-    "CS 1.6, сидели в аське. У тебя острый юмор. Ты молча читаешь чат и сам решаешь — "
-    "вкинуть шутку или промолчать.\n\n"
-    "ГЛАВНОЕ: шутка должна ЗАВЕСТИ движ, а не убить его. Это крючок-кликбейт, на который "
-    "хочется ответить: дерзкое мнение, «кто из вас…», честный топ/рейтинг, подколка-вопрос, "
-    "шуточный вызов. НЕ закрытый однострочник, после которого сказать нечего.\n\n"
-    "КОГДА МОЛЧАТЬ (act:false): по умолчанию ты молчишь. Это нормальный и самый частый "
-    "ответ. Молчи, если разговор — бытовуха, приветствия, погода, договорённости или сухой "
-    "обмен репликами; если нет реально смешного и цепляющего крючка; если сомневаешься. "
-    "Не выжимай шутку из пустоты и не лепи ностальгию к месту и не к месту. Вкидывай "
-    "шутку, только когда уверен, что она зайдёт и заведёт людей.\n\n"
-    "РЕГИСТР:\n"
-    "- \"light\" (по умолчанию): лёгкая шутка, над которой ржут все и никто не обижается. "
-    "Подкол по ситуации, а не по человеку. Так — почти всегда.\n"
-    "- \"roast\": жёстче и адреснее. Только когда кто-то реально напросился — хвастается, "
-    "лажанул, сам подставился. Редко.\n\n"
-    "ЧЕМ ШУТИТЬ:\n"
-    "- игра слов (каламбур на нике, названии игры, на сказанном);\n"
-    "- ностальгия 90-х/2000-х/2010-х: Dendy/Sega/Тамагочи/дозвон модемом; аська/CS 1.6/"
-    "Nokia 3310/«Бумер»; «это фиаско, братан»/«ALARM»/ждун/рофл;\n"
-    "- меткие интернет- и рунет-мемы (фразой или форматом), строго в точку, не случайно;\n"
-    "- то, что реально известно об участниках (факты, цитаты, статы, роль недели).\n\n"
-    "ЗАПРЕЩЕНО: внешность, болезни, семья. Никаких выдуманных сравнений («как бабка у "
-    "подъезда»). Только русский. Одна-две короткие фразы.\n\n"
-    "ФОРМАТ: верни СТРОГО один JSON-объект и больше ничего, без markdown и пояснений:\n"
-    '{"act": true/false, "register": "light"|"roast", "text": "сама шутка"}\n'
-    'Если шутить не стоит: {"act": false, "register": "light", "text": ""}'
-)
-
 
 @dataclass
 class ComedianDecision:
@@ -80,16 +41,45 @@ class ComedianDecision:
         act: True when a joke should be sent.
         register: ``"light"`` or ``"roast"``.
         text: The joke text (empty when abstaining).
+        reply_to_message_id: Id of the message the joke targets (cited from the
+            ``[#id]`` markers in the conversation), or None when the joke is
+            about the conversation as a whole. Not yet validated against the
+            actual message set — the humor node does that.
     """
 
     act: bool
     register: str
     text: str
+    reply_to_message_id: int | None = None
 
     @classmethod
     def abstain(cls) -> "ComedianDecision":
         """Return a do-nothing decision."""
         return cls(act=False, register="light", text="")
+
+
+def parse_reply_target(value: object) -> int | None:
+    """Coerce the model-provided ``reply_to`` value into a message id.
+
+    Accepts an int or a numeric string (with an optional ``#`` prefix, since
+    models sometimes echo the marker format). Anything else — null, booleans,
+    prose — becomes None, which the caller treats as "no anchor".
+
+    Args:
+        value: Raw ``reply_to`` value from the decision JSON.
+
+    Returns:
+        The message id, or None when the value is unusable.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        digits = value.strip().lstrip("#")
+        if digits.isdigit():
+            return int(digits)
+    return None
 
 
 def parse_decision(raw: str) -> ComedianDecision:
@@ -112,13 +102,14 @@ def parse_decision(raw: str) -> ComedianDecision:
         return ComedianDecision.abstain()
     if not isinstance(data, dict) or data.get("act") is not True:
         return ComedianDecision.abstain()
-    text = trim_to_single_roast(str(data.get("text") or ""))
-    if not text or FOREIGN_SCRIPT_RE.search(text):
+    text = normalize_homoglyphs(trim_to_single_roast(str(data.get("text") or "")))
+    if not text or needs_russian_correction(text):
         return ComedianDecision.abstain()
     register = data.get("register")
     if register not in VALID_REGISTERS:
         register = "light"
-    return ComedianDecision(act=True, register=register, text=text)
+    reply_to = parse_reply_target(data.get("reply_to"))
+    return ComedianDecision(act=True, register=register, text=text, reply_to_message_id=reply_to)
 
 
 def build_comedian_prompt(conversation: str, material: str) -> str:
@@ -159,7 +150,7 @@ class ComedianAgent:
     async def init(self) -> None:
         """Build the comedian executor from configuration."""
         self.__executor = ComedianAgent.__build_executor()
-        logger.info("ComedianAgent initialized with model: %s", COMEDIAN_MODEL_FALLBACKS[0])
+        logger.info("ComedianAgent initialized with model: %s", config.COMEDIAN_MODEL_FALLBACKS[0])
 
     async def decide(self, conversation: str, material: str) -> ComedianDecision:
         """Decide whether to joke about the current moment.
@@ -197,10 +188,10 @@ class ComedianAgent:
         """
         fallback_llms = [
             ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.8, top_p=0.95, max_tokens=1024, max_retries=0)
-            for model in COMEDIAN_MODEL_FALLBACKS[1:]
+            for model in config.COMEDIAN_MODEL_FALLBACKS[1:]
         ]
         primary_llm = ChatGroq(
-            model=COMEDIAN_MODEL_FALLBACKS[0],
+            model=config.COMEDIAN_MODEL_FALLBACKS[0],
             api_key=config.GROQ_API_KEY,
             temperature=0.8,
             top_p=0.95,

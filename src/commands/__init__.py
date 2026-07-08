@@ -7,7 +7,6 @@ from src.commands.games import (
     handle_duel_callback,
     DUEL_CALLBACK_PATTERN,
 )
-from src.commands.statistics import cmd_achievements, cmd_top
 
 __all__ = [
     "cmd_start",
@@ -16,6 +15,4 @@ __all__ = [
     "cmd_duel",
     "handle_duel_callback",
     "DUEL_CALLBACK_PATTERN",
-    "cmd_achievements",
-    "cmd_top",
 ]

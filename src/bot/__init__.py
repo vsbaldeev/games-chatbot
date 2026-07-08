@@ -6,31 +6,32 @@ Run with: python -m src.bot
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder
 
-from src import achievements, log
+from src import log
 from src.agent import worker_agent, response_agent, roast_agent, comedian_agent
-from src.bot.jobs import RolesJobManager, SilenceSweepJobManager, ResetModelJobManager, MessageCleanupJobManager, MemeJobManager
-from src.memes import store as meme_store
-from src.store import db as database, unified_messages as msg_store, user_memories as memory_store, thread_history as thread_history_store
-from src.store import roast_store, user_tags as user_tags_store
+from src.bot.jobs import (
+    MemeJobManager,
+    MessageCleanupJobManager,
+    ResetModelJobManager,
+    RolesJobManager,
+    YtdlpUpdateJobManager,
+)
+from src.store import db as database
+from src.tts import speech_service
 
 log.setup()
 logger = log.get_logger(__name__)
 
 
 async def __on_startup(application: Application) -> None:
+    # The database schema is owned by Alembic migrations (`alembic upgrade head`),
+    # applied before the bot process starts — the bot no longer creates tables.
     await database.init()
     await worker_agent.init()
     await response_agent.init()
     await roast_agent.init()
     await comedian_agent.init()
-    await achievements.init_tables()
-    await msg_store.init_table()
-    await memory_store.init_table()
-    await meme_store.init_table()
-    await thread_history_store.init_table()
-    await roast_store.init_tables()
-    await user_tags_store.init_table()
-    logger.info("Bot started, all tables and jobs initialized")
+    await speech_service.init()
+    logger.info("Bot started, all agents and jobs initialized")
 
 
 def main() -> None:
@@ -46,7 +47,7 @@ def main() -> None:
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
         manager.add_handlers(app)
 
-    for job_manager in [RolesJobManager(), SilenceSweepJobManager(), ResetModelJobManager(), MessageCleanupJobManager(), MemeJobManager()]:
+    for job_manager in [RolesJobManager(), ResetModelJobManager(), MessageCleanupJobManager(), MemeJobManager(), YtdlpUpdateJobManager()]:
         job_manager.add_jobs(app)
 
     logger.info("Starting polling...")

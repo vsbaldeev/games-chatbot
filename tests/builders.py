@@ -9,9 +9,11 @@ def make_telegram_message(
     *,
     reply_to_user_id: int | None = None,
     caption: str | None = None,
+    text: str | None = None,
 ) -> MagicMock:
     telegram_message = MagicMock()
     telegram_message.caption = caption
+    telegram_message.text = text
     if reply_to_user_id is not None:
         reply = MagicMock()
         reply.from_user = MagicMock()
@@ -38,7 +40,8 @@ def make_incoming(
     telegram_message: MagicMock | None = None,
 ) -> dict:
     if telegram_message is None:
-        telegram_message = make_telegram_message()
+        message_text = raw_text if media_type == "text" else None
+        telegram_message = make_telegram_message(text=message_text)
     update = MagicMock()
     update.message = telegram_message
     return {

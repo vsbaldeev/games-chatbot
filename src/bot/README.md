@@ -1,7 +1,10 @@
 Telegram Application wiring: handler registration, scheduled job setup, and startup lifecycle.
 
 bot/__init__.py builds the Application, registers all HandlerManagers and JobManagers,
-initialises DB tables, and calls application.run_polling().
+opens the DB connection pool and initialises the LLM agents, and calls
+application.run_polling(). The database schema is provisioned separately by Alembic
+migrations (`alembic upgrade head`) before the process starts — the bot no longer
+creates tables.
 
 ## Handler managers
 
@@ -15,8 +18,6 @@ EventHandlerManager
 CommandHandlerManager
     /start          — welcome message
     /help           — command list
-    /achievements   — last 3 earned achievements with total count
-    /top            — top-3 leaderboard by achievement count
     /duel           — emoji duel picker
     /meme           — random image meme from Reddit
     CallbackQueryHandler(duel_*)   — duel inline buttons
@@ -35,7 +36,8 @@ MessageHandlerManager
 
 ```
 RolesJobManager          daily 14:00 UTC   weekly_roles_job        (exits early unless Sunday)
-SilenceSweepJobManager   daily 10:00 UTC   silence_sweep_job       (awards silence achievements)
+MemeJobManager           daily 15:00 UTC   daily_meme_job          (sends one fresh meme per chat)
 ResetModelJobManager     daily 00:05 UTC   reset_model_job         (resets LLM fallback index to 0)
 MessageCleanupJobManager daily 03:00 UTC   cleanup_messages_job    (prunes unified_messages and thread_history, 60-day retention)
+YtdlpUpdateJobManager    daily 03:30 UTC   ytdlp_update_job        (installs newer yt-dlp into /app/runtime-deps and restarts the bot gracefully)
 ```

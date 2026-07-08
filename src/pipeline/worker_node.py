@@ -75,13 +75,21 @@ class WorkerNode:
             state: Current pipeline state containing the incoming message and context.
 
         Returns:
-            Dict with keys ``worker_output`` (str) and ``search_notification_msg``
-            (the sent Telegram Message or None).
+            Dict with keys ``worker_output`` (str), ``search_notification_msg``
+            (the sent Telegram Message or None) and ``worker_tools_used``
+            (True when at least one tool actually ran; False on all error
+            and skip paths).
 
         Raises:
             DailyLimitError: Propagated from ``agent.invoke_worker`` on daily quota exhaustion.
             RateLimitError: Propagated from ``agent.invoke_worker`` on transient rate limits.
         """
+        if state.get("is_bot_insult") or state.get("response_trigger") == "youtube_short":
+            # A comeback needs personality, not IGDB lookups: skipping the
+            # worker avoids a «🔍 Ищу…» notification before the burn and junk
+            # search output steering it. Same for Shorts summaries — the
+            # source material is already in processed_text.
+            return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")
         tg_message = msg["update"].message
@@ -89,19 +97,23 @@ class WorkerNode:
         callbacks = [callback] if callback is not None else None
 
         try:
-            output = await self.__agent.invoke_worker(worker_input, callbacks=callbacks)
+            output, tools_used = await self.__agent.invoke_worker(worker_input, callbacks=callbacks)
             notification_msg = callback.sent_message if callback is not None else None
-            return {"worker_output": output, "search_notification_msg": notification_msg}
+            return {
+                "worker_output": output,
+                "search_notification_msg": notification_msg,
+                "worker_tools_used": tools_used,
+            }
         except ContextLengthError as err:
             logger.warning("Worker context too long: %s", err)
-            return {"worker_output": "", "search_notification_msg": None}
+            return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
         except (DailyLimitError, RateLimitError):
             raise
         except Exception as err:
             logger.error("Worker failed: %s", err, exc_info=True)
-            return {"worker_output": "", "search_notification_msg": None}
+            return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
 
-    def __build_worker_input(self, msg: dict, context, response_trigger: Literal["explicit", "random"] = "explicit") -> str:
+    def __build_worker_input(self, msg: dict, context, response_trigger: Literal["explicit", "insult_check", "random"] = "explicit") -> str:
         """Assemble the prompt string sent to the worker agent.
 
         Includes the current UTC datetime, reply chain or recent history as
@@ -113,7 +125,8 @@ class WorkerNode:
             context: Context dict with ``reply_chain`` and ``recent_history`` lists,
                 or None if context is unavailable.
             response_trigger: ``"explicit"`` when the bot was @mentioned or replied
-                to; ``"random"`` for unprompted media responses.
+                to; ``"insult_check"`` for confirmed bot-word insults (treated
+                like explicit); ``"random"`` for unprompted media responses.
 
         Returns:
             Assembled prompt string ready to send to the worker executor.
@@ -152,7 +165,5 @@ class WorkerNode:
         Returns:
             Formatted string representation of the message.
         """
-        content = row["content"]
-        if row["media_type"] == "photo":
-            content = unified_messages.display_photo_content(content)
+        content = unified_messages.display_media_content(row["media_type"], row["content"])
         return f"{row_speaker(row)}: {content}"

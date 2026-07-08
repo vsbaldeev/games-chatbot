@@ -8,7 +8,11 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent.language import FOREIGN_SCRIPT_RE, LANGUAGE_CORRECTION_PROMPT
+from src.agent.language import (
+    LANGUAGE_CORRECTION_PROMPT,
+    needs_russian_correction,
+    normalize_homoglyphs,
+)
 from src.agent.middleware import (
     GroqContextGuard,
     ThinkingStripper,
@@ -16,6 +20,7 @@ from src.agent.middleware import (
     should_retry,
     strip_thinking,
 )
+from src.config.prompts import ROAST_SYSTEM_PROMPT
 
 logger = log.get_logger(__name__)
 
@@ -51,40 +56,6 @@ def trim_to_single_roast(text: str) -> str:
     return " ".join(sentences[:MAX_ROAST_SENTENCES]).strip()
 
 
-# gpt-oss-120b is primary: better world-knowledge and fact comprehension for roasts,
-# and it draws on a separate Groq token budget from llama-3.3 (which the main agent
-# uses), so heavy roasting does not starve the bot's regular replies. llama models
-# remain as fallbacks if gpt-oss is rate-limited or down.
-ROAST_MODEL_FALLBACKS = [
-    "openai/gpt-oss-120b",
-    "llama-3.3-70b-versatile",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-]
-
-ROAST_SYSTEM_PROMPT = (
-    "Ты жёстко и пошло жаришь своего в кругу друзей. "
-    "Тебе дают список фактов о человеке. Возьми один яркий факт или противоречие "
-    "и врежь коротко и прямо. "
-    "Назови вещь своими словами и добей грубым выводом, подколом или дерзкой подъёбкой. "
-    "Одна-две короткие фразы, не больше. "
-    "НЕ выдумывай образов, НЕ строй метафор и сравнений («как бабка у подъезда», "
-    "«как пьяный дядя») — это убивает шутку. Чем проще, прямее и злее, тем лучше. "
-    "Грубо, с матом — это нормально. Высмеивай только реальные факты. "
-    "Обращайся на «ты» или коротко обзови. "
-    "Не унижай по внешности, болезням или семье. Только русский. Шутку не объясняй.\n\n"
-    "Примеры хороших прожарок — короткие и злые, пойми приём, не копируй дословно.\n"
-    "1) Факты: сентиментален к детям; хочет жить на Диком Западе с револьвером.\n"
-    "   Прожарка: Ты сентиментален к детям, но хочешь жить на Диком Западе. Хуйню не неси, братан.\n"
-    "2) Факты: играет на чужом аккаунте, который взял у другого пользователя.\n"
-    "   Прожарка: Хватит брать чужие аккаунты! Позорься на своём!\n"
-    "3) Факты: готов ездить на такси за 130 рублей.\n"
-    "   Прожарка: Готов ездить на такси за 130 рублей, а зарабатывать больше — видимо нет.\n"
-    "4) Факты: самоуверен в своём уме; начал учить JS, но забросил; испытывает трудности с JS.\n"
-    "   Прожарка: Самоуверенный лох-программист. Начал изучать JS, но как обычно забросил. "
-    "Как и всё в своей жизни."
-)
-
-
 class RoastAgent:
     """LLM agent that generates roast text from assembled user facts.
 
@@ -104,7 +75,7 @@ class RoastAgent:
     async def init(self) -> None:
         """Build the roast executor from configuration."""
         self.__roast_executor = RoastAgent.__build_executor()
-        logger.info("RoastAgent initialized with model: %s", ROAST_MODEL_FALLBACKS[0])
+        logger.info("RoastAgent initialized with model: %s", config.ROAST_MODEL_FALLBACKS[0])
 
     async def invoke_roast(self, user_prompt: str) -> str:
         """Generate a roast from the assembled user prompt.
@@ -151,10 +122,11 @@ class RoastAgent:
             reply: The reply text to inspect for foreign script.
 
         Returns:
-            Corrected reply if foreign script was detected, otherwise the original.
+            Normalized reply, re-prompted in Russian when foreign script remains.
         """
+        reply = normalize_homoglyphs(reply)
         visible = strip_thinking(reply)
-        if not visible or not FOREIGN_SCRIPT_RE.search(visible):
+        if not visible or not needs_russian_correction(visible):
             return reply
         logger.warning("Foreign script detected in roast, retrying in Russian")
         correction_messages = [
@@ -162,7 +134,8 @@ class RoastAgent:
             AIMessage(content=reply),
             HumanMessage(content=LANGUAGE_CORRECTION_PROMPT),
         ]
-        return await self.__call_executor(correction_messages) or reply
+        corrected = await self.__call_executor(correction_messages)
+        return normalize_homoglyphs(corrected) if corrected else reply
 
     @staticmethod
     def __build_executor():
@@ -177,10 +150,10 @@ class RoastAgent:
         # final roast to two sentences regardless, so the headroom costs nothing visible.
         fallback_llms = [
             ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=1024, max_retries=0)
-            for model in ROAST_MODEL_FALLBACKS[1:]
+            for model in config.ROAST_MODEL_FALLBACKS[1:]
         ]
         primary_llm = ChatGroq(
-            model=ROAST_MODEL_FALLBACKS[0],
+            model=config.ROAST_MODEL_FALLBACKS[0],
             api_key=config.GROQ_API_KEY,
             temperature=0.5,
             top_p=0.9,

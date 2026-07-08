@@ -11,37 +11,6 @@ import time
 from src.store import db as database
 
 
-async def init_tables() -> None:
-    async with database.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS roast_log (
-                    message_id     BIGINT           NOT NULL,
-                    chat_id        BIGINT           NOT NULL,
-                    target_user_id BIGINT           NOT NULL,
-                    anchor_key     TEXT             NOT NULL,
-                    created_at     DOUBLE PRECISION NOT NULL,
-                    PRIMARY KEY (message_id, chat_id)
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS roast_reactions (
-                    message_id  BIGINT  NOT NULL,
-                    chat_id     BIGINT  NOT NULL,
-                    emoji       TEXT    NOT NULL,
-                    count       INT     NOT NULL DEFAULT 0,
-                    PRIMARY KEY (message_id, chat_id, emoji)
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS roast_queue (
-                    chat_id BIGINT NOT NULL,
-                    user_id BIGINT NOT NULL,
-                    PRIMARY KEY (chat_id, user_id)
-                )
-            """)
-
-
 async def log_roast(
     *,
     message_id: int,

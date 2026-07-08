@@ -8,90 +8,6 @@ from src.achievements.definitions import TRACKABLE_STATS, MAX_TRACKABLE_STATS
 from src.store import db as database
 
 
-async def create_core_tables(conn) -> None:
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS chat_members (
-            chat_id  BIGINT   NOT NULL,
-            user_id  BIGINT   NOT NULL,
-            username TEXT,
-            is_bot   BOOLEAN  NOT NULL DEFAULT FALSE,
-            PRIMARY KEY (chat_id, user_id)
-        )
-    """)
-    await conn.execute("""
-        ALTER TABLE chat_members
-        ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT FALSE
-    """)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_stats (
-            user_id              BIGINT  NOT NULL,
-            chat_id              BIGINT  NOT NULL,
-            username             TEXT,
-            laugh_reactions      INTEGER NOT NULL DEFAULT 0,
-            heart_reactions      INTEGER NOT NULL DEFAULT 0,
-            fire_reactions       INTEGER NOT NULL DEFAULT 0,
-            thumbsup_reactions   INTEGER NOT NULL DEFAULT 0,
-            emoji_messages       INTEGER NOT NULL DEFAULT 0,
-            sticker_messages     INTEGER NOT NULL DEFAULT 0,
-            forwarded_messages   INTEGER NOT NULL DEFAULT 0,
-            link_messages        INTEGER NOT NULL DEFAULT 0,
-            voice_messages       INTEGER NOT NULL DEFAULT 0,
-            video_messages       INTEGER NOT NULL DEFAULT 0,
-            video_note_messages  INTEGER NOT NULL DEFAULT 0,
-            photo_messages       INTEGER NOT NULL DEFAULT 0,
-            night_messages       INTEGER NOT NULL DEFAULT 0,
-            animation_messages   INTEGER NOT NULL DEFAULT 0,
-            roasted_count        INTEGER NOT NULL DEFAULT 0,
-            roulette_win_count   INTEGER NOT NULL DEFAULT 0,
-            duel_wins            INTEGER NOT NULL DEFAULT 0,
-            long_messages        INTEGER NOT NULL DEFAULT 0,
-            voice_max_duration   INTEGER NOT NULL DEFAULT 0,
-            long_message_max     INTEGER NOT NULL DEFAULT 0,
-            last_seen            BIGINT  NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, chat_id)
-        )
-    """)
-
-
-async def create_event_tables(conn) -> None:
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS announced_achievements (
-            user_id BIGINT NOT NULL,
-            chat_id BIGINT NOT NULL,
-            key     TEXT   NOT NULL,
-            PRIMARY KEY (user_id, chat_id, key)
-        )
-    """)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS message_authors (
-            chat_id    BIGINT NOT NULL,
-            message_id BIGINT NOT NULL,
-            user_id    BIGINT NOT NULL,
-            username   TEXT   NOT NULL,
-            created_at BIGINT NOT NULL,
-            PRIMARY KEY (chat_id, message_id)
-        )
-    """)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS message_reaction_counts (
-            chat_id     BIGINT  NOT NULL,
-            message_id  BIGINT  NOT NULL,
-            emoji       TEXT    NOT NULL,
-            total_count INTEGER NOT NULL,
-            updated_at  BIGINT  NOT NULL,
-            PRIMARY KEY (chat_id, message_id, emoji)
-        )
-    """)
-
-
-async def init_tables() -> None:
-    """Create all achievement-related tables."""
-    async with database.acquire() as conn:
-        async with conn.transaction():
-            await create_core_tables(conn)
-            await create_event_tables(conn)
-
-
 async def register_member(chat_id: int, user_id: int, username: str, is_bot: bool = False) -> None:
     """Upsert a member into chat_members, updating is_bot on conflict."""
     async with database.acquire() as conn:
@@ -192,16 +108,6 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
         "duel_wins":           row["duel_wins"],
         "animation_messages":  row["animation_messages"],
     }
-
-
-async def get_announced_keys(user_id: int, chat_id: int) -> set[str]:
-    """Return all achievement keys already announced to this user in this chat."""
-    async with database.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT key FROM announced_achievements WHERE user_id = $1 AND chat_id = $2",
-            user_id, chat_id,
-        )
-    return {row["key"] for row in rows}
 
 
 async def mark_and_get_new(user_id: int, chat_id: int, keys: list[str]) -> list[str]:

@@ -130,12 +130,13 @@ class TestThinkingBlockStripping:
 
 
 class TestRandomTriggerContext:
-    """Regression for mixed-topic responses: when the bot randomly reacts to a
-    photo it should not drag in unrelated recent-history threads.
+    """Random triggers get a thin recent-history slice (RANDOM_TRIGGER_CONTEXT_LIMIT).
 
-    Root cause (46013): random photo trigger still injected the full recent chat
+    Root cause (46013): random photo trigger injected the full recent chat
     history into the response prompt, so the LLM addressed multiple open threads
-    and broke the 'never suggest commands unprompted' rule.
+    and broke the 'never suggest commands unprompted' rule. The revised contract
+    keeps the newest few messages so the model can catch obvious topic mismatch
+    without turning a spontaneous reaction into a reply to the discussion.
     """
 
     RECENT_MSG = {
@@ -154,18 +155,37 @@ class TestRandomTriggerContext:
             "reply_chain": [],
         }
 
-    def test_random_trigger_excludes_recent_history(self):
-        """Unrelated recent chat must not appear in the prompt when the bot
-        fired by random chance — prevents mixing unrelated conversation threads."""
+    def test_random_trigger_gets_reduced_history_slice(self):
+        """Random triggers see only the newest RANDOM_TRIGGER_CONTEXT_LIMIT
+        messages — older chat noise must stay out of the prompt."""
+        recent_newest_first = [
+            {
+                "message_id": index,
+                "username": "bob",
+                "content": f"сообщение номер {index}",
+                "media_type": "text",
+                "user_id": 2,
+            }
+            for index in range(1, 5)
+        ]
+        context = {
+            "user_facts": {},
+            "recent_history": recent_newest_first,
+            "replied_to": None,
+            "reply_chain": [],
+        }
+
         result = build_response_input(
             "tmaxims",
             "Изображение: руководство по стрижкам",
             "",
-            self.make_context(),
+            context,
             response_trigger="random",
         )
 
-        assert "я в мобильном" not in result
+        assert "сообщение номер 1" in result
+        assert "сообщение номер 3" in result
+        assert "сообщение номер 4" not in result
 
     def test_explicit_trigger_includes_recent_history(self):
         """When the user explicitly @mentioned the bot or replied to it, recent
@@ -199,7 +219,6 @@ class TestRandomTriggerContext:
         )
 
         assert "любит PS5" in result
-        assert "я в мобильном" not in result
 
     def test_random_trigger_includes_worker_output(self):
         """Worker facts must always reach the response LLM even for random triggers."""

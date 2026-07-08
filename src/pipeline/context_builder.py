@@ -5,17 +5,23 @@ Assembles everything the Agent node needs for an enriched prompt:
   1. Recent history  — last RECENT_HISTORY_LIMIT messages from unified_messages,
                        excluding the current incoming message to avoid duplication.
   2. Replied-to      — the specific message being replied to (for annotation),
-                       looked up in the recent window or fetched directly if older.
+                       looked up in the recent window or fetched directly if older;
+                       when the store has no row (other bots' posts, command
+                       outputs, expired messages) the fallback synthesized from
+                       the Telegram update is used instead.
   3. User facts      — per-user memories for every participant visible in recent history
                        plus the initiating user.
-  4. Reply chain     — full reply chain with photo rows lazily enriched via vision LLM
-                       so WorkerNode and ResponseNode see real descriptions, not placeholders.
+  4. Reply chain     — full reply chain with photo and sticker rows lazily
+                       enriched via the shared ingester.enrich_media_row helper
+                       (also used by the filter node before classification) so
+                       WorkerNode and ResponseNode see real descriptions, not
+                       placeholders.
 """
 
 import re
 
 from src import achievements, log
-from src.pipeline.ingester import describe_photo
+from src.pipeline.ingester import enrich_media_row
 from src.pipeline.state import AssembledContext, BotState
 from src.store import unified_messages, user_memories, user_tags
 
@@ -34,9 +40,14 @@ class ContextBuilder:
         chat_id = msg["chat_id"]
 
         bot = state["context_types"].bot
+        fallback = msg.get("replied_to_fallback")
         recent = await self.__get_recent(chat_id, msg["message_id"])
-        replied_to = await self.__find_replied_to(chat_id, msg["reply_to_msg_id"], recent)
-        reply_chain = await self.__get_reply_chain(chat_id, msg["reply_to_msg_id"], bot)
+        replied_to = await self.__find_replied_to(
+            chat_id, msg["reply_to_msg_id"], recent, fallback
+        )
+        reply_chain = await self.__get_reply_chain(
+            chat_id, msg["reply_to_msg_id"], bot, fallback
+        )
         user_facts = await self.__collect_user_facts(
             chat_id, msg["user_id"], msg["username"], recent
         )
@@ -100,11 +111,29 @@ class ContextBuilder:
         )
         return [row for row in all_recent if row["message_id"] != current_message_id]
 
-    async def __get_reply_chain(self, chat_id: int, reply_to_msg_id: int | None, bot) -> list[dict]:
+    async def __get_reply_chain(
+        self, chat_id: int, reply_to_msg_id: int | None, bot, fallback: dict | None
+    ) -> list[dict]:
+        """Load the reply chain, degrading to a one-element fallback chain.
+
+        Args:
+            chat_id: Chat the reply belongs to.
+            reply_to_msg_id: Message id being replied to, or None.
+            bot: Telegram bot instance for lazy media enrichment.
+            fallback: Row-shaped copy of the replied-to message from the
+                update, used when the store has no chain for it.
+
+        Returns:
+            Chain rows oldest-first (photo and sticker rows enriched, content
+            truncated); a one-element chain from the fallback when the store
+            has nothing.
+        """
         if reply_to_msg_id is None:
             return []
         chain = await unified_messages.get_chain(chat_id=chat_id, message_id=reply_to_msg_id)
-        enriched = [await self.__maybe_enrich_photo(row, chat_id, bot) for row in chain]
+        if not chain and fallback:
+            chain = [fallback]
+        enriched = [await enrich_media_row(row, chat_id, bot) for row in chain]
         return [self.__truncate_chain_row(row) for row in enriched]
 
     @staticmethod
@@ -114,36 +143,32 @@ class ContextBuilder:
             return row
         return {**row, "content": content[:CHAIN_MSG_CHAR_LIMIT] + "…"}
 
-    async def __maybe_enrich_photo(self, row: dict, chat_id: int, bot) -> dict:
-        if row["media_type"] != "photo" or not unified_messages.needs_photo_description(row["content"]):
-            return row
-        file_id = row.get("file_id")
-        if not file_id:
-            return row
-        caption = unified_messages.extract_photo_caption(row["content"])
-        description = await describe_photo(file_id, bot)
-        if not description:
-            return row
-        combined = unified_messages.combine_description_and_caption(description, caption)
-        try:
-            await unified_messages.update_content(
-                chat_id=chat_id,
-                message_id=row["message_id"],
-                content=combined,
-            )
-        except Exception as err:
-            logger.warning("Failed to cache photo description for msg %s: %s", row["message_id"], err)
-        return {**row, "content": combined}
-
     async def __find_replied_to(
-        self, chat_id: int, reply_to_msg_id: int | None, recent: list[dict]
+        self,
+        chat_id: int,
+        reply_to_msg_id: int | None,
+        recent: list[dict],
+        fallback: dict | None,
     ) -> dict | None:
+        """Resolve the replied-to message: recent window, store, then fallback.
+
+        Args:
+            chat_id: Chat the reply belongs to.
+            reply_to_msg_id: Message id being replied to, or None.
+            recent: Recent-history rows already loaded for this chat.
+            fallback: Row-shaped copy of the replied-to message from the
+                update, used when the store has no row.
+
+        Returns:
+            The best available row for the replied-to message, or None.
+        """
         if reply_to_msg_id is None:
             return None
         for row in recent:
             if row["message_id"] == reply_to_msg_id:
                 return row
-        return await unified_messages.get_by_id(chat_id=chat_id, message_id=reply_to_msg_id)
+        stored = await unified_messages.get_by_id(chat_id=chat_id, message_id=reply_to_msg_id)
+        return stored or fallback
 
     async def __collect_user_facts(
         self,

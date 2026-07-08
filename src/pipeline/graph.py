@@ -21,7 +21,7 @@ Graph edges:
 from langgraph.graph import END, START, StateGraph
 
 from src import config, log
-from src.agent import FOREIGN_SCRIPT_RE, comedian_agent
+from src.agent import comedian_agent, needs_russian_correction
 from src.pipeline import humor_gate
 from src.pipeline.context_builder import ContextBuilder
 from src.pipeline.humor_node import HumorNode
@@ -66,7 +66,7 @@ def route_by_guard(state: BotState) -> str:
 def route_after_response(state: BotState) -> str:
     """Route to language_correction when the response contains foreign script."""
     response = state.get("response") or ""
-    if response and FOREIGN_SCRIPT_RE.search(response):
+    if needs_russian_correction(response):
         return "language_correction"
     return "memory_writer"
 

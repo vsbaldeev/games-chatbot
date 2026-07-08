@@ -1,10 +1,13 @@
 """HumorNode — autonomous-humor pipeline node.
 
-Reached only when the opportunity gate fires. Gathers the live conversation and
+Reached only when the opportunity gate fires. Gathers the live conversation
+(rendered with ``[#id]`` markers so the comedian can cite its target) and
 participant material, asks the comedian whether to joke, and — when it acts —
-sets ``state["response"]`` so ``run_pipeline`` delivers it like any other reply.
-On an abstain or any error it stays silent (fail-safe to silence), then the
-graph continues to ``memory_writer`` so facts are still extracted.
+sets ``state["response"]`` plus a validated ``humor_reply_to_msg_id`` so
+``run_pipeline`` anchors the joke to the message it is actually about (or sends
+it un-anchored when no valid target was cited). On an abstain or any error it
+stays silent (fail-safe to silence), then the graph continues to
+``memory_writer`` so facts are still extracted.
 """
 
 from src import config, log
@@ -22,7 +25,10 @@ MAX_PARTICIPANTS = 4
 
 
 def render_conversation(recent: list[dict]) -> str:
-    """Render recent messages oldest-first as ``@user [media]: text`` lines.
+    """Render recent messages oldest-first as ``[#id] @user [media]: text`` lines.
+
+    The ``[#id]`` marker lets the comedian cite which message its joke targets,
+    so the reply can be anchored to that message instead of the pipeline trigger.
 
     Args:
         recent: Messages newest-first, as returned by ``get_recent``.
@@ -30,7 +36,28 @@ def render_conversation(recent: list[dict]) -> str:
     Returns:
         The rendered conversation, oldest-first.
     """
-    return "\n".join(render_row(row) for row in reversed(recent))
+    return "\n".join(f"[#{row['message_id']}] {render_row(row)}" for row in reversed(recent))
+
+
+def validate_reply_target(target: int | None, recent: list[dict], bot_id: int) -> int | None:
+    """Return the target id if it cites a real participant message, else None.
+
+    Fail-safe: a hallucinated id, a citation of the bot's own message, or a
+    missing citation all degrade to None, which sends the joke un-anchored
+    rather than attached to the wrong message.
+
+    Args:
+        target: The comedian's ``reply_to_message_id`` claim.
+        recent: Messages newest-first, as fetched for the comedian prompt.
+        bot_id: The bot's user id; its own messages are not valid targets.
+
+    Returns:
+        A validated message id, or None.
+    """
+    if target is None:
+        return None
+    valid_ids = {row["message_id"] for row in recent if row["user_id"] != bot_id}
+    return target if target in valid_ids else None
 
 
 def distinct_participants(recent: list[dict], bot_id: int) -> list[tuple[int, str]]:
@@ -96,32 +123,42 @@ class HumorNode:
             state: Current pipeline state.
 
         Returns:
-            ``{"response": joke}`` when a joke is produced, otherwise ``{}``.
+            ``{"response", "response_trigger", "humor_reply_to_msg_id"}`` when a
+            joke is produced (the target id is None for an un-anchored joke),
+            otherwise ``{}``.
         """
         chat_id = state["incoming"]["chat_id"]
         try:
-            decision = await self.__decide(chat_id)
+            recent = await unified_messages.get_recent(chat_id=chat_id, limit=RECENT_LIMIT)
+            decision = await self.__decide(chat_id, recent)
         except Exception as error:
             logger.warning("Humor decision failed for chat %s: %s", chat_id, error)
             humor_gate.mark_considered(chat_id)
             return {}
         if decision.act and decision.text.strip():
+            target = validate_reply_target(decision.reply_to_message_id, recent, config.BOT_ID)
             humor_gate.mark_joke_sent(chat_id)
-            logger.info("Autonomous %s joke in chat %s", decision.register, chat_id)
-            return {"response": decision.text}
+            logger.info(
+                "Autonomous %s joke in chat %s (reply_to=%s)", decision.register, chat_id, target
+            )
+            return {
+                "response": decision.text,
+                "response_trigger": "humor",
+                "humor_reply_to_msg_id": target,
+            }
         humor_gate.mark_considered(chat_id)
         return {}
 
-    async def __decide(self, chat_id: int) -> ComedianDecision:
+    async def __decide(self, chat_id: int, recent: list[dict]) -> ComedianDecision:
         """Build context and ask the comedian for a decision.
 
         Args:
             chat_id: Chat to consider.
+            recent: Messages newest-first, as returned by ``get_recent``.
 
         Returns:
             The comedian's decision.
         """
-        recent = await unified_messages.get_recent(chat_id=chat_id, limit=RECENT_LIMIT)
         conversation = render_conversation(recent)
         material = await gather_participants_material(chat_id, recent, config.BOT_ID)
         return await self.__agent.decide(conversation, material)

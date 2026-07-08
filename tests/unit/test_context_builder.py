@@ -26,7 +26,7 @@ STORE_UPDATE_CONTENT = "src.pipeline.context_builder.unified_messages.update_con
 STORE_GET_FACTS_FOR_USERS = "src.pipeline.context_builder.user_memories.get_facts_for_users"
 STORE_GET_FACTS = "src.pipeline.context_builder.user_memories.get_facts"
 STORE_GET_TAG = "src.pipeline.context_builder.user_tags.get_tag"
-DESCRIBE_PHOTO = "src.pipeline.context_builder.describe_photo"
+DESCRIBE_PHOTO = "src.pipeline.ingester.describe_photo"
 
 
 def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=None, tag=None):

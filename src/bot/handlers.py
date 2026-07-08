@@ -14,7 +14,7 @@ from telegram.ext import (
     filters,
 )
 
-from src.commands import general, fun, games, statistics
+from src.commands import general, fun, games
 from src.events.members import (
     track_member,
     handle_new_chat_members,
@@ -61,8 +61,6 @@ class CommandHandlerManager(HandlerManagerInterface):
         app.add_handler(CommandHandler("meme", fun.cmd_meme, filters=group_only))
         app.add_handler(CommandHandler("duel", games.cmd_duel, filters=group_only))
         app.add_handler(CallbackQueryHandler(games.handle_duel_callback, pattern=games.DUEL_CALLBACK_PATTERN))
-        app.add_handler(CommandHandler("achievements", statistics.cmd_achievements, filters=group_only))
-        app.add_handler(CommandHandler("top", statistics.cmd_top, filters=group_only))
 
 
 class MessageHandlerManager(HandlerManagerInterface):

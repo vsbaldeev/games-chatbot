@@ -164,9 +164,10 @@ class TestWorkerNodeOutput:
     """WorkerNode stores whatever invoke_worker returns in the pipeline state."""
 
     async def test_worker_output_stored_in_state(self):
-        """Output from invoke_worker must be forwarded verbatim to worker_output."""
+        """Output from invoke_worker must be forwarded verbatim to worker_output,
+        along with the mechanical tool-usage provenance flag."""
         agent = MagicMock()
-        agent.invoke_worker = AsyncMock(return_value="GTA 6 выходит 19 ноября 2026.")
+        agent.invoke_worker = AsyncMock(return_value=("GTA 6 выходит 19 ноября 2026.", True))
         state = make_worker_state(
             username="alice",
             raw_text="когда выйдет GTA 6?",
@@ -174,6 +175,7 @@ class TestWorkerNodeOutput:
         )
         result = await WorkerNode(agent)(state)
         assert result["worker_output"] == "GTA 6 выходит 19 ноября 2026."
+        assert result["worker_tools_used"] is True
 
 
 class TestContextLengthErrorHandling:

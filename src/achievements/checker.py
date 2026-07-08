@@ -1,9 +1,10 @@
 """
 Achievement business logic: computing earned achievements, checking for new ones,
-summarising what a user or chat has unlocked, and notifying the chat on unlock.
-"""
+and notifying the chat on unlock.
 
-import time
+Only duel achievements remain; the passive-counter and silence achievements were
+retired, so the silence sweep and chat/user summary helpers are gone with them.
+"""
 
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -13,15 +14,11 @@ from src.achievements.definitions import (
     Achievement,
     ACHIEVEMENT_MAP,
     ACHIEVEMENT_RULES,
-    SILENCE_THRESHOLDS,
 )
 from src.achievements.store import (
     get_user_stats,
-    get_chat_members,
-    get_announced_keys,
     mark_and_get_new,
 )
-from src.store import db as database
 
 logger = log.get_logger(__name__)
 
@@ -43,47 +40,6 @@ async def check_new_achievements(user_id: int, chat_id: int, username: str) -> l
     earned = compute_earned(stats)
     new_keys = await mark_and_get_new(user_id, chat_id, [ach.key for ach in earned])
     return [ACHIEVEMENT_MAP[key] for key in new_keys]
-
-
-async def check_silence_achievements(user_id: int, chat_id: int, username: str) -> list[Achievement]:
-    """Return the next unawarded silence achievement (at most one per call) and mark it announced."""
-    async with database.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT last_seen FROM user_stats WHERE user_id = $1 AND chat_id = $2",
-            user_id, chat_id,
-        )
-    if not row or row["last_seen"] == 0:
-        return []
-
-    elapsed_days = (time.time() - row["last_seen"]) / 86400
-    for days, key in SILENCE_THRESHOLDS:
-        if elapsed_days < days:
-            break
-        new_keys = await mark_and_get_new(user_id, chat_id, [key])
-        if new_keys:
-            return [ACHIEVEMENT_MAP[key]]
-    return []
-
-
-async def get_user_achievements(user_id: int, chat_id: int) -> list[Achievement]:
-    """Return all achievements a user has earned (stat-based + silence-based)."""
-    stats = await get_user_stats(user_id, chat_id)
-    stat_earned = compute_earned(stats)
-    announced_keys = await get_announced_keys(user_id, chat_id)
-    silence_keys = {key for _, key in SILENCE_THRESHOLDS}
-    silence_earned = [ACHIEVEMENT_MAP[key] for key in silence_keys if key in announced_keys]
-    return stat_earned + silence_earned
-
-
-async def get_chat_achievements_summary(chat_id: int) -> dict[str, list[Achievement]]:
-    """Return {username: [Achievement, ...]} for every member with at least one achievement."""
-    members = await get_chat_members(chat_id)
-    result: dict[str, list[Achievement]] = {}
-    for user_id, username in members:
-        earned = await get_user_achievements(user_id, chat_id)
-        if earned:
-            result[username] = earned
-    return result
 
 
 async def notify_unlocks(

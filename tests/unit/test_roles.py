@@ -156,6 +156,9 @@ class TestAnnounceRoles:
         text = context.bot.send_message.await_args.kwargs["text"]
         assert "@alice — Ночной" in text
         assert "@bob — Спидран" in text
+        # The reason is surfaced as a one-sentence profile beneath each role.
+        assert "r1" in text
+        assert "r2" in text
 
     async def test_empty_roles_sends_nothing(self):
         context = make_context()

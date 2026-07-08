@@ -11,13 +11,10 @@ general.py
     /start          — welcome message
     /help           — full command list
 
-statistics.py
-    /achievements   — last 3 earned achievements with total count
-    /top            — top-3 leaderboard by achievement count, with medal emojis
-
 fun/
     /meme           — see src/commands/fun/README.md
-    (roast generation lives here too — no command; used by the offense auto-roast)
+    (roast generation lives here too — no command and no automatic trigger;
+     kept as a reusable generator)
 
 games/
     /duel           — see src/commands/games/README.md

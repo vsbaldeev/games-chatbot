@@ -19,13 +19,12 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
+from src.config.prompts import ROLES_SYSTEM_PROMPT, TAG_MAX_CHARS
 from src.store import unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users
 
 logger = log.get_logger(__name__)
 
-TAG_MODEL = "llama-3.3-70b-versatile"
-TAG_MAX_CHARS = 16
 MAX_TOKENS = 2048
 
 # The roles job is scheduled daily but only acts on Sundays, so the one
@@ -37,20 +36,6 @@ CATCH_UP_DELAY_SECONDS = 30
 
 FALLBACK_ROLE = "Тёмная лошадка"
 FALLBACK_REASON = "Пока загадка — фактов маловато, но роль ещё впереди."
-
-SYSTEM_PROMPT = (
-    "Ты назначаешь короткие роли участникам чата на основе фактов об их поведении. "
-    "Для каждого участника найди самую характерную черту или привычку из фактов — "
-    "ту, которая лучше всего его определяет, — и придумай короткую остроумную роль "
-    f"на русском языке (строго не длиннее {TAG_MAX_CHARS} символов включая пробелы). "
-    "Роль должна быть конкретной и меткой, а не общей. "
-    "ВАЖНО: все роли должны быть РАЗНЫМИ — ни одна роль не повторяется у разных участников. "
-    "Для каждого участника добавь короткое объяснение (reason) на русском — "
-    "одно предложение о том, почему выдана именно эта роль. "
-    "Ответь строго в формате JSON: "
-    "{\"user_0\": {\"role\": \"роль\", \"reason\": \"объяснение\"}, ...} "
-    "используя те же ключи, что и во входных данных. Без какого-либо другого текста."
-)
 
 
 async def call_role_model(system_prompt: str, user_content: str) -> str:
@@ -64,7 +49,7 @@ async def call_role_model(system_prompt: str, user_content: str) -> str:
         The model's raw response content (expected to be JSON).
     """
     llm = ChatGroq(
-        model=TAG_MODEL,
+        model=config.TAG_MODEL,
         api_key=config.GROQ_API_KEY,
         temperature=0.5,
         top_p=0.9,
@@ -160,7 +145,7 @@ async def generate_roles(facts_by_uid: dict[int, list[str]]) -> dict[int, dict]:
         return {}
     uid_to_anon, anon_to_uid = anonymise(list(facts_by_uid))
     lines = [build_fact_line(uid_to_anon[user_id], facts) for user_id, facts in facts_by_uid.items()]
-    raw = await call_role_model(SYSTEM_PROMPT, "\n".join(lines))
+    raw = await call_role_model(ROLES_SYSTEM_PROMPT, "\n".join(lines))
     return parse_roles_response(raw, anon_to_uid)
 
 
@@ -189,7 +174,7 @@ async def reask_unique(facts_by_uid: dict[int, list[str]], taken_roles: set[str]
         + f"\n\nЭти роли уже заняты другими участниками: {taken}. "
         "Придумай каждому ДРУГУЮ, уникальную роль, не совпадающую с занятыми."
     )
-    raw = await call_role_model(SYSTEM_PROMPT, user_content)
+    raw = await call_role_model(ROLES_SYSTEM_PROMPT, user_content)
     return parse_roles_response(raw, anon_to_uid)
 
 
@@ -268,6 +253,24 @@ def to_assignments(roles: dict[int, dict]) -> dict[int, dict]:
     }
 
 
+def render_member_block(name, entry: dict) -> str:
+    """Render one member's weekly entry: role headline plus the reason as a profile line.
+
+    Args:
+        name: Display name (or user_id fallback) shown after the ``@``.
+        entry: The member's ``{"role", "reason"}`` mapping.
+
+    Returns:
+        A two-line block (``@name — Role`` then the reason), or just the headline
+        when no reason is available.
+    """
+    role = entry["role"]
+    reason = entry.get("reason") or ""
+    if reason:
+        return f"@{name} — {role}\n{reason}"
+    return f"@{name} — {role}"
+
+
 async def announce_roles(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -276,14 +279,15 @@ async def announce_roles(
 ) -> None:
     """Post the weekly roles, built from the decided map (not from API success).
 
-    The sent message is recorded in ``unified_messages`` so that when a member
-    replies to the announcement to ask about a role, the chat pipeline can load
-    the announcement text as the replied-to context.
+    Each member's role is shown together with the LLM-generated reason as a
+    one-sentence profile. The sent message is recorded in ``unified_messages`` so
+    that when a member replies to the announcement to ask about a role, the chat
+    pipeline can load the announcement text as the replied-to context.
     """
     if not roles:
         return
-    lines = "\n".join(
-        f"@{names_by_uid.get(user_id, user_id)} — {entry['role']}"
+    lines = "\n\n".join(
+        render_member_block(names_by_uid.get(user_id, user_id), entry)
         for user_id, entry in roles.items()
     )
     text = f"🏷 Роли недели:\n\n{lines}"

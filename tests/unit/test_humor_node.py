@@ -50,13 +50,15 @@ def state() -> dict:
 
 
 class TestRenderConversation:
-    def test_renders_oldest_first(self):
+    def test_renders_oldest_first_with_id_markers(self):
         recent = [  # get_recent is newest-first
-            {"username": "b", "media_type": "text", "content": "второе"},
-            {"username": "a", "media_type": "text", "content": "первое"},
+            {"message_id": 12, "username": "b", "media_type": "text", "content": "второе"},
+            {"message_id": 11, "username": "a", "media_type": "text", "content": "первое"},
         ]
         rendered = render_conversation(recent)
         assert rendered.index("первое") < rendered.index("второе")
+        assert "[#11]" in rendered
+        assert "[#12]" in rendered
 
 
 class TestDistinctParticipants:
@@ -99,7 +101,11 @@ class TestHumorNodeCall:
         with patch("src.pipeline.humor_node.unified_messages.get_recent", AsyncMock(return_value=[])), \
              patch("src.pipeline.humor_node.gather_participants_material", AsyncMock(return_value="")):
             result = await node(state())
-        assert result == {"response": "Кто проспорил?"}
+        assert result == {
+            "response": "Кто проспорил?",
+            "response_trigger": "humor",
+            "humor_reply_to_msg_id": None,
+        }
         assert humor_gate.messages_since_joke[CHAT_ID] == 0
         assert CHAT_ID in humor_gate.last_joke_time
 

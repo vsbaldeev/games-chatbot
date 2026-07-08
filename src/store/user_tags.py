@@ -12,21 +12,6 @@ import time
 from src.store import db as database
 
 
-async def init_table() -> None:
-    """Create the user_tags table if it does not already exist."""
-    async with database.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS user_tags (
-                chat_id     BIGINT           NOT NULL,
-                user_id     BIGINT           NOT NULL,
-                tag         TEXT             NOT NULL,
-                reason      TEXT             NOT NULL,
-                assigned_at DOUBLE PRECISION NOT NULL,
-                PRIMARY KEY (chat_id, user_id)
-            )
-        """)
-
-
 async def get_tag(*, chat_id: int, user_id: int) -> dict | None:
     """Return the member's current role and reason, or None when unassigned.
 

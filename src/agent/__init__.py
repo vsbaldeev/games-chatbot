@@ -7,16 +7,21 @@ from src.agent.middleware import (
     GroqContextGuard,
     ThinkingStripper,
     ToolMessageSanitizer,
+    ainvoke_with_backoff,
     guarded_ainvoke,
     should_retry,
     strip_thinking,
 )
-from src.agent.language import FOREIGN_SCRIPT_RE, apply_language_correction
-from src.agent.worker import WORKER_MODEL_FALLBACKS, WORKER_PROMPT, WorkerAgent, worker_agent
-from src.agent.response import RESPONSE_MODEL_FALLBACKS, RESPONSE_PROMPT, ResponseAgent, response_agent
-from src.agent.roast import ROAST_MODEL_FALLBACKS, ROAST_SYSTEM_PROMPT, RoastAgent, roast_agent
+from src.agent.language import (
+    FOREIGN_SCRIPT_RE,
+    apply_language_correction,
+    needs_russian_correction,
+    normalize_homoglyphs,
+)
+from src.agent.worker import WORKER_PROMPT, WorkerAgent, worker_agent
+from src.agent.response import RESPONSE_PROMPT, ResponseAgent, response_agent
+from src.agent.roast import ROAST_SYSTEM_PROMPT, RoastAgent, roast_agent
 from src.agent.comedian import (
-    COMEDIAN_MODEL_FALLBACKS,
     COMEDIAN_SYSTEM_PROMPT,
     ComedianAgent,
     ComedianDecision,
@@ -32,24 +37,23 @@ __all__ = [
     "GroqContextGuard",
     "ThinkingStripper",
     "ToolMessageSanitizer",
+    "ainvoke_with_backoff",
     "guarded_ainvoke",
     "should_retry",
     "strip_thinking",
     "FOREIGN_SCRIPT_RE",
     "apply_language_correction",
-    "WORKER_MODEL_FALLBACKS",
+    "needs_russian_correction",
+    "normalize_homoglyphs",
     "WORKER_PROMPT",
     "WorkerAgent",
     "worker_agent",
-    "RESPONSE_MODEL_FALLBACKS",
     "RESPONSE_PROMPT",
     "ResponseAgent",
     "response_agent",
-    "ROAST_MODEL_FALLBACKS",
     "ROAST_SYSTEM_PROMPT",
     "RoastAgent",
     "roast_agent",
-    "COMEDIAN_MODEL_FALLBACKS",
     "COMEDIAN_SYSTEM_PROMPT",
     "ComedianAgent",
     "ComedianDecision",
