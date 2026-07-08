@@ -73,7 +73,7 @@ class TestExplicitMention:
         assert trigger == "explicit"
 
     def test_plain_text_without_mention_does_not_respond(self, router):
-        incoming = make_incoming(raw_text="обычное сообщение без упоминания бота")
+        incoming = make_incoming(raw_text="обычное сообщение ни о чём")
         should_respond, _ = call_decide(router, incoming)
         assert not should_respond
 

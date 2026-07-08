@@ -3,17 +3,6 @@
 from src.store import db as database
 
 
-async def init_table() -> None:
-    async with database.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS sent_memes (
-                chat_id BIGINT NOT NULL,
-                url     TEXT   NOT NULL,
-                PRIMARY KEY (chat_id, url)
-            )
-        """)
-
-
 async def get_seen_urls(chat_id: int) -> set[str]:
     async with database.acquire() as conn:
         rows = await conn.fetch(

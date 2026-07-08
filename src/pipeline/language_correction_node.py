@@ -3,15 +3,12 @@
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent import DailyLimitError, RateLimitError
+from src.agent import DailyLimitError, RateLimitError, normalize_homoglyphs
+from src.config.prompts import LANGUAGE_CORRECTION_PROMPT
+from src.pipeline.response_node import persist_thread_turn
 from src.pipeline.state import BotState
 
 logger = log.get_logger(__name__)
-
-CORRECTION_PROMPT = (
-    "Твой предыдущий ответ содержал символы не на русском языке. "
-    "Ответь ТОЛЬКО на русском языке."
-)
 
 
 class LanguageCorrectionNode:
@@ -45,12 +42,17 @@ class LanguageCorrectionNode:
             RateLimitError: Propagated when rate-limit retries are exhausted.
         """
         messages = state.get("response_messages") or []
-        correction_messages = messages + [HumanMessage(content=CORRECTION_PROMPT)]
+        correction_messages = messages + [HumanMessage(content=LANGUAGE_CORRECTION_PROMPT)]
         try:
             corrected = await self.__agent.invoke_response(correction_messages)
-            return {"response": corrected}
+            corrected = normalize_homoglyphs(corrected) if corrected else corrected
         except (DailyLimitError, RateLimitError):
             raise
         except Exception as err:
             logger.warning("Language correction failed: %s", err)
-            return {}
+            corrected = None
+        # Persist the reply the chat will actually see: the corrected text, or
+        # the original response when correction itself failed.
+        final_text = corrected or state.get("response") or ""
+        await persist_thread_turn(state, final_text)
+        return {"response": corrected} if corrected else {}

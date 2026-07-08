@@ -24,15 +24,21 @@ unified_messages (
     user_id         BIGINT,
     username        TEXT,
     content         TEXT,           -- text / transcript / vision description; placeholder before enrichment
-    media_type      TEXT,           -- "text" | "voice" | "video_note" | "video" | "photo"
+    media_type      TEXT,           -- "text" | "voice" | "video_note" | "video" | "photo" | "sticker" | "animation" | "audio"
     reply_to_msg_id BIGINT,
-    file_id         TEXT,           -- Telegram file_id; permanent; used for lazy photo description
+    file_id         TEXT,           -- Telegram file_id; permanent; used for lazy photo/sticker description
+    media_group_id  TEXT,           -- Telegram album id; groups items of one album
+    is_forwarded    BOOLEAN,        -- forwarded channel content, not the sender's own words; rendered as [переслал] in prompts
     created_at      DOUBLE PRECISION,
     PRIMARY KEY (chat_id, message_id)
 )
 INDEX idx_unified_messages_chat_time ON (chat_id, created_at DESC)
 
--- LLM-extracted facts per user per chat; cap 30 rows per (chat_id, user_id)
+-- LLM-extracted facts per user per chat; cap 30 rows per (chat_id, user_id).
+-- Facts untouched for 90 days are deleted by the nightly cleanup
+-- (cleanup_stale) — counters included; the dedup path refreshes updated_at
+-- on every re-observation, so live facts survive. Cross-user facts carry a
+-- «по словам @X, …» attribution prefix in the fact text.
 user_memories (
     id         BIGSERIAL        PRIMARY KEY,
     chat_id    BIGINT,
@@ -68,7 +74,11 @@ announced_achievements (
 -- Tracks registered chat members for job targeting and achievement queries
 chat_members (chat_id BIGINT, user_id BIGINT, username TEXT, PRIMARY KEY (chat_id, user_id))
 
--- Per-thread conversation history for the response LLM; keyed by reply-chain root or chat_id
+-- Per-thread conversation history for the response LLM; keyed by reply-chain
+-- root ({chat_id}_{root_message_id}). Flat (non-reply) exchanges are stored
+-- under the prospective chain root — the triggering message id — so a
+-- follow-up reply chain starts pre-seeded. Legacy chat_id-only rows are dead
+-- data aged out by retention.
 thread_history (
     thread_id  TEXT             NOT NULL,
     chat_id    BIGINT           NOT NULL,
@@ -78,14 +88,35 @@ thread_history (
 )
 INDEX idx_thread_history_lookup ON (thread_id, created_at)
 Retention: 60 days (cleanup_messages_job)
+
+-- Vision descriptions per sticker identity. file_unique_id is stable across
+-- resends and bots (unlike file_id), so each distinct sticker is described
+-- by the vision LLM at most once ever. No retention — rows are tiny and
+-- permanently valid.
+sticker_descriptions (
+    file_unique_id TEXT             PRIMARY KEY,
+    description    TEXT             NOT NULL,
+    created_at     DOUBLE PRECISION NOT NULL
+)
 ```
+
+## Coverage gaps in `unified_messages`
+
+Some messages are never stored: other bots' posts, rows past the 60-day
+retention, and messages sent while the bot was down. Replied-to context is
+therefore resolved DB-first with an update fallback — consumers receive a
+row-shaped dict synthesized from the Telegram `reply_to_message` object when
+the store has no row. The fallback is read-side only and never inserted.
+User replies to game messages and the bot's own out-of-pipeline sends
+(pipeline error notices) are persisted.
 
 ## Modules
 
 ```
 db.py               asyncpg Pool; acquire() context manager; init() / close() lifecycle
 unified_messages.py insert (ON CONFLICT DO NOTHING), update_content, get_by_id, get_chain (max 10 hops), get_recent (last N), get_media_group, get_user_messages, cleanup_old
-user_memories.py    upsert_facts (cap 30 per user), upsert_hack_attempt, get_facts, get_facts_for_users, get_facts_with_embeddings, find_similar_fact, refresh_updated_at
+user_memories.py    upsert_facts (cap 30 per user), upsert_hack_attempt, get_facts, get_facts_for_users, get_facts_with_embeddings, find_similar_fact, refresh_updated_at, cleanup_stale (90-day retention)
 thread_history.py   append_turn, get_history (thread-scoped, oldest-first), cleanup_old (60-day retention)
+sticker_descriptions.py get_description / save_description — permanent vision-description cache keyed by sticker file_unique_id
 embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[float] (384-dim)
 ```

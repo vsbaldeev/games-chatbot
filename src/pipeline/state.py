@@ -25,6 +25,7 @@ class IncomingMessage(TypedDict):
     file_id: str | None           # Telegram file_id for voice / photo messages
     is_forwarded: bool
     media_group_id: str | None    # Telegram media_group_id for album messages
+    replied_to_fallback: NotRequired[dict | None]  # row-shaped copy of msg.reply_to_message, used when the DB row is missing; read-side only, never inserted
 
 
 class AssembledContext(TypedDict):
@@ -43,12 +44,18 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply) or "random" (20% chance)
+    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (20% chance), "youtube_short" (Shorts link) or "humor" (autonomous joke)
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
     context_types: Any             # telegram.ext.ContextTypes instance for sending replies
     thread_id: NotRequired[str]    # derived from reply-chain root; scopes LLM history
+    is_flat_thread: NotRequired[bool]  # True when the message is not a reply; flat mentions read recent chat context, not thread history
     worker_output: NotRequired[str | None] # raw facts gathered by the worker
+    worker_tools_used: NotRequired[bool]   # True when the worker actually ran at least one tool (mechanical ToolMessage scan)
     search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator
     response_messages: NotRequired[list]  # assembled LangChain messages forwarded to LanguageCorrectionNode
+    humor_reply_to_msg_id: NotRequired[int | None]  # validated joke anchor; None sends the joke un-anchored
+    is_bot_insult: NotRequired[bool]  # True when the filter classified the message as an insult aimed at the bot
+    youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
+    youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester

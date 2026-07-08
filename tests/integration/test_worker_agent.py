@@ -34,7 +34,7 @@ async def test_invoke_worker_returns_non_empty_text(worker_agent):
         "Current datetime: 2026-05-15 12:00 UTC\n\n"
         "Question from @testuser: Какое сегодня число?"
     )
-    result = await worker_agent.invoke_worker(prompt)
+    result, tools_used = await worker_agent.invoke_worker(prompt)
     assert isinstance(result, str)
     assert len(result.strip()) > 0
 
@@ -53,5 +53,5 @@ async def test_invoke_worker_uses_context_before_tools(worker_agent):
         "@alice: Elden Ring was released in February 2022.\n\n"
         "Question from @bob: Когда вышел Elden Ring?"
     )
-    result = await worker_agent.invoke_worker(prompt)
+    result, tools_used = await worker_agent.invoke_worker(prompt)
     assert "2022" in result

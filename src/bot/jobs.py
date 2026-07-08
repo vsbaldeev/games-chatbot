@@ -5,11 +5,11 @@ from abc import ABC, abstractmethod
 
 from telegram.ext import Application
 
-from src.jobs.achievements import silence_sweep_job
 from src.jobs.agent import reset_model_job
 from src.jobs.cleanup import cleanup_messages_job
 from src.jobs.meme import daily_meme_job
 from src.jobs.roles import CATCH_UP_DELAY_SECONDS, ROLES_RUN_TIME, catch_up_roles_job, weekly_roles_job
+from src.jobs.ytdlp_update import ytdlp_update_job
 
 
 class JobManagerInterface(ABC):
@@ -32,14 +32,6 @@ class MemeJobManager(JobManagerInterface):
         )
 
 
-class SilenceSweepJobManager(JobManagerInterface):
-    def add_jobs(self, app: Application) -> None:
-        app.job_queue.run_daily(
-            silence_sweep_job,
-            time=datetime.time(hour=10, minute=0, tzinfo=datetime.timezone.utc),
-        )
-
-
 class ResetModelJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
         app.job_queue.run_daily(
@@ -53,4 +45,15 @@ class MessageCleanupJobManager(JobManagerInterface):
         app.job_queue.run_daily(
             cleanup_messages_job,
             time=datetime.time(hour=3, minute=0, tzinfo=datetime.timezone.utc),
+        )
+
+
+class YtdlpUpdateJobManager(JobManagerInterface):
+    """Registers the daily yt-dlp freshness check (self-healing extractor rot)."""
+
+    def add_jobs(self, app: Application) -> None:
+        # 03:30 UTC: dead hours for the chat, after the cleanup job.
+        app.job_queue.run_daily(
+            ytdlp_update_job,
+            time=datetime.time(hour=3, minute=30, tzinfo=datetime.timezone.utc),
         )

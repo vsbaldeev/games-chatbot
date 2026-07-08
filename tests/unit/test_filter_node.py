@@ -119,7 +119,11 @@ class TestTextClassification:
 
 
 class TestMediaMessages:
-    async def test_no_transcription_explicit_passes_through(self):
+    async def test_no_transcription_explicit_gets_canned_failure_reply(self):
+        """An addressed voice note with no transcript gets an honest canned
+        reply instead of a pass-through that would hallucinate a reaction."""
+        from src.pipeline.filter_node import TRANSCRIPTION_FAILED_REPLIES
+
         node, _ = make_node_with_mock_llm()
         state = make_state(
             make_incoming(media_type="voice", processed_text=None),
@@ -127,7 +131,8 @@ class TestMediaMessages:
             response_trigger="explicit",
         )
         result = await node(state)
-        assert result == {}
+        assert result["should_respond"] is False
+        assert result["response"] in TRANSCRIPTION_FAILED_REPLIES
 
     async def test_no_transcription_explicit_does_not_fire_reaction(self):
         node, _ = make_node_with_mock_llm()
@@ -186,32 +191,32 @@ class TestMediaMessages:
 class TestClassify:
     async def test_meaningless_llm_response_returns_meaningless(self):
         node, _ = make_node_with_mock_llm("MEANINGLESS")
-        result = await node._MeaninglessFilterNode__classify("лол")
+        result = await node._MeaninglessFilterNode__classify("лол", FILTER_SYSTEM)
         assert result == "MEANINGLESS"
 
     async def test_meaningful_llm_response_returns_meaningful(self):
         node, _ = make_node_with_mock_llm("MEANINGFUL")
-        result = await node._MeaninglessFilterNode__classify("как дела?")
+        result = await node._MeaninglessFilterNode__classify("как дела?", FILTER_SYSTEM)
         assert result == "MEANINGFUL"
 
     async def test_llm_error_fails_open_as_meaningful(self):
         node, _ = make_node_with_mock_llm(llm_error=Exception("API unavailable"))
-        result = await node._MeaninglessFilterNode__classify("лол")
+        result = await node._MeaninglessFilterNode__classify("лол", FILTER_SYSTEM)
         assert result == "MEANINGFUL"
 
     async def test_lowercase_response_parsed_as_meaningless(self):
         node, _ = make_node_with_mock_llm("meaningless")
-        result = await node._MeaninglessFilterNode__classify("хаха")
+        result = await node._MeaninglessFilterNode__classify("хаха", FILTER_SYSTEM)
         assert result == "MEANINGLESS"
 
     async def test_response_with_trailing_text_still_parsed(self):
         node, _ = make_node_with_mock_llm("MEANINGLESS - just laughter")
-        result = await node._MeaninglessFilterNode__classify("хаха")
+        result = await node._MeaninglessFilterNode__classify("хаха", FILTER_SYSTEM)
         assert result == "MEANINGLESS"
 
     async def test_unrecognized_response_defaults_to_meaningful(self):
         node, _ = make_node_with_mock_llm("UNKNOWN")
-        result = await node._MeaninglessFilterNode__classify("что-то")
+        result = await node._MeaninglessFilterNode__classify("что-то", FILTER_SYSTEM)
         assert result == "MEANINGFUL"
 
 

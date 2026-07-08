@@ -1,20 +1,23 @@
 Roast ("прожарка") text generation and the /meme command.
 
 The `/roast` command and the weekly scheduled roast were retired in favour of
-autonomous humor (see `src/pipeline/` HumorNode). Roast generation
-(`Roaster.generate` / `generate_roast_text`) is kept solely for the **offense
-auto-roast**: when a user insults the bot twice in a row, the bot claps back.
+autonomous humor (see `src/pipeline/` HumorNode). The regex-based **offense
+auto-roast** was retired too, replaced by the LLM-classified insult ladder in
+`src/pipeline/filter_node.py` / `src/pipeline/insult_gate.py` (comeback →
+dismissive one-liner → bored emoji). Roast generation (`Roaster.generate` /
+`generate_roast_text`) currently has no automatic trigger and is kept as a
+reusable building block for future commands, jobs or engagement features.
 
 ## Trigger mode
 
 ```
-auto-roast        — two consecutive offensive replies to bot → immediate roast of the offender
+(none currently — generator is dormant, callable programmatically)
 ```
 
 ## Generation pipeline
 
 ```
-1. Target — the offending user (chosen by the caller in src/events/messages.py)
+1. Target — chosen by the caller
 
 2. Pick mode (random, avoiding the angle used last time on this target)
        The target's last RECENT_MODE_WINDOW = 1 anchor_key(s) are read from roast_log and excluded
@@ -32,7 +35,7 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
        fact that makes the joke land. The mode instruction tells the model which angle to take.
 
 4. LLM call
-       model:       openai/gpt-oss-120b  → llama-3.3-70b-versatile → llama-4-scout (fallback chain)
+       model:       openai/gpt-oss-120b  → llama-3.3-70b-versatile → gpt-oss-20b (fallback chain)
                     gpt-oss-120b is primary: better world-knowledge/fact-comprehension, and it draws
                     on a SEPARATE Groq token budget from llama-3.3 (the main agent model), so heavy
                     roasting does not starve the bot's regular replies.
@@ -52,7 +55,7 @@ auto-roast        — two consecutive offensive replies to bot → immediate roa
 5. Fallback (no facts at all)
        → mock them for never writing anything ("@username вообще ничего не пишет в чате")
 
-6. The offense handler (src/events/messages.py) sends the roast and stores it to
+6. The caller is responsible for sending the roast and storing it to
    unified_messages so users can reply to it and the bot has context.
 ```
 
@@ -67,18 +70,18 @@ user_memories
              pair) for the chosen mode's angle and crafts one short, blunt jab
 ```
 
-## Auto-roast detection
+## Related protections (live elsewhere)
 
 ```
-GuardNode classifies message as MALICIOUS + trigger="explicit" (@mention or reply to bot)
+GuardNode (src/pipeline/guard_node.py)
+    MALICIOUS + trigger="explicit" (@mention or reply to bot)
     → random refusal sent to user
     → hack attempt recorded in user_memories as "Пытался взломать бота N раз"
-    → roasted_count incremented in user_stats
 
-handle_message (src/events/messages.py)
-    → OFFENSE_RE matches text + message is a reply to the bot
-    → offense_reply_counts[chat_id][user_id] += 1
-    → if count >= 2: reset counter, generate roast, increment roasted_count
+Insult ladder (src/pipeline/filter_node.py + insult_gate.py)
+    LLM-confirmed insult aimed at the bot
+    → 1st in 30 min: witty comeback; 2nd–3rd: canned dismissive line; 4+: bored emoji
+    → each insult recorded in user_memories as "Оскорблял бота N раз"
 ```
 
 ---

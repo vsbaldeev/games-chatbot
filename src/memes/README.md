@@ -81,13 +81,12 @@ CREATE TABLE sent_memes (
 ```
 
 The `url` column stores the opaque dedup **key** (`9gag:…`, `tg:…`), not
-necessarily an image URL. Initialized by `store.init_table()`, called at bot
-startup in `src/bot/__init__.py`.
+necessarily an image URL. The `sent_memes` table is provisioned by Alembic
+migrations (`alembic upgrade head`), not by the bot at startup.
 
 ## store.py
 
 ```
-init_table()              — CREATE TABLE IF NOT EXISTS sent_memes
 get_seen_urls(chat_id)    — SELECT url WHERE chat_id = ? → set[str]
 mark_seen(chat_id, key)   — INSERT ON CONFLICT DO NOTHING (chat_id, key)
 ```

@@ -1,5 +1,7 @@
 """Groq-specific LangChain agent middleware and async call guard."""
 
+import asyncio
+import random
 import re
 from typing import Any, Callable
 
@@ -46,6 +48,64 @@ def should_retry(err: Exception) -> bool:
         return False
     error_str = str(err).lower()
     return not any(phrase in error_str for phrase in DAILY_LIMIT_PHRASES)
+
+
+RATE_LIMIT_MAX_ATTEMPTS = 4
+RATE_LIMIT_BASE_DELAY = 1.0
+RATE_LIMIT_MAX_DELAY = 30.0
+RATE_LIMIT_JITTER = 1.0
+
+
+def retry_after_seconds(err: groq.RateLimitError) -> float | None:
+    """Extract Groq's suggested ``retry-after`` delay from a rate-limit error.
+
+    Args:
+        err: The Groq rate-limit error whose response headers may carry the hint.
+
+    Returns:
+        The server-suggested delay in seconds, or ``None`` when absent or unparseable.
+    """
+    response = getattr(err, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("retry-after")
+    try:
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def ainvoke_with_backoff(runnable, messages, *, max_attempts: int = RATE_LIMIT_MAX_ATTEMPTS) -> Any:
+    """Invoke ``runnable.ainvoke``, retrying transient Groq TPM 429s with backoff.
+
+    Honors Groq's ``retry-after`` header when present, otherwise falls back to
+    exponential backoff. Jitter desynchronises concurrent callers so a burst of
+    background tasks does not re-stampede the shared token bucket in lockstep.
+    Daily-quota 429s and all non-rate-limit errors propagate immediately.
+
+    Args:
+        runnable: Any object exposing an async ``ainvoke`` method.
+        messages: The message payload forwarded to ``ainvoke``.
+        max_attempts: Total number of attempts before giving up.
+
+    Returns:
+        The result of the first successful ``ainvoke`` call.
+
+    Raises:
+        groq.RateLimitError: If every attempt is exhausted on transient limits.
+        Exception: Any non-retryable error is re-raised unchanged.
+    """
+    for attempt in range(max_attempts):
+        try:
+            return await runnable.ainvoke(messages)
+        except groq.RateLimitError as err:
+            if not should_retry(err) or attempt == max_attempts - 1:
+                raise
+            delay = retry_after_seconds(err)
+            if delay is None:
+                delay = min(RATE_LIMIT_BASE_DELAY * (2 ** attempt), RATE_LIMIT_MAX_DELAY)
+            await asyncio.sleep(delay + random.uniform(0, RATE_LIMIT_JITTER))
 
 
 async def guarded_ainvoke(runnable, *args, **kwargs) -> Any:

@@ -12,10 +12,13 @@ pool: asyncpg.Pool | None = None
 
 
 async def init() -> None:
+    """Create the shared connection pool.
+
+    The ``vector`` extension and all tables are provisioned by Alembic
+    migrations (``alembic upgrade head``) before the process starts, so the
+    pool's ``register_vector`` codec has a type to bind to.
+    """
     global pool
-    bootstrap = await asyncpg.connect(config.DATABASE_URL)
-    await bootstrap.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    await bootstrap.close()
     pool = await asyncpg.create_pool(
         config.DATABASE_URL, min_size=2, max_size=10, init=register_vector
     )

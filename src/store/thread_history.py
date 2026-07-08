@@ -1,9 +1,15 @@
 """
 Per-thread conversation history for the response LLM.
 
-Each thread corresponds to a Telegram reply chain (keyed by its root message)
-or the flat chat (keyed by chat_id alone).  Rows are stored oldest-first and
-retrieved in that order so the LLM always sees chronological context.
+Each thread corresponds to a Telegram reply chain, keyed by its root message
+(``{chat_id}_{root_message_id}``, see :func:`thread_id_for_root`). Flat
+(non-reply) exchanges are stored under the prospective chain root — the
+triggering message id — so a follow-up reply chain starts pre-seeded with
+the exchange that spawned it. Rows are stored oldest-first and retrieved in
+that order so the LLM always sees chronological context.
+
+Legacy rows keyed by chat_id alone (the old flat bucket) are no longer read
+or written; the retention cleanup ages them out.
 """
 
 import time
@@ -13,22 +19,18 @@ from src.store import db as database
 HISTORY_RETENTION_DAYS = 60
 
 
-async def init_table() -> None:
-    async with database.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS thread_history (
-                    thread_id  TEXT             NOT NULL,
-                    chat_id    BIGINT           NOT NULL,
-                    role       TEXT             NOT NULL,
-                    content    TEXT             NOT NULL,
-                    created_at DOUBLE PRECISION NOT NULL
-                )
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_thread_history_lookup
-                ON thread_history (thread_id, created_at)
-            """)
+def thread_id_for_root(chat_id: int, message_id: int) -> str:
+    """Build the thread id for the chain rooted at a message.
+
+    Args:
+        chat_id: Chat the thread belongs to.
+        message_id: Root message of the reply chain (or the prospective
+            root — the triggering message — for flat exchanges).
+
+    Returns:
+        Thread id string of the form ``{chat_id}_{message_id}``.
+    """
+    return f"{chat_id}_{message_id}"
 
 
 async def get_history(*, thread_id: str, limit: int) -> list[dict]:

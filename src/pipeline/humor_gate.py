@@ -3,7 +3,7 @@
 Keeps the expensive comedian model off the per-message hot path. Per-chat
 in-memory counters decide whether a message is even worth *considering* for a
 joke; the model only runs when the gate fires. State is intentionally in-memory
-(KISS, mirroring ``offense_reply_counts``) — losing cadence history on restart is
+(KISS, mirroring ``insult_gate``) — losing cadence history on restart is
 harmless for a rare-and-sharp feature.
 
 Cadence (anti-spam):

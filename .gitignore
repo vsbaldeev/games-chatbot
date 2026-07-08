@@ -5,6 +5,7 @@ data/*.db-wal
 __pycache__/
 *.pyc
 .venv/
+.cache/
 *.egg-info/
 .idea/
 .claude/settings.local.json

@@ -5,14 +5,12 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src import achievements
-from src.achievements import notify_unlocks
 from src.store.roast_store import is_roast_message, record_reaction
 
 logger = log.get_logger(__name__)
 
 
 async def __credit_reaction_stats(
-    context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     author_id: int,
     author_username: str,
@@ -29,14 +27,9 @@ async def __credit_reaction_stats(
         (fire_emojis, "fire_reactions"),
         (thumb_emojis, "thumbsup_reactions"),
     ]
-    credited_any = False
     for emoji_set, stat_name in stat_map:
         if added_emojis & emoji_set:
             await achievements.increment_stat(author_id, chat_id, author_username, stat_name)
-            credited_any = True
-
-    if credited_any:
-        await notify_unlocks(context, chat_id, author_id, author_username)
 
 
 async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -73,4 +66,4 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         added_emojis, reaction.message_id, chat_id, author_username,
     )
 
-    await __credit_reaction_stats(context, chat_id, author_id, author_username, added_emojis)
+    await __credit_reaction_stats(chat_id, author_id, author_username, added_emojis)

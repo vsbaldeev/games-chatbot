@@ -19,6 +19,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # Generates YouTube PO tokens so yt-dlp survives «Sign in to confirm you're
+  # not a bot» on datacenter IPs. The bgutil-ytdlp-pot-provider plugin inside
+  # the bot fetches tokens from it automatically (src/pipeline/shorts.py).
+  # `latest` is deliberate: the provider must track YouTube-side changes.
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    init: true
+    mem_limit: 256m
+    memswap_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   bot:
     build: .
     image: games-chatbot
@@ -33,8 +49,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    mem_limit: 800m
-    memswap_limit: 800m
+      # No health condition: the bot must start even when the sidecar is
+      # down — Shorts summaries degrade to silence, everything else works.
+      pot-provider:
+        condition: service_started
+    # 2g: CPU torch + the resident Silero TTS model do not fit in the old
+    # 800m cap; postgres keeps 1g, the OS keeps the rest of the 4GB VPS.
+    mem_limit: 2g
+    memswap_limit: 2g
     logging:
       driver: json-file
       options:
