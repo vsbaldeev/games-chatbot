@@ -152,7 +152,7 @@ class TestPhotoEnrichmentInReplyChain:
         with contextlib.ExitStack() as stack:
             patch_store(stack, chain=[photo_row])
             mock_describe = stack.enter_context(
-                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="Мем с котом в шляпе.")
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value=(False, "Мем с котом в шляпе."))
             )
             result = await context_builder(state)
 
@@ -174,7 +174,7 @@ class TestPhotoEnrichmentInReplyChain:
         with contextlib.ExitStack() as stack:
             patch_store(stack, chain=[photo_row])
             mock_describe = stack.enter_context(
-                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="whatever")
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value=(None, "whatever"))
             )
             result = await context_builder(state)
 
@@ -193,7 +193,7 @@ class TestPhotoEnrichmentInReplyChain:
         with contextlib.ExitStack() as stack:
             patch_store(stack, chain=[photo_row])
             mock_describe = stack.enter_context(
-                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="whatever")
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value=(None, "whatever"))
             )
             await context_builder(state)
 
@@ -212,7 +212,7 @@ class TestPhotoEnrichmentInReplyChain:
         with contextlib.ExitStack() as stack:
             patch_store(stack, chain=[photo_row])
             stack.enter_context(
-                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value="Описание мема.")
+                patch(DESCRIBE_PHOTO, new_callable=AsyncMock, return_value=(True, "Описание мема."))
             )
             mock_update = stack.enter_context(
                 patch(STORE_UPDATE_CONTENT, new_callable=AsyncMock)

@@ -14,7 +14,7 @@ Respond when:
   - The text mentions the bot by word («бот» / "bot") without addressing it —
     routed with response_trigger="insult_check"; the filter node replies only
     if it confirms the message insults the bot.
-  - Random chance fires for voice/video_note/video/photo (20%).
+  - Random chance fires for voice/video_note/video/photo (10%).
   - A text message contains a YouTube Shorts link — routed with
     response_trigger="youtube_short" so the pipeline summarizes the video.
     This check runs before the forwarded-message guard (forwarding is the
@@ -37,7 +37,7 @@ from src.utils.ttl_gate import TtlGate
 
 logger = log.get_logger(__name__)
 
-MEDIA_RESPONSE_CHANCE = 0.20
+MEDIA_RESPONSE_CHANCE = 0.10
 
 # Albums (shared media_group_id) roll the random-response dice once for the
 # whole group instead of once per item. Albums arrive within seconds; the

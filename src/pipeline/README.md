@@ -51,7 +51,7 @@ incoming message
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
     │     ├─ album item whose media_group_id already rolled (5-min TtlGate)
     │     │                           → should_respond=False (one roll per album)
-    │     └─ otherwise               → random.random() < MEDIA_RESPONSE_CHANCE (0.20)
+    │     └─ otherwise               → random.random() < MEDIA_RESPONSE_CHANCE (0.10)
     │
     └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
     │
@@ -122,8 +122,11 @@ ingester (current message, should_respond=True only)
     │     PO tokens for YouTube bot-detection come automatically from the
     │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
     ├─ voice      → Groq Whisper → transcript
-    ├─ video_note → Groq Whisper + frame extraction (see below)
-    ├─ video      → Groq Whisper + frame extraction (see below)
+    ├─ video_note → Groq Whisper + frame extraction (see below); frames' vision
+    │               calls also yield media_is_real_person (majority vote — see below)
+    ├─ video      → Groq Whisper + frame extraction (see below); same
+    │               media_is_real_person aggregation (unused for gating today —
+    │               only photo/video_note are gated, see filter below)
     ├─ photo      → vision LLM description; combined with caption when present
     │               "<description>\n(подпись: <caption>)" form
     │               all non-text results: update unified_messages content
@@ -134,10 +137,26 @@ ingester (current message, should_respond=True only)
     │               short visible text (meme captions, реплики, headlines) is
     │               quoted verbatim in its original language, so requests like
     │               «переведи» have the actual text to work with
+    │               the same vision call also yields media_is_real_person
+    │               (see below) — no extra LLM round trip
     └─ sticker    → vision LLM description, only when should_respond=True
                     (plain sticker traffic is enriched lazily instead — see
                     below; note the router currently never responds to
                     stickers, so in practice all sticker enrichment is lazy)
+
+real-person-vs-meme classification (ingester.parse_vision_response)
+    every vision call (photo, and each extracted video/video_note frame) is
+    instructed to prepend a [ЧЕЛОВЕК]/[МЕМ] tag before its description
+    (VISION_PROMPT); the tag is parsed off and never leaks into the stored
+    description. For photo it is used directly; for video/video_note the
+    per-frame tags are majority-voted (aggregate_real_person) into one
+    media_is_real_person verdict, None when no frame could be classified.
+    Surfaced in BotState as media_is_real_person (None for text/voice or on
+    any classification failure — fails open). Consumed only by the filter
+    node's random-trigger meme gate (see Safety below); explicit @mentions
+    and replies ignore it entirely, and lazy reply-chain photo enrichment
+    (enrich_photo_row) discards it — only the currently incoming message's
+    classification can gate a response.
 
 transcription (Groq Whisper, verbose_json, temperature=0)
     language pinned to Russian (WHISPER_LANGUAGE) — short notes no longer flip
@@ -196,7 +215,15 @@ filter  (runs after ingester)
     │       │     voice/video → «Не расслышал…» (TRANSCRIPTION_FAILED_REPLIES)
     │       │     photo       → «Не разглядел…» (VISION_FAILED_REPLIES)
     │       └─ random trigger → should_respond=False + random emoji reaction
-    ├─ media message, processed_text non-empty → pass through
+    ├─ media message, processed_text non-empty
+    │       ├─ random trigger, media_type in (photo, video_note), and
+    │       │     media_is_real_person is False (a meme, not a real person —
+    │       │     see ingester's real-person-vs-meme classification above)
+    │       │       → should_respond=False, fully silent — as if the random
+    │       │         roll had simply missed (is_meme_random_trigger)
+    │       └─ otherwise → pass through (explicit @mentions/replies are
+    │             never gated — a member directly asking the bot to react
+    │             to a meme still gets the roast)
     ├─ text, raw_text empty  → should_respond=False (silent)
     addressed messages (trigger="explicit", FILTER_SYSTEM prompt):
     │   if the message is a reply, the replied-to message is loaded from
@@ -445,6 +472,7 @@ BotState:
     blocked: bool
     youtube_short_url: str | None      # canonical Shorts URL, set by router
     youtube_short_content: str | None  # labelled transcript/frames/comments block, set by ingester
+    media_is_real_person: bool | None  # vision classification for photo/video_note/video, set by ingester; None = text/voice/unclassified
     context: AssembledContext | None
     thread_id: str | None              # {chat_id}_{root_message_id} for replies, chat_id for flat; scopes LLM history
     is_flat_thread: bool               # True when the message is not a reply; skips thread-history reads

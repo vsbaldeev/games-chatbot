@@ -11,6 +11,13 @@ Processes raw media into readable text:
   - video_note → transcribed via Groq Whisper + frames described via Vision LLM
   - video      → transcribed via Groq Whisper + frames described via Vision LLM
   - photo      → described via vision LLM (one-sentence description)
+
+  Every vision call also returns a real-person-vs-meme classification (see
+  ``parse_vision_response``), piggybacked on the same call — no extra LLM
+  round trip. It is surfaced as ``media_is_real_person`` in the pipeline
+  state and used by the filter node to skip the unprompted random reaction
+  to photos/video notes that are not a genuine photo of a real person
+  (memes, screenshots, art…); explicit @mentions/replies are unaffected.
   - sticker    → described via vision LLM, but only when the bot is about to
                  respond; descriptions are cached per sticker identity
                  (file_unique_id) in sticker_descriptions, so a resent
@@ -54,12 +61,54 @@ from langchain_core.messages import HumanMessage
 
 from src import config
 from src.agent import ainvoke_with_backoff
-from src.config.prompts import VISION_PROMPT
+from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
 from src.pipeline import shorts
 from src.pipeline.state import BotState
 from src.store import sticker_descriptions, unified_messages
 
 logger = log.get_logger(__name__)
+
+VISION_TAG_RE = re.compile(rf"^\[({VISION_REAL_PERSON_TAG}|{VISION_MEME_TAG})\]\s*", re.IGNORECASE)
+
+
+def parse_vision_response(raw: str) -> tuple[bool | None, str]:
+    """Split a vision LLM response into its real-person classification and description.
+
+    Args:
+        raw: Raw vision LLM output, expected to start with a
+            ``[ЧЕЛОВЕК]``/``[МЕМ]`` tag per ``VISION_PROMPT``.
+
+    Returns:
+        Tuple of ``(is_real_person, description)``. ``is_real_person`` is
+        True/False when the tag is present and recognized, or None when the
+        model omitted or malformed it — callers gating on this value must
+        fail open (None never suppresses a response) rather than treat a
+        parsing hiccup as a meme.
+    """
+    text = raw.strip()
+    match = VISION_TAG_RE.match(text)
+    if not match:
+        return None, text
+    is_real_person = match.group(1).upper() == VISION_REAL_PERSON_TAG
+    return is_real_person, text[match.end():].strip()
+
+
+def aggregate_real_person(frame_results: list[tuple[bool | None, str]]) -> bool | None:
+    """Aggregate per-frame real-person classifications into one verdict.
+
+    Args:
+        frame_results: ``(is_real_person, description)`` pairs, one per
+            successfully described keyframe.
+
+    Returns:
+        True when a majority of classified frames show a real person, False
+        when a majority do not, or None when no frame could be classified —
+        callers must treat None as "unknown" and not suppress a response on it.
+    """
+    votes = [is_real_person for is_real_person, _ in frame_results if is_real_person is not None]
+    if not votes:
+        return None
+    return sum(votes) > len(votes) / 2
 
 def _make_vision_llm() -> ChatGroq:
     """Return a ChatGroq instance configured for vision tasks.
@@ -183,7 +232,7 @@ async def transcribe_voice(file_id: str, media_type: str, bot) -> str:
     return await transcribe_bytes(audio_bytes, media_type, filename)
 
 
-async def describe_image_bytes(raw_bytes: bytes) -> str:
+async def describe_image_bytes(raw_bytes: bytes) -> tuple[bool | None, str]:
     """Describe raw image bytes (PNG/WEBP/JPEG) in Russian via the vision LLM.
 
     Args:
@@ -191,7 +240,8 @@ async def describe_image_bytes(raw_bytes: bytes) -> str:
             bytes, defaulting to JPEG.
 
     Returns:
-        The stripped vision description. Errors propagate to the caller.
+        ``(is_real_person, description)`` — see :func:`parse_vision_response`.
+        Errors propagate to the caller.
     """
     if raw_bytes[:4] == b'\x89PNG':
         mime = "image/png"
@@ -208,11 +258,16 @@ async def describe_image_bytes(raw_bytes: bytes) -> str:
             {"type": "text", "text": VISION_PROMPT},
         ]),
     ])
-    return response.content.strip()
+    return parse_vision_response(response.content)
 
 
-async def describe_photo(file_id: str, bot) -> str:
-    """Download a Telegram photo and return a one-sentence Russian description via vision LLM."""
+async def describe_photo(file_id: str, bot) -> tuple[bool | None, str]:
+    """Download a Telegram photo and return its real-person classification + description.
+
+    Returns:
+        ``(is_real_person, description)`` — see :func:`parse_vision_response`.
+        ``(None, "")`` on any download or vision failure.
+    """
     try:
         tg_file = await bot.get_file(file_id)
         buffer = io.BytesIO()
@@ -220,7 +275,7 @@ async def describe_photo(file_id: str, bot) -> str:
         return await describe_image_bytes(buffer.getvalue())
     except Exception as err:
         logger.error("Photo description failed for file %s: %s", file_id, err)
-        return ""
+        return None, ""
 
 
 async def enrich_photo_row(row: dict, chat_id: int, bot) -> dict:
@@ -249,7 +304,7 @@ async def enrich_photo_row(row: dict, chat_id: int, bot) -> dict:
     if not file_id:
         return row
     caption = unified_messages.extract_photo_caption(row["content"])
-    description = await describe_photo(file_id, bot)
+    _, description = await describe_photo(file_id, bot)
     if not description:
         return row
     combined = unified_messages.combine_description_and_caption(description, caption)
@@ -301,9 +356,10 @@ async def describe_sticker_bytes(raw_bytes: bytes) -> str:
     if kind == "animated":
         return ""
     if kind == "video":
-        frame_descriptions = await extract_and_describe_frames(raw_bytes)
-        return "\n".join(frame_descriptions)
-    return await describe_image_bytes(raw_bytes)
+        frame_results = await extract_and_describe_frames(raw_bytes)
+        return "\n".join(description for _, description in frame_results)
+    _, description = await describe_image_bytes(raw_bytes)
+    return description
 
 
 async def describe_sticker(file_id: str, bot) -> str:
@@ -402,7 +458,12 @@ async def enrich_media_row(row: dict, chat_id: int, bot) -> dict:
     return row
 
 
-async def describe_frame(frame_bytes: bytes) -> str:
+async def describe_frame(frame_bytes: bytes) -> tuple[bool | None, str]:
+    """Describe a single video keyframe via the vision LLM.
+
+    Returns:
+        ``(is_real_person, description)`` — see :func:`parse_vision_response`.
+    """
     b64_image = base64.b64encode(frame_bytes).decode()
     llm = _make_vision_llm()
     response = await ainvoke_with_backoff(llm, [
@@ -411,21 +472,31 @@ async def describe_frame(frame_bytes: bytes) -> str:
             {"type": "text", "text": VISION_PROMPT},
         ]),
     ])
-    return response.content.strip()
+    return parse_vision_response(response.content)
 
 
-async def extract_and_describe_frames(video_bytes: bytes) -> list[str]:
+async def extract_and_describe_frames(video_bytes: bytes) -> list[tuple[bool | None, str]]:
+    """Extract keyframes from a video and describe each via the vision LLM.
+
+    Returns:
+        ``(is_real_person, description)`` pairs for successfully described
+        frames; a failed frame extraction or a failed individual frame
+        description is dropped rather than raised.
+    """
     loop = asyncio.get_event_loop()
     try:
         frames = await loop.run_in_executor(None, extract_frames_sync, video_bytes)
     except Exception as err:
         logger.warning("Frame extraction failed: %s", err)
         return []
-    descriptions = await asyncio.gather(
+    results = await asyncio.gather(
         *[describe_frame(frame) for frame in frames],
         return_exceptions=True,
     )
-    return [desc for desc in descriptions if isinstance(desc, str) and desc]
+    return [
+        result for result in results
+        if isinstance(result, tuple) and result[1]
+    ]
 
 
 def compose_video_content(transcript: str, frame_descriptions: list[str]) -> str:
@@ -455,8 +526,15 @@ def compose_video_content(transcript: str, frame_descriptions: list[str]) -> str
     return "\n".join(parts)
 
 
-async def transcribe_video(file_id: str, media_type: str, bot) -> str:
-    """Download a video/video_note, transcribe audio and describe frames."""
+async def transcribe_video(file_id: str, media_type: str, bot) -> tuple[bool | None, str]:
+    """Download a video/video_note, transcribe audio and describe frames.
+
+    Returns:
+        ``(is_real_person, content)`` — ``is_real_person`` aggregates the
+        per-frame classifications (see :func:`aggregate_real_person`);
+        ``content`` is the composed transcript + frame-description block.
+        ``(None, "")`` on a download failure.
+    """
     try:
         tg_file = await bot.get_file(file_id)
         buffer = io.BytesIO()
@@ -464,12 +542,14 @@ async def transcribe_video(file_id: str, media_type: str, bot) -> str:
         video_bytes = buffer.getvalue()
     except Exception as err:
         logger.error("Video download failed for file %s: %s", file_id, err)
-        return ""
-    transcript, frame_descriptions = await asyncio.gather(
+        return None, ""
+    transcript, frame_results = await asyncio.gather(
         transcribe_bytes(video_bytes, media_type),
         extract_and_describe_frames(video_bytes),
     )
-    return compose_video_content(transcript, frame_descriptions)
+    frame_descriptions = [description for _, description in frame_results]
+    is_real_person = aggregate_real_person(frame_results)
+    return is_real_person, compose_video_content(transcript, frame_descriptions)
 
 
 def compose_comments_block(comments: list[dict]) -> str:
@@ -539,10 +619,11 @@ async def summarize_youtube_short(url: str) -> str:
     if downloaded is None:
         return ""
     video_bytes, info = downloaded
-    transcript, frame_descriptions = await asyncio.gather(
+    transcript, frame_results = await asyncio.gather(
         transcribe_bytes(video_bytes, "video", "short.mp4"),
         extract_and_describe_frames(video_bytes),
     )
+    frame_descriptions = [description for _, description in frame_results]
     if not transcript and not frame_descriptions:
         logger.warning("Shorts content extraction produced nothing for %s", url)
         return ""
@@ -568,27 +649,25 @@ class MessageIngester:
             state: Current pipeline state.
 
         Returns:
-            State update dict with the enriched ``incoming`` message and,
-            for Shorts triggers, the ``youtube_short_content`` success flag.
+            State update dict with the enriched ``incoming`` message, the
+            ``media_is_real_person`` classification (photo/video_note/video
+            only; None otherwise) and, for Shorts triggers, the
+            ``youtube_short_content`` success flag.
         """
         msg = state["incoming"]
         media_type = msg["media_type"]
         bot = state["context_types"].bot
         short_content: str | None = None
+        is_real_person: bool | None = None
 
         if media_type == "text":
             processed, short_content = await self.__ingest_text(state)
         elif media_type == "voice":
             processed = await transcribe_voice(msg["file_id"], "voice", bot)
         elif media_type in ("video_note", "video"):
-            processed = await transcribe_video(msg["file_id"], media_type, bot)
+            is_real_person, processed = await transcribe_video(msg["file_id"], media_type, bot)
         elif media_type == "photo":
-            description = await describe_photo(msg["file_id"], bot)
-            caption = msg["raw_text"] or ""
-            if description:
-                processed = unified_messages.combine_description_and_caption(description, caption)
-            else:
-                processed = caption
+            is_real_person, processed = await self.__ingest_photo(msg, bot)
         elif media_type == "sticker" and state["should_respond"]:
             # Only when the bot is about to answer — plain sticker traffic is
             # enriched lazily (reply chains / replied-to lookups) to avoid a
@@ -602,10 +681,28 @@ class MessageIngester:
 
         incoming_update = dict(state["incoming"])
         incoming_update["processed_text"] = processed
-        result: dict = {"incoming": incoming_update}
+        result: dict = {"incoming": incoming_update, "media_is_real_person": is_real_person}
         if state.get("response_trigger") == "youtube_short":
             result["youtube_short_content"] = short_content or None
         return result
+
+    async def __ingest_photo(self, msg: dict, bot) -> tuple[bool | None, str]:
+        """Describe an incoming photo and combine it with its caption.
+
+        Args:
+            msg: IncomingMessage dict of the photo message.
+            bot: Telegram bot instance used to download the photo.
+
+        Returns:
+            ``(is_real_person, processed_text)`` — see :func:`describe_photo`;
+            ``processed_text`` falls back to the bare caption when the vision
+            call produced no description.
+        """
+        is_real_person, description = await describe_photo(msg["file_id"], bot)
+        caption = msg["raw_text"] or ""
+        if description:
+            return is_real_person, unified_messages.combine_description_and_caption(description, caption)
+        return is_real_person, caption
 
     async def __update_stored_content(self, msg: dict, content: str) -> None:
         """Overwrite the stored placeholder row with the real content.
