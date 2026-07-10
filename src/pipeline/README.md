@@ -288,8 +288,16 @@ context_builder
     ├─ load user_memories facts for all user_ids visible in recent history
     ├─ load initiating user's facts if not already in recent participants
     ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
-    └─ resolve @mentions (in the question + replied_to) to members and load their
-       weekly role + reason from user_tags → mentioned_tags
+    ├─ resolve @mentions (in the question + replied_to) to members and load their
+    │    weekly role + reason from user_tags → mentioned_tags
+    ├─ bot canon: embed processed_text once, reuse for both queries — top-5
+    │    bot_memories.find_similar_facts + 3 newest get_facts (dedupe, cap 8)
+    │    → bot_self_facts; top-2 find_similar_episodes above a similarity
+    │    floor → bot_self_episodes (Жора's own life canon; see src/life/README.md)
+    │    degrades to [] on any failure (embed or DB error) — never fails the pipeline
+    └─ bot current activity: newest episode's current_activity bucketed by
+         age — < 12h "fresh", < 48h "recent", older → None (the bot improvises
+         instead of reading a stale answer) → bot_current_activity
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
@@ -349,6 +357,13 @@ response   personality LLM (ReAct executor, no tools)
     │            gets a real translation
     │          when someone asks why they (or an @mentioned member) have a role, the
     │          bot explains it from the stored reason
+    │          + Жора's own life canon (build_bot_life_lines): relevant canon facts
+    │            and past episodes from bot_self_facts/bot_self_episodes (only when
+    │            the current message actually touches that topic — background
+    │            colour, never filler), plus a current-activity line
+    │            («[Прямо сейчас ты]: …» / «[Недавно ты]: …») from
+    │            bot_current_activity so «что делаешь сейчас» answers consistently
+    │            with the latest life post instead of being improvised fresh each time
     │          when the filter set is_bot_insult=True, a hint is injected before the
     │            trigger line telling the model the message is an attack on it and to
     │            answer with a sharp comeback instead of a neutral reply
@@ -419,6 +434,9 @@ AssembledContext:
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
     asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
+    bot_self_facts: list[str]            # Жора's own canon facts relevant to this message
+    bot_self_episodes: list[str]         # Жора's own past life-post episodes relevant to this message
+    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post
 
 BotState:
     incoming: IncomingMessage

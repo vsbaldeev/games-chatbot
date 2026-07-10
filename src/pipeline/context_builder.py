@@ -19,17 +19,26 @@ Assembles everything the Agent node needs for an enriched prompt:
 """
 
 import re
+import time
 
 from src import achievements, log
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.state import AssembledContext, BotState
-from src.store import unified_messages, user_memories, user_tags
+from src.store import bot_memories, embedder, unified_messages, user_memories, user_tags
 
 logger = log.get_logger(__name__)
 
 RECENT_HISTORY_LIMIT = 20
 CHAIN_MSG_CHAR_LIMIT = 400
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
+
+# Bot canon retrieval, mirroring user-facts sizing: a handful of relevant
+# facts plus at most one or two full episodes when the topic is a specific
+# past story.
+BOT_FACTS_SIMILAR_LIMIT = 5
+BOT_FACTS_NEWEST_LIMIT = 3
+BOT_FACTS_CAP = 8
+BOT_EPISODES_LIMIT = 2
 
 
 class ContextBuilder:
@@ -55,6 +64,8 @@ class ContextBuilder:
         mentioned_tags = await self.__collect_mentioned_tags(
             chat_id, msg, replied_to, asker_username=msg["username"]
         )
+        bot_self_facts, bot_self_episodes = await self.__collect_bot_canon(msg)
+        bot_current_activity = await self.__get_bot_current_activity()
 
         assembled: AssembledContext = {
             "user_facts": user_facts,
@@ -63,8 +74,67 @@ class ContextBuilder:
             "reply_chain": reply_chain,
             "asking_user_tag": asking_user_tag,
             "mentioned_tags": mentioned_tags,
+            "bot_self_facts": bot_self_facts,
+            "bot_self_episodes": bot_self_episodes,
+            "bot_current_activity": bot_current_activity,
         }
         return {"context": assembled}
+
+    async def __collect_bot_canon(self, msg: dict) -> tuple[list[str], list[str]]:
+        """Retrieve canon facts and past episodes relevant to the incoming message.
+
+        Embeds the message once and reuses it for both the fact and episode
+        similarity queries. Degrades to empty lists on any failure (embedding
+        or database error) — a missing canon block must never fail the
+        pipeline.
+
+        Args:
+            msg: IncomingMessage dict of the message being processed.
+
+        Returns:
+            ``(bot_self_facts, bot_self_episodes)``, each possibly empty.
+        """
+        text = msg.get("processed_text") or msg.get("raw_text") or ""
+        if not text.strip():
+            return [], []
+        try:
+            query_embedding = await embedder.embed(text)
+            similar_facts = await bot_memories.find_similar_facts(
+                query_embedding, BOT_FACTS_SIMILAR_LIMIT
+            )
+            newest_facts = await bot_memories.get_facts(BOT_FACTS_NEWEST_LIMIT)
+            facts = list(dict.fromkeys(similar_facts + newest_facts))[:BOT_FACTS_CAP]
+            episodes = await bot_memories.find_similar_episodes(
+                query_embedding, top_k=BOT_EPISODES_LIMIT
+            )
+            return facts, episodes
+        except Exception as err:
+            logger.warning("Failed to load bot canon context: %s", err)
+            return [], []
+
+    async def __get_bot_current_activity(self) -> tuple[str, str] | None:
+        """Bucket the newest episode's current-activity phrase by freshness.
+
+        Returns:
+            ``(phrase, "fresh")`` within :data:`bot_memories.ACTIVITY_FRESH_HOURS`,
+            ``(phrase, "recent")`` within :data:`bot_memories.ACTIVITY_RECENT_HOURS`,
+            otherwise None — either the activity is stale (the bot improvises)
+            or the lookup failed.
+        """
+        try:
+            activity = await bot_memories.get_current_activity()
+        except Exception as err:
+            logger.warning("Failed to load bot current activity: %s", err)
+            return None
+        if activity is None:
+            return None
+        phrase, posted_at = activity
+        age_hours = (time.time() - posted_at) / 3600
+        if age_hours < bot_memories.ACTIVITY_FRESH_HOURS:
+            return phrase, "fresh"
+        if age_hours < bot_memories.ACTIVITY_RECENT_HOURS:
+            return phrase, "recent"
+        return None
 
     async def __collect_mentioned_tags(
         self, chat_id: int, msg: dict, replied_to: dict | None, asker_username: str

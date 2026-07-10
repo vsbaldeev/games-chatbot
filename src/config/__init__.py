@@ -21,6 +21,8 @@ from src.config.credentials import (
 )
 from src.config.models import (
     COMEDIAN_MODEL_FALLBACKS,
+    EPISODE_MAX_TOKENS,
+    EPISODE_MODEL_FALLBACKS,
     FILTER_MODEL,
     GUARD_MODEL,
     INSULT_CONFIRM_MODEL,
@@ -56,6 +58,8 @@ __all__ = [
     "TWITCH_CLIENT_SECRET",
     # models
     "COMEDIAN_MODEL_FALLBACKS",
+    "EPISODE_MAX_TOKENS",
+    "EPISODE_MODEL_FALLBACKS",
     "FILTER_MODEL",
     "GUARD_MODEL",
     "INSULT_CONFIRM_MODEL",

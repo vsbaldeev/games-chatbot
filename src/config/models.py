@@ -69,6 +69,18 @@ ROAST_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-20b",
 ]
 
+# Life-post episode writer fallback chain. llama first: only Meta/llama holds
+# the casual Russian style (see RESPONSE_MODEL_FALLBACKS above).
+EPISODE_MODEL_FALLBACKS: list[str] = [
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
+]
+
+# Generous headroom over the ~1100-char JSON contract payload so a post is
+# never truncated mid-joke by the model's completion limit.
+EPISODE_MAX_TOKENS = 2000
+
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly
 # stressed words are the loudest tell of synthetic Russian speech.

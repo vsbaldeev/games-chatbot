@@ -89,6 +89,27 @@ thread_history (
 INDEX idx_thread_history_lookup ON (thread_id, created_at)
 Retention: 60 days (cleanup_messages_job)
 
+-- Жора's own life canon: episode rows are full posted life-story entries
+-- (narrative continuity for the next episode, cap 100, oldest pruned);
+-- fact rows are short durable canon sentences injected into chat replies
+-- (cap 300, semantically deduped on upsert, newest text wins on a match).
+-- current_activity/post_format/posted_at are episode-only columns; the
+-- newest episode's current_activity is the sole "what is Жора doing right
+-- now" answer, decayed by age (fresh/recent/stale) in the context builder.
+bot_memories (
+    id                BIGSERIAL        PRIMARY KEY,
+    kind              TEXT,            -- "episode" | "fact"
+    content           TEXT,            -- full episode text, or one fact sentence
+    embedding         vector(384),     -- fastembed MiniLM-L12
+    post_format       TEXT,            -- episodes only: "story" (more formats later)
+    posted_at         DOUBLE PRECISION,-- episodes only: also the catch-up watermark
+    current_activity  TEXT,            -- episodes only: present-tense residual
+    created_at        DOUBLE PRECISION,
+    updated_at        DOUBLE PRECISION
+)
+INDEX idx_bot_memories_kind_time ON (kind, updated_at DESC)
+INDEX idx_bot_memories_hnsw      ON (embedding vector_cosine_ops) WHERE embedding IS NOT NULL
+
 -- Vision descriptions per sticker identity. file_unique_id is stable across
 -- resends and bots (unlike file_id), so each distinct sticker is described
 -- by the vision LLM at most once ever. No retention — rows are tiny and
@@ -116,6 +137,7 @@ User replies to game messages and the bot's own out-of-pipeline sends
 db.py               asyncpg Pool; acquire() context manager; init() / close() lifecycle
 unified_messages.py insert (ON CONFLICT DO NOTHING), update_content, get_by_id, get_chain (max 10 hops), get_recent (last N), get_media_group, get_user_messages, cleanup_old
 user_memories.py    upsert_facts (cap 30 per user), upsert_hack_attempt, get_facts, get_facts_for_users, get_facts_with_embeddings, find_similar_fact, refresh_updated_at, cleanup_stale (90-day retention)
+bot_memories.py     insert_episode (cap 100, prunes oldest), get_recent_episodes, get_latest_posted_at, get_current_activity, get_facts, get_writer_facts (newest + sampled older), find_similar_facts, find_similar_episodes (similarity floor), upsert_facts (cap 300, semantic dedup, newest wins)
 thread_history.py   append_turn, get_history (thread-scoped, oldest-first), cleanup_old (60-day retention)
 sticker_descriptions.py get_description / save_description — permanent vision-description cache keyed by sticker file_unique_id
 embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[float] (384-dim)

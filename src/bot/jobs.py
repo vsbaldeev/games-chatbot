@@ -7,6 +7,12 @@ from telegram.ext import Application
 
 from src.jobs.agent import reset_model_job
 from src.jobs.cleanup import cleanup_messages_job
+from src.jobs.life_post import (
+    CATCH_UP_DELAY_SECONDS as LIFE_POST_CATCH_UP_DELAY_SECONDS,
+    LIFE_POST_RUN_TIME,
+    catch_up_life_post_job,
+    life_post_job,
+)
 from src.jobs.meme import daily_meme_job
 from src.jobs.roles import CATCH_UP_DELAY_SECONDS, ROLES_RUN_TIME, catch_up_roles_job, weekly_roles_job
 from src.jobs.ytdlp_update import ytdlp_update_job
@@ -22,6 +28,14 @@ class RolesJobManager(JobManagerInterface):
         app.job_queue.run_daily(weekly_roles_job, time=ROLES_RUN_TIME)
         # Recover a Sunday run missed while the bot was down (e.g. network outage).
         app.job_queue.run_once(catch_up_roles_job, when=CATCH_UP_DELAY_SECONDS)
+
+
+class LifePostJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
+        app.job_queue.run_daily(life_post_job, time=LIFE_POST_RUN_TIME)
+        # Posts the deployment opener on a fresh install, or recovers a
+        # missed scheduled slot (e.g. the bot was down during a planned post).
+        app.job_queue.run_once(catch_up_life_post_job, when=LIFE_POST_CATCH_UP_DELAY_SECONDS)
 
 
 class MemeJobManager(JobManagerInterface):
