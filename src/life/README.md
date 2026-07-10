@@ -42,8 +42,8 @@ the post, never kill it.
 ## Scheduling — `src/jobs/life_post.py`
 
 - Exactly `LIFE_POSTS_PER_WEEK = 2` posts per ISO week, on random days at a
-  random minute inside `LIFE_POST_WINDOW` (10:00–22:00, Eastern European Time
-  — `Europe/Kyiv`, DST-aware). `week_plan(now)` is a deterministic seeded plan
+  random minute inside `LIFE_POST_WINDOW` (10:00–22:00, Moscow Time —
+  `Europe/Moscow`, fixed UTC+3, no DST). `week_plan(now)` is a deterministic seeded plan
   (`random.Random(f"life-{iso_year}-{iso_week}")`) — no schedule table, and
   calling it at any point during the week returns the same plan.
 - `life_post_job` runs daily at the window start (`LIFE_POST_RUN_TIME`,

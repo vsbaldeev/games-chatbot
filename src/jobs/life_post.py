@@ -1,6 +1,6 @@
 """Scheduled job: post a life-story episode from Жора's life, twice a week.
 
-Posts land at random daytime moments in Eastern European Time — never at
+Posts land at random daytime moments in Moscow Time — never at
 night, so a proactive post never lands while chat members are asleep (the
 reactive pipeline still answers mentions and replies around the clock; this
 job only governs proactive posting). The very first post ever fires right
@@ -21,12 +21,13 @@ from src.store import bot_memories
 
 logger = log.get_logger(__name__)
 
-LIFE_POST_TIMEZONE = ZoneInfo("Europe/Kyiv")
+LIFE_POST_TIMEZONE = ZoneInfo("Europe/Moscow")
 LIFE_POST_WINDOW = (10, 22)  # local hours [start, end) — no night posts
 LIFE_POSTS_PER_WEEK = 2
 
-# APScheduler resolves this tzinfo with full DST awareness (see JobQueue.run_daily),
-# so the job reliably fires at 10:00 local time year-round.
+# Moscow Time is a fixed UTC+3 offset (no DST), but APScheduler resolves this
+# tzinfo correctly either way (see JobQueue.run_daily), so the job reliably
+# fires at 10:00 local time year-round.
 LIFE_POST_RUN_TIME = datetime.time(hour=LIFE_POST_WINDOW[0], minute=0, tzinfo=LIFE_POST_TIMEZONE)
 
 CATCH_UP_DELAY_SECONDS = 60
@@ -36,7 +37,7 @@ def week_plan(now: datetime.datetime) -> list[datetime.datetime]:
     """Return this ISO week's planned post moments, deterministic for the week.
 
     Args:
-        now: A timezone-aware moment in Eastern European Time; only its ISO
+        now: A timezone-aware moment in Moscow Time; only its ISO
             year/week identify the plan, so any moment during the week
             returns the same result.
 
@@ -65,7 +66,7 @@ def next_window_start(now: datetime.datetime) -> datetime.datetime:
     """Return ``now`` if inside the daytime window, otherwise the next window start.
 
     Args:
-        now: Current timezone-aware moment in Eastern European Time.
+        now: Current timezone-aware moment in Moscow Time.
 
     Returns:
         ``now`` unchanged when inside :data:`LIFE_POST_WINDOW`; otherwise
@@ -86,7 +87,7 @@ def most_recent_due_slot(now: datetime.datetime) -> datetime.datetime | None:
     week boundary can belong to either.
 
     Args:
-        now: Current timezone-aware moment in Eastern European Time.
+        now: Current timezone-aware moment in Moscow Time.
 
     Returns:
         The latest planned moment at/before ``now``, or None if every
