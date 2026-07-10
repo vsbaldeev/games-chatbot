@@ -37,6 +37,9 @@ class AssembledContext(TypedDict):
     reply_chain: list[dict]            # full reply chain from root to replied-to message, oldest-first
     asking_user_tag: dict | None       # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]    # username → {"tag", "reason"} for members @mentioned in the question
+    bot_self_facts: list[str]          # canon facts about the bot's own life, relevant to this message
+    bot_self_episodes: list[str]       # past life-post episodes relevant to this message
+    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post, or None
 
 
 class BotState(TypedDict):

@@ -10,8 +10,6 @@ reason so the bot can later explain why a member got their role.
 
 import asyncio
 import datetime
-import json
-import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -22,6 +20,7 @@ from src import achievements, config, log
 from src.config.prompts import ROLES_SYSTEM_PROMPT, TAG_MAX_CHARS
 from src.store import unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users
+from src.utils.llm_json import load_json_object
 
 logger = log.get_logger(__name__)
 
@@ -82,20 +81,6 @@ def build_fact_line(anon: str, facts: list[str]) -> str:
     return f"{anon}: {'; '.join(facts)}"
 
 
-def load_json_object(raw: str) -> dict | None:
-    """Strip code fences and parse the LLM response into a dict, or None on failure."""
-    try:
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.DOTALL)
-        data = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError, AttributeError) as error:
-        logger.warning("Role generation returned non-JSON: %s — %s", error, raw[:200])
-        return None
-    if not isinstance(data, dict):
-        logger.warning("Role generation expected dict, got %s", type(data).__name__)
-        return None
-    return data
-
-
 def extract_role_reason(value) -> tuple[str, str]:
     """Pull a trimmed ``(role, reason)`` pair from a JSON value (dict or string)."""
     if isinstance(value, dict):
@@ -118,7 +103,7 @@ def parse_roles_response(raw: str, anon_to_uid: dict[str, int]) -> dict[int, dic
         Mapping of user_id to ``{"role", "reason"}``; empty on parse failure or
         when no usable roles were produced.
     """
-    data = load_json_object(raw)
+    data = load_json_object(raw, context="Role generation")
     if data is None:
         return {}
     roles: dict[int, dict] = {}

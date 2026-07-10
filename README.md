@@ -1,10 +1,18 @@
 Telegram group chat bot for a Russian-speaking PS5 friend group.
 
-Friendly and sarcastic personality — answers game questions with dry humour and
+The bot is НейроЖора — Жора for short — a fictional do-it-all guy from an unnamed
+Slavic village whose everyday life is a running quest log (chasing a bear off the
+beehives one day, repainting the house the next), on top of its existing sarcastic
+gaming-assistant personality: answers game questions with dry humour and
 decides on its own when to drop a joke into the chat (a conversation-spawning hook,
-gentle by default, roasting only when someone invites it) or to stay quiet. Tracks
-per-user stats, extracts long-term memories, and routes every message through a
-typed LangGraph pipeline. YouTube Shorts links posted in the chat are watched for
+gentle by default, roasting only when someone invites it) or to stay quiet. Twice a
+week, at a random daytime moment (Eastern European Time — never at night), Жора
+posts a short 2–3 sentence episode from his village life to every chat; the posts
+build a running, self-consistent canon (`src/life/`) that the bot also draws on
+casually in ordinary replies — mentioning a past episode when it is relevant, and
+answering "what are you up to" from whatever its latest post says it is doing.
+Tracks per-user stats, extracts long-term memories, and routes every message through
+a typed LangGraph pipeline. YouTube Shorts links posted in the chat are watched for
 everyone: the bot downloads the short, transcribes and looks at it, reads the top
 comments, and replies with a 1–2 sentence retell of the video plus a short summary
 of the audience reaction in the comments — no verdict, and no fact-checking the
@@ -21,7 +29,8 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
 | [src/commands/](src/commands/README.md) | Command handlers — /duel, /meme |
-| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup |
+| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, life posts, cleanup |
+| [src/life/](src/life/README.md) | Жора's scheduled life posts — episode writing, canon, posting |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
 | [src/achievements/](src/achievements/README.md) | Duel achievements + stat counters (consumed by roast material) |
@@ -42,6 +51,7 @@ Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, loc
 LLM (roast)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → gpt-oss-20b (fallback chain)
 LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.6-27b (autonomous comedian; JSON decide-or-abstain)
 LLM (roles)  Groq llama-3.1-8b-instant
+LLM (life posts) Groq llama-3.3-70b-versatile → gpt-oss-120b → qwen3.6-27b (fallback chain; llama only holds the casual Russian style)
 STT          Groq whisper-large-v3
 TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
 Vision       Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat the whole token budget)

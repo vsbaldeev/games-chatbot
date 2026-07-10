@@ -183,6 +183,38 @@ def build_mentioned_tags_lines(context) -> list[str]:
     return lines
 
 
+def build_bot_life_lines(context) -> list[str]:
+    """Return formatted bot-canon and current-activity lines for the response prompt.
+
+    Args:
+        context: AssembledContext dict or None.
+
+    Returns:
+        Prompt lines for relevant canon facts, relevant past episodes and the
+        current-activity line, each block only present when data exists;
+        empty list when there is no bot canon to show (e.g. empty store).
+    """
+    context = context or {}
+    parts: list[str] = []
+    facts = context.get("bot_self_facts") or []
+    if facts:
+        parts.append("[Твоя жизнь — фоновый канон]:")
+        parts.extend(f"- {fact}" for fact in facts)
+        parts.append("")
+    episodes = context.get("bot_self_episodes") or []
+    if episodes:
+        parts.append("[Твои прошлые истории по теме]:")
+        parts.extend(episodes)
+        parts.append("")
+    activity = context.get("bot_current_activity")
+    if activity:
+        phrase, freshness = activity
+        label = "Прямо сейчас ты" if freshness == "fresh" else "Недавно ты"
+        parts.append(f"[{label}]: {phrase}")
+        parts.append("")
+    return parts
+
+
 def build_trigger_line(
     username: str, user_input: str, media_type: str, replied_to: dict | None,
     response_trigger: str = "explicit",
@@ -226,6 +258,42 @@ def build_trigger_line(
     return f"{speaker}: {user_input}"
 
 
+def build_recent_history_lines(
+    context, response_trigger: str, has_thread_history: bool
+) -> tuple[list[str], dict | None]:
+    """Return recent-history and replied-to prompt lines, plus the replied-to row.
+
+    Args:
+        context: AssembledContext dict or None.
+        response_trigger: Routing trigger; ``"random"``/``"youtube_short"``
+            trim the recent-history slice further (see :func:`build_response_input`).
+        has_thread_history: ``True`` when per-thread turn history is available;
+            suppresses recent chat history to avoid double-context.
+
+    Returns:
+        Tuple of ``(prompt lines, replied_to)`` — the replied-to row is
+        returned alongside so the caller can pass it to :func:`build_trigger_line`
+        without recomputing it.
+    """
+    recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
+    if response_trigger in ("random", "youtube_short"):
+        recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
+    parts: list[str] = []
+    if recent and not has_thread_history:
+        parts.append("Недавние сообщения чата:")
+        parts.extend(render_row(row) for row in reversed(recent))
+        parts.append("")
+
+    replied_to = (context or {}).get("replied_to")
+    if replied_to:
+        recent_ids = {row["message_id"] for row in recent}
+        if replied_to["message_id"] not in recent_ids:
+            parts.append("Сообщение, на которое отвечают:")
+            parts.append(render_row(replied_to))
+            parts.append("")
+    return parts, replied_to
+
+
 def build_response_input(
     username: str,
     user_input: str,
@@ -265,28 +333,17 @@ def build_response_input(
     parts += build_user_facts_lines(context)
     parts += build_asking_user_tag_lines(context, username)
     parts += build_mentioned_tags_lines(context)
+    parts += build_bot_life_lines(context)
 
-    recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     # Skip recent history when thread history is present (thread turns already
     # provide conversational context, group chat would just confuse the model).
     # Random and Shorts triggers keep a thin slice — enough to catch topic
     # mismatch without turning a spontaneous reaction into a reply to the
     # discussion.
-    if response_trigger in ("random", "youtube_short"):
-        recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
-    if recent and not has_thread_history:
-        parts.append("Недавние сообщения чата:")
-        for row in reversed(recent):
-            parts.append(render_row(row))
-        parts.append("")
-
-    replied_to = (context or {}).get("replied_to")
-    if replied_to:
-        recent_ids = {row["message_id"] for row in recent}
-        if replied_to["message_id"] not in recent_ids:
-            parts.append("Сообщение, на которое отвечают:")
-            parts.append(render_row(replied_to))
-            parts.append("")
+    history_lines, replied_to = build_recent_history_lines(
+        context, response_trigger, has_thread_history
+    )
+    parts += history_lines
 
     if worker_output:
         if worker_tools_used:
