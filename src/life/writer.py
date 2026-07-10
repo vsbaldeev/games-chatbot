@@ -10,6 +10,7 @@ from langchain_groq import ChatGroq
 from src import config, log
 from src.agent.middleware import GroqContextGuard, ThinkingStripper, guarded_ainvoke, should_retry
 from src.config.prompts import EPISODE_TEXT_MAX_CHARS, EPISODE_WRITER_SYSTEM
+from src.life.engagement import MEMBER, choose_mode
 from src.store import bot_memories
 from src.utils.llm_json import load_json_object
 
@@ -44,24 +45,46 @@ class Episode:
     format: str
 
 
-def build_episode_prompt(
-    recent_episodes: list[dict],
-    facts: list[str],
-    previous_format: str | None,
-    allowed_formats: tuple[str, ...],
-) -> str:
-    """Assemble the human turn for the episode writer.
+def build_engagement_lines(mode: str, mention: tuple[str, str] | None) -> list[str]:
+    """Return the engagement instruction for this episode: a chat question or a member mention.
+
+    Args:
+        mode: ``engagement.SOLO`` or ``engagement.MEMBER``.
+        mention: ``(username, fact)`` when mode is ``MEMBER``; otherwise None.
+
+    Returns:
+        Prompt lines instructing the writer how to engage the chat this post.
+    """
+    if mode == MEMBER and mention is not None:
+        username, fact = mention
+        return [
+            f"Задание: упомяни в посте живого участника чата @{username}.",
+            f"Известный факт о нём: «{fact}».",
+            "Вплети его в историю тепло и по-доброму — как соседа или друга, который "
+            "появился в твоей жизни, а не как факт для доклада. Опирайся только на этот "
+            "факт, не выдумывай про него ничего сверх. Если факт слишком личный или может "
+            "смутить человека на публике — упомяни его нейтрально, без этой детали, просто "
+            "по-дружески кольни.",
+            "",
+        ]
+    return [
+        "Задание: закончи пост вопросом или подколкой в адрес чата — что-то, на что "
+        "хочется ответить, а не просто прочитать.",
+        "",
+    ]
+
+
+def build_history_lines(recent_episodes: list[dict], facts: list[str]) -> list[str]:
+    """Return prompt lines for past episodes and canon facts.
 
     Args:
         recent_episodes: Recent episode rows, newest-first (as returned by
             ``bot_memories.get_recent_episodes``).
         facts: Canon facts to ground continuity (newest plus sampled older).
-        previous_format: Format of the most recent post, or None when there
-            is no history yet.
-        allowed_formats: Formats the writer may currently choose from.
 
     Returns:
-        The prompt string to send as the human turn.
+        Prompt lines: past episodes oldest-to-newest (or a first-post note
+        when there are none), followed by canon facts when present.
     """
     parts: list[str] = []
     if recent_episodes:
@@ -75,9 +98,39 @@ def build_episode_prompt(
         parts.append("Факты твоего канона:")
         parts.extend(f"- {fact}" for fact in facts)
         parts.append("")
+    return parts
+
+
+def build_episode_prompt(
+    recent_episodes: list[dict],
+    facts: list[str],
+    previous_format: str | None,
+    allowed_formats: tuple[str, ...],
+    mode: str,
+    mention: tuple[str, str] | None,
+) -> str:
+    """Assemble the human turn for the episode writer.
+
+    Args:
+        recent_episodes: Recent episode rows, newest-first (as returned by
+            ``bot_memories.get_recent_episodes``).
+        facts: Canon facts to ground continuity (newest plus sampled older).
+        previous_format: Format of the most recent post, or None when there
+            is no history yet.
+        allowed_formats: Formats the writer may currently choose from.
+        mode: ``engagement.SOLO`` or ``engagement.MEMBER`` — how this post
+            should engage the chat (see :func:`build_engagement_lines`).
+        mention: ``(username, fact)`` when mode is ``MEMBER``; otherwise None.
+
+    Returns:
+        The prompt string to send as the human turn.
+    """
+    parts = build_history_lines(recent_episodes, facts)
     parts.append(f"Доступные форматы: {', '.join(allowed_formats)}.")
     if previous_format:
         parts.append(f"Предыдущий пост был в формате «{previous_format}» — выбери другой, если можно.")
+    parts.append("")
+    parts.extend(build_engagement_lines(mode, mention))
     parts.append("Напиши следующий эпизод. Ответь строго одним JSON-объектом.")
     return "\n".join(parts)
 
@@ -173,7 +226,10 @@ class EpisodeWriterAgent:
         recent_episodes = await bot_memories.get_recent_episodes(EPISODE_CONTEXT_EPISODES)
         facts = await bot_memories.get_writer_facts()
         previous_format = recent_episodes[0]["post_format"] if recent_episodes else None
-        prompt = build_episode_prompt(recent_episodes, facts, previous_format, allowed_formats)
+        mode, mention = await choose_mode()
+        prompt = build_episode_prompt(
+            recent_episodes, facts, previous_format, allowed_formats, mode, mention
+        )
         for attempt in range(WRITE_ATTEMPTS):
             episode = await self.__attempt(prompt, allowed_formats)
             if episode is not None:

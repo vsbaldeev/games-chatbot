@@ -8,12 +8,13 @@ src/jobs/life_post.py (schedule) ──► src/life/poster.py:post_life_episode(
     │
     ├─ src/life/writer.py: EpisodeWriterAgent.write_episode()
     │      reads bot_memories.get_recent_episodes(10) + get_writer_facts()
-    │      (20 newest + 10 sampled older) → prompts EPISODE_WRITER_SYSTEM
-    │      → strict JSON {episode_text, image_prompt, voice_script,
-    │        current_activity, format} → parse_episode validates length
-    │        (≤ EPISODE_TEXT_MAX_CHARS, 450) and required fields; one retry
-    │        on a malformed/invalid response, then None (slot skipped,
-    │        catch-up retries later)
+    │      (20 newest + 10 sampled older); src/life/engagement.choose_mode()
+    │      picks how this post engages the chat (see below) → prompts
+    │      EPISODE_WRITER_SYSTEM → strict JSON {episode_text, image_prompt,
+    │        voice_script, current_activity, format} → parse_episode
+    │        validates length (≤ EPISODE_TEXT_MAX_CHARS, 450) and required
+    │        fields; one retry on a malformed/invalid response, then None
+    │        (slot skipped, catch-up retries later)
     │
     ├─ send_episode: fan out to every chat (achievements.get_all_chat_ids,
     │      asyncio.gather(..., return_exceptions=True) — one chat's failure
@@ -31,6 +32,30 @@ src/jobs/life_post.py (schedule) ──► src/life/poster.py:post_life_episode(
 Zero successful sends leaves `bot_memories` untouched — the watermark
 (`get_latest_posted_at`) stays behind, so catch-up retries the slot on the
 next startup instead of silently losing it.
+
+## Engagement — `src/life/engagement.py`
+
+Жора's posts don't just narrate his own life — each one either asks the chat
+a question or pulls a real member into the story:
+
+- **SOLO** (`MEMBER_MODE_CHANCE = 0.5` chance of *not* landing on MEMBER):
+  the episode closes with a question or callout aimed at the chat.
+- **MEMBER**: `collect_mentionable_facts()` gathers `(username, fact)` pairs
+  across every registered chat from `user_memories` (in practice a single
+  friend group — life posts broadcast identically everywhere, matching
+  `bot_memories`' "one life" design), `is_safe_to_mention` drops counter-tally
+  facts («Оскорблял бота N раз», «Пытался взломать бота N раз») and
+  second-hand cross-user facts («по словам @X, ...») since broadcasting
+  either would misrepresent or embarrass the member, and one surviving
+  candidate is picked at random. The writer prompt is instructed to weave
+  the fact in warmly and to soften or drop it if it reads as too personal —
+  the prefix filter is a mechanical first pass, not a full judgment call.
+  Falls back to SOLO when no eligible candidate exists (fresh install, or
+  every stored fact is filtered out) or the lookup itself fails — a broken
+  personalization query must never block a scheduled post.
+
+The mode is picked once per post, before the writer prompt is built, and is
+not re-picked on the one retry attempt.
 
 ## Format degradation ladder
 
