@@ -107,7 +107,23 @@ OVERHEARD_SYSTEM = (
 # Media ingestion — vision descriptions (src/pipeline/ingester.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# Leading classification tag the vision LLM must emit before its description
+# (parsed by ingester.parse_vision_response). Lets the pipeline tell a
+# genuine candid photo/video of a real person apart from a meme, screenshot,
+# art or promotional image without a second LLM call — the same vision call
+# already does both jobs.
+VISION_REAL_PERSON_TAG = "ЧЕЛОВЕК"
+VISION_MEME_TAG = "МЕМ"
+
 VISION_PROMPT = (
+    f"Сначала, отдельной строкой, поставь метку одним словом в квадратных скобках: "
+    f"[{VISION_REAL_PERSON_TAG}] — если это настоящее, неподготовленное фото или "
+    f"видеокадр живого человека из реальной жизни (селфи, фото с друзьями, случайный "
+    f"кадр); [{VISION_MEME_TAG}] — во всех остальных случаях: мемы, шутки-картинки, "
+    f"реакция-картинки с любым лицом (даже настоящего человека или знаменитости), "
+    f"скриншоты игр/фильмов/чатов/соцсетей, арт и рисунки, постановочные или "
+    f"рекламные снимки, объекты и пейзажи без людей, коллажи, надписи. "
+    f"Дальше, с новой строки, — само описание.\n"
     "Опиши изображение по-русски (1–2 предложения), но не сухо. "
     "Если есть узнаваемый человек и ты уверен, кто это — назови имя "
     "(знаменитость, актёр, стример, спортсмен, политик и др.); "

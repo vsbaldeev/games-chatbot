@@ -47,7 +47,7 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (20% chance), "youtube_short" (Shorts link) or "humor" (autonomous joke)
+    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (10% chance), "youtube_short" (Shorts link) or "humor" (autonomous joke)
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
@@ -62,3 +62,4 @@ class BotState(TypedDict):
     is_bot_insult: NotRequired[bool]  # True when the filter classified the message as an insult aimed at the bot
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
+    media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified

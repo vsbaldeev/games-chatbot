@@ -158,6 +158,33 @@ PLACEHOLDER_RE = re.compile(r"^\[\w+\]$")
 OVERHEARD_CONTEXT_LIMIT = 5
 OVERHEARD_CONTEXT_CHAR_LIMIT = 120
 
+# Media types the unprompted random reaction skips when the vision classifier
+# says the content is not a genuine photo/video of a real person (a meme,
+# screenshot, art…). Explicit @mentions/replies are never gated — a member
+# directly asking the bot to react to a meme still gets the roast.
+RANDOM_MEDIA_MEME_GATE_TYPES = ("photo", "video_note")
+
+
+def is_meme_random_trigger(state: BotState, media_type: str) -> bool:
+    """True when a random-trigger photo/video note was classified as not a real person.
+
+    Fails open: an unknown classification (``None`` — e.g. a vision-tag
+    parsing hiccup) never suppresses a response.
+
+    Args:
+        state: Current pipeline state.
+        media_type: The incoming message's media type.
+
+    Returns:
+        True only for a ``"random"`` trigger on a gated media type whose
+        vision classification is explicitly False.
+    """
+    if state.get("response_trigger") != "random":
+        return False
+    if media_type not in RANDOM_MEDIA_MEME_GATE_TYPES:
+        return False
+    return state.get("media_is_real_person") is False
+
 
 def looks_like_request(text: str) -> bool:
     """Cheap deterministic check that a message is a question or imperative request.
@@ -426,7 +453,9 @@ class MeaninglessFilterNode:
         text gets a canned «не расслышал / не разглядел» reply instead of a
         pass-through — generating a reaction from nothing is guaranteed
         hallucination. Unaddressed (random-trigger) media keeps the silent
-        emoji-reaction path.
+        emoji-reaction path. A random-trigger photo/video note the vision
+        classifier flagged as not a real person (a meme) is dropped the same
+        way — silently, as if the random roll had simply missed.
 
         Args:
             state: Current pipeline state.
@@ -437,7 +466,7 @@ class MeaninglessFilterNode:
         media_type = state["incoming"]["media_type"]
         text = state["incoming"]["processed_text"] or ""
         if text.strip():
-            return {}
+            return self.__handle_transcribed_media(state, media_type)
         if state.get("response_trigger") == "explicit":
             logger.warning(
                 "Filter: no transcription for %s message %s, explicit trigger — canned failure reply",
@@ -453,6 +482,28 @@ class MeaninglessFilterNode:
         )
         asyncio.create_task(self.__send_reaction(state))
         return {"should_respond": False}
+
+    def __handle_transcribed_media(self, state: BotState, media_type: str) -> dict:
+        """Pass a successfully transcribed/described media message through.
+
+        A random-trigger photo/video note the vision classifier flagged as
+        not a real person (a meme) is dropped instead — silently, as if the
+        random roll had simply missed.
+
+        Args:
+            state: Current pipeline state.
+            media_type: The incoming message's media type.
+
+        Returns:
+            State update dict.
+        """
+        if is_meme_random_trigger(state, media_type):
+            logger.info(
+                "Filter: random-trigger %s message %s looks like a meme — skipping",
+                media_type, state["incoming"]["message_id"],
+            )
+            return {"should_respond": False}
+        return {}
 
     def __resolve_addressed(self, state: BotState, decision: str) -> dict:
         """Apply the verdict for a message explicitly addressed to the bot.
