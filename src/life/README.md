@@ -1,5 +1,6 @@
 Жора's scheduled life posts — the character's own story, told to every chat twice a
-week and remembered as canon.
+week and remembered as canon — plus a silent daily activity refresh that keeps
+"what are you doing right now" fresh between posts.
 
 ## Flow
 
@@ -8,13 +9,15 @@ src/jobs/life_post.py (schedule) ──► src/life/poster.py:post_life_episode(
     │
     ├─ src/life/writer.py: EpisodeWriterAgent.write_episode()
     │      reads bot_memories.get_recent_episodes(10) + get_writer_facts()
-    │      (20 newest + 10 sampled older); src/life/engagement.choose_mode()
-    │      picks how this post engages the chat (see below) → prompts
-    │      EPISODE_WRITER_SYSTEM → strict JSON {episode_text, image_prompt,
-    │        voice_script, current_activity, format} → parse_episode
-    │        validates length (≤ EPISODE_TEXT_MAX_CHARS, 450) and required
-    │        fields; one retry on a malformed/invalid response, then None
-    │        (slot skipped, catch-up retries later)
+    │      (20 newest + 10 sampled older) + get_recent_activities(7);
+    │      src/life/engagement.choose_mode() picks how this post engages
+    │      the chat (see below) → prompts EPISODE_WRITER_SYSTEM (today's
+    │      date/season + dated recent activities via calendar_ru, for
+    │      season-appropriate and non-contradicting episodes) → strict JSON
+    │      {episode_text, image_prompt, voice_script, current_activity,
+    │        format} → parse_episode validates length (≤ EPISODE_TEXT_MAX_CHARS,
+    │        450) and required fields; one retry on a malformed/invalid
+    │        response, then None (slot skipped, catch-up retries later)
     │
     ├─ send_episode: fan out to every chat (achievements.get_all_chat_ids,
     │      asyncio.gather(..., return_exceptions=True) — one chat's failure
@@ -85,12 +88,48 @@ the post, never kill it.
 
 ## Canon write rules
 
-Canon (`bot_memories`) is written only by this scheduled job — chat members
+Canon (`bot_memories`) is written only by scheduled jobs — chat members
 cannot inject it. The episode writer sees the last 10 episodes plus a
 20-newest/10-sampled-older slice of facts (never the whole store), so canon
 holds months of detail without blowing the prompt budget. `current_activity`
-is stored on the episode row and is the sole source for the pipeline's
-«что делаешь сейчас» answer (see `src/pipeline/README.md`).
+is stored on both `episode` rows (life posts) and `activity` rows (the daily
+refresh below); whichever is newest is the pipeline's answer for «что делаешь
+сейчас» (see `src/pipeline/README.md`).
+
+## Daily activity refresh — `src/life/activity.py`, `src/jobs/daily_activity.py`
+
+Life posts land only twice a week, so between them `current_activity` used
+to sit frozen for days (the exact "рубит дрова for a week" bug this refresh
+fixes) and then go stale and get improvised inconsistently. A lightweight
+daily job closes that gap without ever posting to chat:
+
+```
+src/jobs/daily_activity.py (09:30 MSK, before the 10:00 life-post window)
+    │ skip if bot_memories.get_current_activity() already dates to today
+    │   (an earlier refresh, or a life post that already landed)
+    ▼
+src/life/activity.py: refresh_daily_activity()
+    reads bot_memories.get_recent_activities(10) + get_facts(5)
+    → build_activity_prompt: today's date/weekday/season (calendar_ru) +
+      dated recent activities ("не повторяй их") + canon facts
+    → DAILY_ACTIVITY_SYSTEM (ChatGroq, config.ACTIVITY_MODEL, temp 0.9,
+      single call, up to 2 attempts) → one bare phrase, not JSON
+    → parse_activity_phrase: strips think-blocks/quotes, drops (retry) if
+      empty or over CURRENT_ACTIVITY_MAX_CHARS (80)
+    → bot_memories.insert_activity(phrase) — kind='activity', capped at
+      MAX_BOT_ACTIVITIES (30, oldest pruned)
+```
+
+Fails soft: any exception or two unusable attempts just leave yesterday's
+activity in place (it ages from "fresh" into "recent" phrasing) — a broken
+refresh must never crash the job. `catch_up_daily_activity_job` recovers a
+refresh missed while the bot was down, same as the life-post catch-up.
+
+`src/life/calendar_ru.py` renders the shared Russian date/weekday/season and
+relative-day ("вчера", "позавчера", "8 июля") phrasing consumed by this
+generator, the episode writer (season-appropriate episodes, continuity with
+recent activities) and the response prompt (dated "what did you do
+yesterday" answers via `bot_recent_activities`, see `src/pipeline/README.md`).
 
 ## Shared helper
 

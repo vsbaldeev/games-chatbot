@@ -9,6 +9,7 @@ from telegram.ext import Application, ApplicationBuilder
 from src import log
 from src.agent import worker_agent, response_agent, roast_agent, comedian_agent
 from src.bot.jobs import (
+    DailyActivityJobManager,
     LifePostJobManager,
     MemeJobManager,
     MessageCleanupJobManager,
@@ -50,7 +51,7 @@ def main() -> None:
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
         manager.add_handlers(app)
 
-    for job_manager in [RolesJobManager(), ResetModelJobManager(), MessageCleanupJobManager(), MemeJobManager(), YtdlpUpdateJobManager(), LifePostJobManager()]:
+    for job_manager in [RolesJobManager(), ResetModelJobManager(), MessageCleanupJobManager(), MemeJobManager(), YtdlpUpdateJobManager(), LifePostJobManager(), DailyActivityJobManager()]:
         job_manager.add_jobs(app)
 
     logger.info("Starting polling...")

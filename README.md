@@ -11,6 +11,10 @@ posts a short 2–3 sentence episode from his village life to every chat; the po
 build a running, self-consistent canon (`src/life/`) that the bot also draws on
 casually in ordinary replies — mentioning a past episode when it is relevant, and
 answering "what are you up to" from whatever its latest post says it is doing.
+Between posts, a silent daily job invents a new season-appropriate activity
+phrase each morning with no chat post, so the answer changes daily instead of
+sitting frozen for up to a week — and a dated history of recent activities
+lets Жора answer "what did you do yesterday" consistently too.
 Tracks per-user stats, extracts long-term memories, and routes every message through
 a typed LangGraph pipeline. YouTube Shorts links posted in the chat are watched for
 everyone: the bot downloads the short, transcribes and looks at it, reads the top
@@ -29,7 +33,7 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
 | [src/commands/](src/commands/README.md) | Command handlers — /duel, /meme |
-| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, life posts, cleanup |
+| [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, life posts, daily activity refresh, cleanup |
 | [src/life/](src/life/README.md) | Жора's scheduled life posts — episode writing, canon, posting |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
@@ -52,6 +56,7 @@ LLM (roast)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → gpt-oss-20
 LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.6-27b (autonomous comedian; JSON decide-or-abstain)
 LLM (roles)  Groq llama-3.1-8b-instant
 LLM (life posts) Groq llama-3.3-70b-versatile → gpt-oss-120b → qwen3.6-27b (fallback chain; llama only holds the casual Russian style)
+LLM (daily activity) Groq llama-3.3-70b-versatile (single tiny call, no fallback chain — on failure the previous activity just ages out)
 STT          Groq whisper-large-v3
 TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
 Vision       Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat the whole token budget)

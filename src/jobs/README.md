@@ -8,6 +8,7 @@ Job managers live in src/bot/jobs.py. Implementations live here, one file per jo
 00:05 UTC        reset_model_job        agent.py        reset LLM fallback index to 0
 03:00 UTC        cleanup_messages_job   cleanup.py      prune unified_messages and thread_history rows older than 60 days
 03:30 UTC        ytdlp_update_job       ytdlp_update.py install newer yt-dlp into /app/runtime-deps and restart the bot gracefully (SIGTERM + docker restart policy); no-op outside the container or when current
+09:30 MSK        daily_activity_job     daily_activity.py silently invent Жора's current-activity phrase for the day, no chat post; skipped if already refreshed today (e.g. a life post landed); see src/life/README.md
 10:00 MSK        life_post_job          life_post.py    post one of Жора's life-story episodes, on 2 random days per week at a random daytime minute (never at night); see src/life/README.md
 14:00 UTC        weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
 15:00 UTC        daily_meme_job         meme.py         send one fresh unseen meme to every chat (every day)
@@ -41,6 +42,16 @@ members who share a name can never collapse into one entry.
 
 Reasons stored in `user_tags` let the response pipeline explain a member's role
 when they ask "why do I have this role?" (see `src/pipeline/README.md`).
+
+## Daily activity job
+
+Full generation flow lives in `src/life/README.md`. This job file only owns
+scheduling: a daily 09:30 MSK run (30 minutes before the life-post window
+opens at 10:00, so a same-day life post always ends up as the newer
+`current_activity`) that skips silently if today's activity was already set
+— by an earlier run of this job or by a life post landing before 09:30.
+`catch_up_daily_activity_job` recovers a refresh missed while the bot was
+down, using the same "already refreshed today" check.
 
 ## Life-post job
 

@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
 from src.config.prompts import SHORTS_TRIGGER_INSTRUCTION
+from src.life import calendar_ru
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -183,6 +184,32 @@ def build_mentioned_tags_lines(context) -> list[str]:
     return lines
 
 
+def build_activity_history_lines(recent_activities: list[tuple[str, float]]) -> list[str]:
+    """Return dated activity-history lines, skipping the newest (already-shown) entry.
+
+    Args:
+        recent_activities: ``(phrase, posted_at)`` pairs, newest first, as
+            stored in ``AssembledContext.bot_recent_activities``. The first
+            entry is skipped — it is the same one already rendered as
+            ``[Прямо сейчас ты]``/``[Недавно ты]`` by the caller.
+
+    Returns:
+        Prompt lines for the remaining dated history, with a trailing blank
+        line, or an empty list when fewer than two entries exist.
+    """
+    history = recent_activities[1:]
+    if not history:
+        return []
+    now = datetime.datetime.now(calendar_ru.MOSCOW_TZ)
+    parts = ["[Чем ты занимался в последние дни]:"]
+    parts.extend(
+        f"- {calendar_ru.describe_relative_day(posted_at, now)} — {phrase}"
+        for phrase, posted_at in history
+    )
+    parts.append("")
+    return parts
+
+
 def build_bot_life_lines(context) -> list[str]:
     """Return formatted bot-canon and current-activity lines for the response prompt.
 
@@ -190,9 +217,10 @@ def build_bot_life_lines(context) -> list[str]:
         context: AssembledContext dict or None.
 
     Returns:
-        Prompt lines for relevant canon facts, relevant past episodes and the
-        current-activity line, each block only present when data exists;
-        empty list when there is no bot canon to show (e.g. empty store).
+        Prompt lines for relevant canon facts, relevant past episodes, the
+        current-activity line and dated activity history, each block only
+        present when data exists; empty list when there is no bot canon to
+        show (e.g. empty store).
     """
     context = context or {}
     parts: list[str] = []
@@ -212,6 +240,7 @@ def build_bot_life_lines(context) -> list[str]:
         label = "Прямо сейчас ты" if freshness == "fresh" else "Недавно ты"
         parts.append(f"[{label}]: {phrase}")
         parts.append("")
+    parts += build_activity_history_lines(context.get("bot_recent_activities") or [])
     return parts
 
 

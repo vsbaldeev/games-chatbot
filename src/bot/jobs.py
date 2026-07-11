@@ -7,6 +7,12 @@ from telegram.ext import Application
 
 from src.jobs.agent import reset_model_job
 from src.jobs.cleanup import cleanup_messages_job
+from src.jobs.daily_activity import (
+    CATCH_UP_DELAY_SECONDS as DAILY_ACTIVITY_CATCH_UP_DELAY_SECONDS,
+    DAILY_ACTIVITY_RUN_TIME,
+    catch_up_daily_activity_job,
+    daily_activity_job,
+)
 from src.jobs.life_post import (
     CATCH_UP_DELAY_SECONDS as LIFE_POST_CATCH_UP_DELAY_SECONDS,
     LIFE_POST_RUN_TIME,
@@ -36,6 +42,14 @@ class LifePostJobManager(JobManagerInterface):
         # Posts the deployment opener on a fresh install, or recovers a
         # missed scheduled slot (e.g. the bot was down during a planned post).
         app.job_queue.run_once(catch_up_life_post_job, when=LIFE_POST_CATCH_UP_DELAY_SECONDS)
+
+
+class DailyActivityJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
+        app.job_queue.run_daily(daily_activity_job, time=DAILY_ACTIVITY_RUN_TIME)
+        # Recovers a refresh missed while the bot was down, so the current
+        # activity never goes stale just because of a restart.
+        app.job_queue.run_once(catch_up_daily_activity_job, when=DAILY_ACTIVITY_CATCH_UP_DELAY_SECONDS)
 
 
 class MemeJobManager(JobManagerInterface):

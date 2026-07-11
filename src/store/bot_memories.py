@@ -2,16 +2,18 @@
 Persistent store for the bot's own life canon — Жора's posted episodes and
 the durable facts distilled from them.
 
-Two row kinds share one table: ``episode`` rows are full posted life-story
+Three row kinds share one table: ``episode`` rows are full posted life-story
 entries, kept for narrative continuity when the next episode is written;
-``fact`` rows are short durable canon sentences injected into chat replies.
-Facts survive episode pruning, which is why both kinds live together rather
-than in separate tables — a completed state change («дом перекрашен») must
-outlive the episode that established it.
+``fact`` rows are short durable canon sentences injected into chat replies;
+``activity`` rows are silent daily-invented "what is Жора doing right now"
+phrases (see ``src/life/activity.py``), generated without a chat post. Facts
+survive episode/activity pruning, which is why all three kinds live together
+rather than in separate tables — a completed state change («дом перекрашен»)
+must outlive the episode that established it.
 
-The newest episode's ``current_activity`` is the single "what is Жора doing
-right now" answer: there is exactly one current episode, so no separate
-state table is needed for it.
+The newest of (episode, activity) rows' ``current_activity`` is the single
+"what is Жора doing right now" answer — whichever was written most recently,
+scheduled life post or daily refresh, wins.
 """
 
 import time
@@ -23,13 +25,16 @@ from src.store import embedder
 
 MAX_BOT_FACTS = 300
 MAX_BOT_EPISODES = 100
+MAX_BOT_ACTIVITIES = 30
 BOT_FACT_SIMILARITY_THRESHOLD = 0.85
 
 # current_activity decay windows, consumed by the context builder to bucket
-# the newest episode's activity into fresh / recent / stale phrasing. Owned
-# here (not src/life/) because the context builder depends on this module
-# regardless of whether the life-posting package exists yet.
-ACTIVITY_FRESH_HOURS = 12
+# the newest activity into fresh / recent / stale phrasing. Owned here (not
+# src/life/) because the context builder depends on this module regardless
+# of whether the life-posting package exists yet. 14h (not 12h) so a 09:30
+# MSK daily refresh stays "fresh" through the evening (23:30) instead of
+# flipping to "recent" at 21:30 while the chat is still awake.
+ACTIVITY_FRESH_HOURS = 14
 ACTIVITY_RECENT_HOURS = 48
 
 EPISODE_SIMILARITY_FLOOR = 0.55
@@ -69,19 +74,23 @@ async def get_latest_posted_at() -> float | None:
 
 
 async def get_current_activity() -> tuple[str, float] | None:
-    """Return the newest episode's current-activity phrase and its timestamp.
+    """Return the newest current-activity phrase and its timestamp.
+
+    Considers both ``episode`` rows (set by a scheduled life post) and
+    ``activity`` rows (set by the silent daily refresh) — whichever is
+    newest wins, so a life post always supersedes a same-day refresh and
+    vice versa.
 
     Returns:
-        ``(phrase, posted_at)`` for the newest episode that carries a
-        current-activity phrase, or None when no episode has one (empty
-        table, or only older rows predating the field).
+        ``(phrase, posted_at)`` for the newest row that carries a
+        current-activity phrase, or None when none exists yet.
     """
     async with database.acquire() as conn:
         row = await conn.fetchrow(
             """
             SELECT current_activity, posted_at
             FROM bot_memories
-            WHERE kind = 'episode' AND current_activity IS NOT NULL
+            WHERE kind IN ('episode', 'activity') AND current_activity IS NOT NULL
             ORDER BY posted_at DESC
             LIMIT 1
             """
@@ -89,6 +98,74 @@ async def get_current_activity() -> tuple[str, float] | None:
     if row is None:
         return None
     return row["current_activity"], row["posted_at"]
+
+
+async def get_recent_activities(limit: int) -> list[tuple[str, float]]:
+    """Return recent current-activity phrases with their timestamps, newest first.
+
+    Spans both ``episode`` and ``activity`` rows, so callers can render a
+    dated history of what Жора has been doing regardless of whether each
+    entry came from a scheduled life post or a silent daily refresh.
+
+    Args:
+        limit: Maximum number of entries to return.
+
+    Returns:
+        ``(phrase, posted_at)`` pairs, newest first.
+    """
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT current_activity, posted_at
+            FROM bot_memories
+            WHERE kind IN ('episode', 'activity') AND current_activity IS NOT NULL
+            ORDER BY posted_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return [(row["current_activity"], row["posted_at"]) for row in rows]
+
+
+async def insert_activity(phrase: str) -> None:
+    """Insert a silently-generated daily activity phrase and prune old ones.
+
+    Args:
+        phrase: Present-tense activity phrase, already validated for length.
+    """
+    now = time.time()
+    async with database.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO bot_memories
+                (kind, content, current_activity, posted_at, created_at, updated_at)
+            VALUES ('activity', $1, $1, $2, $2, $2)
+            """,
+            phrase, now,
+        )
+    await prune_activities(keep=MAX_BOT_ACTIVITIES)
+
+
+async def prune_activities(keep: int = MAX_BOT_ACTIVITIES) -> None:
+    """Delete activity rows beyond the newest ``keep``, oldest first.
+
+    Args:
+        keep: Number of newest activity rows to retain.
+    """
+    async with database.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM bot_memories
+            WHERE kind = 'activity'
+              AND id NOT IN (
+                  SELECT id FROM bot_memories
+                  WHERE kind = 'activity'
+                  ORDER BY posted_at DESC
+                  LIMIT $1
+              )
+            """,
+            keep,
+        )
 
 
 async def insert_episode(
