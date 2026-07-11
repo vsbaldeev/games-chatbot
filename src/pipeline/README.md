@@ -322,9 +322,14 @@ context_builder
     │    → bot_self_facts; top-2 find_similar_episodes above a similarity
     │    floor → bot_self_episodes (Жора's own life canon; see src/life/README.md)
     │    degrades to [] on any failure (embed or DB error) — never fails the pipeline
-    └─ bot current activity: newest episode's current_activity bucketed by
-         age — < 12h "fresh", < 48h "recent", older → None (the bot improvises
-         instead of reading a stale answer) → bot_current_activity
+    ├─ bot current activity: newest current_activity across episode rows
+    │    (life posts) and activity rows (silent daily refresh, see
+    │    src/life/README.md), bucketed by age — < 14h "fresh", < 48h
+    │    "recent", older → None (the bot improvises instead of reading a
+    │    stale answer) → bot_current_activity
+    └─ bot recent activities: bot_memories.get_recent_activities(7), the
+         same newest-first (phrase, posted_at) history spanning episode and
+         activity rows, degrades to [] on failure → bot_recent_activities
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
@@ -390,7 +395,12 @@ response   personality LLM (ReAct executor, no tools)
     │            colour, never filler), plus a current-activity line
     │            («[Прямо сейчас ты]: …» / «[Недавно ты]: …») from
     │            bot_current_activity so «что делаешь сейчас» answers consistently
-    │            with the latest life post instead of being improvised fresh each time
+    │            with the latest life post or daily refresh instead of being
+    │            improvised fresh each time, plus a dated
+    │            «[Чем ты занимался в последние дни]» block (build_activity_history_lines)
+    │            from bot_recent_activities — skipping the newest entry already
+    │            shown above — so «что делал вчера/на выходных» answers consistently
+    │            too instead of inventing a different past per questioner
     │          when the filter set is_bot_insult=True, a hint is injected before the
     │            trigger line telling the model the message is an attack on it and to
     │            answer with a sharp comeback instead of a neutral reply
@@ -463,7 +473,8 @@ AssembledContext:
     mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
     bot_self_facts: list[str]            # Жора's own canon facts relevant to this message
     bot_self_episodes: list[str]         # Жора's own past life-post episodes relevant to this message
-    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post
+    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post or daily refresh
+    bot_recent_activities: list[tuple[str, float]]  # (phrase, posted_at) history, newest first, for dated "what did you do" answers
 
 BotState:
     incoming: IncomingMessage

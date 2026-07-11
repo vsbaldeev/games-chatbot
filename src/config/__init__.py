@@ -20,6 +20,7 @@ from src.config.credentials import (
     TWITCH_CLIENT_SECRET,
 )
 from src.config.models import (
+    ACTIVITY_MODEL,
     COMEDIAN_MODEL_FALLBACKS,
     EPISODE_MAX_TOKENS,
     EPISODE_MODEL_FALLBACKS,
@@ -57,6 +58,7 @@ __all__ = [
     "TWITCH_CLIENT_ID",
     "TWITCH_CLIENT_SECRET",
     # models
+    "ACTIVITY_MODEL",
     "COMEDIAN_MODEL_FALLBACKS",
     "EPISODE_MAX_TOKENS",
     "EPISODE_MODEL_FALLBACKS",

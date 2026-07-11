@@ -81,6 +81,12 @@ EPISODE_MODEL_FALLBACKS: list[str] = [
 # never truncated mid-joke by the model's completion limit.
 EPISODE_MAX_TOKENS = 2000
 
+# Silent daily current-activity refresh. Single tiny call, no fallback chain
+# needed: on failure the previous activity simply ages into "recent" phrasing
+# instead of breaking anything. llama for the same reason as
+# RESPONSE_MODEL_FALLBACKS above — casual Russian style.
+ACTIVITY_MODEL = "llama-3.3-70b-versatile"
+
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly
 # stressed words are the loudest tell of synthetic Russian speech.

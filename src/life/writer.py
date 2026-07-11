@@ -1,5 +1,6 @@
 """EpisodeWriterAgent — writes the next installment of Жора's life for scheduled posts."""
 
+import datetime
 from dataclasses import dataclass
 
 from langchain.agents import create_agent
@@ -10,6 +11,7 @@ from langchain_groq import ChatGroq
 from src import config, log
 from src.agent.middleware import GroqContextGuard, ThinkingStripper, guarded_ainvoke, should_retry
 from src.config.prompts import EPISODE_TEXT_MAX_CHARS, EPISODE_WRITER_SYSTEM
+from src.life import calendar_ru
 from src.life.engagement import MEMBER, choose_mode
 from src.store import bot_memories
 from src.utils.llm_json import load_json_object
@@ -17,6 +19,7 @@ from src.utils.llm_json import load_json_object
 logger = log.get_logger(__name__)
 
 EPISODE_CONTEXT_EPISODES = 10
+EPISODE_CONTEXT_ACTIVITIES = 7
 CURRENT_ACTIVITY_MAX_CHARS = 80
 # Formats grow as later steps ship: voice, then photo, then video_note.
 ALL_FORMATS: tuple[str, ...] = ("story",)
@@ -101,9 +104,33 @@ def build_history_lines(recent_episodes: list[dict], facts: list[str]) -> list[s
     return parts
 
 
+def build_activity_lines(recent_activities: list[tuple[str, float]], now: datetime.datetime) -> list[str]:
+    """Return the current date/season line and recent-activity continuity block.
+
+    Args:
+        recent_activities: Recent ``(phrase, posted_at)`` pairs, newest
+            first, as returned by ``bot_memories.get_recent_activities``.
+        now: Current moment, already in Moscow Time.
+
+    Returns:
+        Prompt lines: a «Сегодня …» date/season line, followed by a dated
+        recent-activities block when any exist.
+    """
+    parts = [f"Сегодня {calendar_ru.describe_moscow_date(now)} (по Москве).", ""]
+    if recent_activities:
+        parts.append("Чем ты занимался в последние дни (для непротиворечивости, от новых к старым):")
+        parts.extend(
+            f"- {calendar_ru.describe_relative_day(posted_at, now)} — {phrase}"
+            for phrase, posted_at in recent_activities
+        )
+        parts.append("")
+    return parts
+
+
 def build_episode_prompt(
     recent_episodes: list[dict],
     facts: list[str],
+    recent_activities: list[tuple[str, float]],
     previous_format: str | None,
     allowed_formats: tuple[str, ...],
     mode: str,
@@ -115,6 +142,8 @@ def build_episode_prompt(
         recent_episodes: Recent episode rows, newest-first (as returned by
             ``bot_memories.get_recent_episodes``).
         facts: Canon facts to ground continuity (newest plus sampled older).
+        recent_activities: Recent ``(phrase, posted_at)`` pairs, newest
+            first, for season-consistent continuity.
         previous_format: Format of the most recent post, or None when there
             is no history yet.
         allowed_formats: Formats the writer may currently choose from.
@@ -125,7 +154,9 @@ def build_episode_prompt(
     Returns:
         The prompt string to send as the human turn.
     """
-    parts = build_history_lines(recent_episodes, facts)
+    now = datetime.datetime.now(calendar_ru.MOSCOW_TZ)
+    parts = build_activity_lines(recent_activities, now)
+    parts += build_history_lines(recent_episodes, facts)
     parts.append(f"Доступные форматы: {', '.join(allowed_formats)}.")
     if previous_format:
         parts.append(f"Предыдущий пост был в формате «{previous_format}» — выбери другой, если можно.")
@@ -225,10 +256,11 @@ class EpisodeWriterAgent:
             raise RuntimeError("EpisodeWriterAgent.init() must be called before writing")
         recent_episodes = await bot_memories.get_recent_episodes(EPISODE_CONTEXT_EPISODES)
         facts = await bot_memories.get_writer_facts()
+        recent_activities = await bot_memories.get_recent_activities(EPISODE_CONTEXT_ACTIVITIES)
         previous_format = recent_episodes[0]["post_format"] if recent_episodes else None
         mode, mention = await choose_mode()
         prompt = build_episode_prompt(
-            recent_episodes, facts, previous_format, allowed_formats, mode, mention
+            recent_episodes, facts, recent_activities, previous_format, allowed_formats, mode, mention
         )
         for attempt in range(WRITE_ATTEMPTS):
             episode = await self.__attempt(prompt, allowed_formats)

@@ -39,6 +39,7 @@ BOT_FACTS_SIMILAR_LIMIT = 5
 BOT_FACTS_NEWEST_LIMIT = 3
 BOT_FACTS_CAP = 8
 BOT_EPISODES_LIMIT = 2
+BOT_ACTIVITY_HISTORY_LIMIT = 7
 
 
 class ContextBuilder:
@@ -66,6 +67,7 @@ class ContextBuilder:
         )
         bot_self_facts, bot_self_episodes = await self.__collect_bot_canon(msg)
         bot_current_activity = await self.__get_bot_current_activity()
+        bot_recent_activities = await self.__get_bot_recent_activities()
 
         assembled: AssembledContext = {
             "user_facts": user_facts,
@@ -77,6 +79,7 @@ class ContextBuilder:
             "bot_self_facts": bot_self_facts,
             "bot_self_episodes": bot_self_episodes,
             "bot_current_activity": bot_current_activity,
+            "bot_recent_activities": bot_recent_activities,
         }
         return {"context": assembled}
 
@@ -135,6 +138,20 @@ class ContextBuilder:
         if age_hours < bot_memories.ACTIVITY_RECENT_HOURS:
             return phrase, "recent"
         return None
+
+    async def __get_bot_recent_activities(self) -> list[tuple[str, float]]:
+        """Load Жора's recent activity history for dated "what did you do" answers.
+
+        Returns:
+            Up to :data:`BOT_ACTIVITY_HISTORY_LIMIT` ``(phrase, posted_at)``
+            pairs, newest first; empty list on any lookup failure — a
+            missing history must never fail the pipeline.
+        """
+        try:
+            return await bot_memories.get_recent_activities(BOT_ACTIVITY_HISTORY_LIMIT)
+        except Exception as err:
+            logger.warning("Failed to load bot recent activities: %s", err)
+            return []
 
     async def __collect_mentioned_tags(
         self, chat_id: int, msg: dict, replied_to: dict | None, asker_username: str

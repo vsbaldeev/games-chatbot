@@ -40,6 +40,7 @@ class AssembledContext(TypedDict):
     bot_self_facts: list[str]          # canon facts about the bot's own life, relevant to this message
     bot_self_episodes: list[str]       # past life-post episodes relevant to this message
     bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post, or None
+    bot_recent_activities: list[tuple[str, float]]  # (phrase, posted_at) history, newest first, for dated "what did you do" answers
 
 
 class BotState(TypedDict):
