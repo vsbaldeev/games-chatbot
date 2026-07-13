@@ -7,7 +7,9 @@ gaming-assistant personality: answers game questions with dry humour and
 decides on its own when to drop a joke into the chat (a conversation-spawning hook,
 gentle by default, roasting only when someone invites it) or to stay quiet. Twice a
 week, at a random daytime moment (Moscow Time — never at night), Жора
-posts a short 2–3 sentence episode from his village life to every chat; the posts
+posts a short 2–3 sentence episode from his village life to every chat — as a plain
+text story or as a ~30-second voice note in the Silero voice, where the caption is
+only a one-line teaser and the full story has to be listened to; the posts
 build a running, self-consistent canon (`src/life/`) that the bot also draws on
 casually in ordinary replies — mentioning a past episode when it is relevant, and
 answering "what are you up to" from whatever its latest post says it is doing.

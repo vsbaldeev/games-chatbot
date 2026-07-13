@@ -14,16 +14,22 @@ src/jobs/life_post.py (schedule) ──► src/life/poster.py:post_life_episode(
     │      the chat (see below) → prompts EPISODE_WRITER_SYSTEM (today's
     │      date/season + dated recent activities via calendar_ru, for
     │      season-appropriate and non-contradicting episodes) → strict JSON
-    │      {episode_text, image_prompt, voice_script, current_activity,
-    │        format} → parse_episode validates length (≤ EPISODE_TEXT_MAX_CHARS,
-    │        450) and required fields; one retry on a malformed/invalid
+    │      {episode_text, image_prompt, voice_script, voice_teaser,
+    │        current_activity, format} → parse_episode validates lengths
+    │        (episode_text ≤ 450, voice_script ≤ 500, voice_teaser ≤ 120)
+    │        and required fields; one retry on a malformed/invalid
     │        response, then None (slot skipped, catch-up retries later)
+    │
+    ├─ resolve_voice_media: for a voice episode, synthesize the spoken story
+    │      once (prepare_tts_text + speech_service.synthesize); any failure
+    │      (service not ready, unspeakable script, synthesis error) demotes
+    │      the episode to a story — a media failure never kills a post
     │
     ├─ send_episode: fan out to every chat (achievements.get_all_chat_ids,
     │      asyncio.gather(..., return_exceptions=True) — one chat's failure
     │      cannot abort the others), record each send in unified_messages
-    │      (content = episode_text, so the bot's own posts need no
-    │      transcription/vision when a member replies to them)
+    │      (content = episode_text even for voice posts, so the bot's own
+    │      posts need no transcription/vision when a member replies to them)
     │
     └─ only if ≥1 chat received the post:
            record_episode → bot_memories.insert_episode(...) with the
@@ -60,12 +66,29 @@ a question or pulls a real member into the story:
 The mode is picked once per post, before the writer prompt is built, and is
 not re-picked on the one retry attempt.
 
+## Voice posts — teaser caption, story in the voice
+
+People skip long voice notes that give no reason to press play, so a voice
+post never shows its full text. The caption is only `voice_teaser` — one dry
+hook line in Жора's style («Про медведя, мёд и одну плохую идею.»), never a
+summary — while the full episode lives in the spoken `voice_script`, which
+must be self-contained and carry the engagement question/mention (in MEMBER
+mode the teaser may hint «тут кое-что про одного из вас» but only the voice
+names the member). Scripts are capped at `EPISODE_VOICE_SCRIPT_MAX_CHARS`
+(500 ≈ 25–40 s of Silero speech, tighter than the general `TTS_MAX_CHARS`
+synthesis limit) so the duration Telegram shows before playing stays a
+low-commitment tap. Reply-context needs no transcription:
+`unified_messages.content` records the full `episode_text` even though
+members see only the teaser.
+
 ## Format degradation ladder
 
-Only `story` (plain text) exists today — there is nothing to degrade to. A
-format→fallback mapping (`photo → story`, `video_note → voice → story`) is
-introduced as later releases add media formats; a media failure will demote
-the post, never kill it.
+`voice → story`: the voice payload is built once before the fan-out
+(`resolve_voice_media`), and any media failure demotes the episode to a text
+story — the recorded format is the demoted one, so the never-repeat-format
+rule sees what was actually posted. Later releases extend the mapping
+(`photo → story`, `video_note → voice → story`); a media failure always
+demotes the post, never kills it.
 
 ## Scheduling — `src/jobs/life_post.py`
 
