@@ -87,12 +87,21 @@ members see only the teaser.
 
 A photo post must never contradict its caption. Three layers guarantee it:
 one episode JSON produces both `episode_text` (the caption) and
-`image_prompt` (the scene), so they cannot describe different events by
-construction; the writer prompt requires `image_prompt` to render THE scene
-of `episode_text` (same action, place, season, key objects); and the poster
-always sends the image *with* `episode_text` as its caption — an image
-failure degrades the post to `story`, so a bare or mismatched photo is never
-posted. The character's appearance is deliberately absent from
+`image_prompt` (the shot), so they cannot describe different events by
+construction; the writer prompt requires `image_prompt` to be **one simple
+frame from the episode** — the most visual single moment, not a retelling
+of the whole plot — that may omit parts of the story but may never
+contradict it (same place, season, time of day, only objects the story
+contains); and the poster always sends the image *with* `episode_text` as
+its caption — an image failure degrades the post to `story`, so a bare or
+mismatched photo is never posted. The fragment framing is deliberate and
+measured: across seed sweeps, two-subject-plus-interaction prompts failed
+the vision judge on 3 of 4 seeds (the second creature simply doesn't
+render), while a single-subject action frame scored 9/10 within three
+candidates. Hence the writer rule: ideally just Жора and one action in
+frame, a second participant only when the shot is meaningless without
+one — exactly like a real chat post where the story is in the text and
+the attached photo shows one detail of it. The character's appearance is deliberately absent from
 `image_prompt`: the fixed `CHARACTER_VISUAL_PROMPT` descriptor is prepended
 at generation time, so every selfie shares wardrobe/beard/style while the
 scene tracks the episode. The photo format is only offered to the writer
