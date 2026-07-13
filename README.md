@@ -65,7 +65,7 @@ LLM (life posts) Groq llama-3.3-70b-versatile → gpt-oss-120b → qwen3.6-27b (
 LLM (daily activity) Groq llama-3.3-70b-versatile (single tiny call, no fallback chain — on failure the previous activity just ages out)
 STT          Groq whisper-large-v3
 TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
-Image gen    Stable Diffusion 1.5 (DreamShaper 8) + LCM-LoRA, self-hosted CPU service (diffusers/FastAPI, async job API)
+Image gen    Stable Diffusion 1.5 (DreamShaper 8), DPM++ 2M Karras 20 steps, self-hosted CPU service (diffusers/FastAPI, async job API); best-of-3 candidates ranked by the Groq vision judge
 Vision       Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat the whole token budget)
 Security     Groq llama-prompt-guard-2-86m
 Video frames PyAV (in-process, no subprocess)

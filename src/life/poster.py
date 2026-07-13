@@ -16,8 +16,9 @@ from langchain_groq import ChatGroq
 
 from src import achievements, config, log
 from src.agent.middleware import ainvoke_with_backoff, strip_thinking
-from src.config.prompts import BOT_FACT_DISTILL_SYSTEM, CHARACTER_VISUAL_PROMPT
+from src.config.prompts import BOT_FACT_DISTILL_SYSTEM, CHARACTER_VISUAL_PROMPT, PHOTO_FRAMING_HINT
 from src.imagegen import generate_image
+from src.life.photo_judge import score_photo
 from src.life.writer import (
     ALL_FORMATS,
     PHOTO_FORMAT,
@@ -101,13 +102,58 @@ async def resolve_media(episode: Episode) -> tuple[Episode, EpisodeMedia]:
             return episode, EpisodeMedia(voice=voice)
         logger.warning("Voice media build failed — degrading life post to a text story")
     if episode.format == PHOTO_FORMAT:
-        photo_png = await generate_image(f"{CHARACTER_VISUAL_PROMPT}, {episode.image_prompt}")
+        photo_png = await generate_best_photo(episode.image_prompt)
         if photo_png is not None:
             return episode, EpisodeMedia(photo_png=photo_png)
         logger.warning("Image generation failed — degrading life post to a text story")
     if episode.format == STORY_FORMAT:
         return episode, EpisodeMedia()
     return dataclasses.replace(episode, format=STORY_FORMAT), EpisodeMedia()
+
+
+async def generate_best_photo(image_prompt: str) -> bytes | None:
+    """Generate up to ``IMAGEGEN_CANDIDATES`` selfies and pick the most faithful.
+
+    SD1.5 renders the described interaction stochastically, so each candidate
+    (random seed) is scored by the vision judge against ``image_prompt``. The
+    first candidate reaching ``PHOTO_JUDGE_PASS_SCORE`` ships immediately;
+    otherwise the best-scoring one does — the judge ranks, it never gates. A
+    candidate the judge could not score ranks below any scored one but still
+    ships if it is all there is.
+
+    The full generation prompt puts the scene before the character
+    descriptor: leading tokens dominate composition on this engine (see
+    ``PHOTO_FRAMING_HINT``), and the reversed order let scene objects render
+    instead of being crowded out by a close-up portrait.
+
+    Args:
+        image_prompt: The episode's English scene description.
+
+    Returns:
+        PNG bytes of the chosen candidate, or None when every generation
+        call failed (service down) — the caller then degrades the post.
+    """
+    photo_prompt = f"{PHOTO_FRAMING_HINT}{image_prompt}, {CHARACTER_VISUAL_PROMPT}"
+    best_png = None
+    best_rank = -2
+    for attempt in range(config.IMAGEGEN_CANDIDATES):
+        candidate = await generate_image(photo_prompt)
+        if candidate is None:
+            continue
+        score = await score_photo(candidate, image_prompt)
+        if score is not None and score >= config.PHOTO_JUDGE_PASS_SCORE:
+            logger.info("Photo candidate %d passed the judge (score %d)", attempt + 1, score)
+            return candidate
+        rank = -1 if score is None else score
+        if rank > best_rank:
+            best_png = candidate
+            best_rank = rank
+    if best_png is not None:
+        logger.info(
+            "No photo candidate passed the judge — posting the best one (score %s)",
+            best_rank if best_rank >= 0 else "unknown",
+        )
+    return best_png
 
 
 async def build_voice_payload(voice_script: str) -> SynthesizedVoice | None:

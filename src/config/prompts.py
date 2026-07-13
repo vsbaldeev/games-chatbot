@@ -201,6 +201,30 @@ CHARACTER_VISUAL_PROMPT = (
     "storybook illustration, painterly, soft natural lighting"
 )
 
+# Prepended before episode.image_prompt, not after: on this engine leading
+# tokens dominate composition, so a leading character descriptor reliably
+# produced a close-up portrait with the episode's scene objects (e.g. an
+# animal in the background) dropped entirely — verified locally, see
+# imagegen-service/README.md. Framing the shot wide first gives secondary
+# scene objects room to actually render.
+PHOTO_FRAMING_HINT = "wide shot, "
+
+# Best-of-N selfie judge (src/life/photo_judge.py). English, like the other
+# image-model-adjacent text: the scene prompts it scores are English. The
+# judge weights the *interaction* because SD1.5 drops relations between
+# subjects far more often than the subjects themselves — a photo where
+# everything is present but nothing happens is the failure mode being ranked
+# down. Strict JSON contract, parsed by the shared load_json_object.
+PHOTO_JUDGE_SYSTEM = (
+    "You judge how faithfully a generated image depicts a requested scene. "
+    "Score 0-10: 9-10 the scene matches including the action and any "
+    "interaction between subjects; 6-8 all subjects present but the action or "
+    "interaction is weak or missing; 3-5 some subjects missing or wrong; 0-2 "
+    "the image shows a different scene. Weight the action/interaction "
+    "heaviest. Answer with strictly one JSON object, no other text: "
+    '{"score": N}'
+)
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Response persona (src/agent/response.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -578,7 +602,11 @@ EPISODE_WRITER_SYSTEM = f"""{CHARACTER_SHEET}
 
 - episode_text: не длиннее {EPISODE_TEXT_MAX_CHARS} символов.
 - image_prompt: только сцена, действие и обстановка по-английски, без описания твоей
-  внешности — она добавляется отдельно при генерации изображения.
+  внешности — она добавляется отдельно при генерации изображения. Сцену рисует
+  простая модель, поэтому: ОДНО чёткое действие, где главный герой его явно
+  выполняет (подлежащее-глагол-дополнение в начале: «man chopping firewood…»),
+  максимум одно другое существо или человек, без перечисления мелких предметов —
+  сложные сцены модель не вытянет.
 - voice_script: полный устный рассказ эпизода, разговорный, без эмодзи и
   форматирования, не длиннее {EPISODE_VOICE_SCRIPT_MAX_CHARS} символов (примерно
   полминуты речи). Участника чата в озвучке называй по нику, но без «@».
