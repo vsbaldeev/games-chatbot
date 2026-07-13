@@ -105,6 +105,22 @@ scene detail. `imagegen-service/engine.py` builds embeddings via Compel
 instead, so the full prompt always reaches the model (see that service's
 README for the story of the bug this replaced).
 
+The fifth layer attacks the model's remaining weakness — SD1.5 renders
+subject *interactions* stochastically (all subjects present, nobody doing
+what the caption says). `generate_best_photo` generates up to
+`IMAGEGEN_CANDIDATES` (3) candidates with random seeds and
+`src/life/photo_judge.py` scores each against the episode's `image_prompt`
+via the existing Groq vision model (0–10, interaction weighted heaviest,
+same multimodal pattern as `src/pipeline/ingester.py`). The first candidate
+scoring ≥ `PHOTO_JUDGE_PASS_SCORE` (7) ships immediately (early exit saves
+CPU-minutes); otherwise the best-scoring one ships — **the judge ranks, it
+never gates**: a photo post degrades to a text story only when every
+generation call itself failed. A judge outage scores as "unknown" (ranked
+below any scored candidate, still postable) — a broken judge must never
+block a scheduled post. The episode writer is also instructed to keep
+`image_prompt` renderable: one subject-verb-object action, at most one
+other creature, no prop lists.
+
 Recording uses `format_photo_content(episode_text)` plus the sent photo's
 `file_id`, which plugs Жора's selfies into the existing lazy
 vision-description path — a member replying to a selfie gets a real

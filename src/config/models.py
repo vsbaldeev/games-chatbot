@@ -87,15 +87,26 @@ EPISODE_MAX_TOKENS = 2000
 # RESPONSE_MODEL_FALLBACKS above — casual Russian style.
 ACTIVITY_MODEL = "llama-3.3-70b-versatile"
 
-# Self-hosted image generation (imagegen-service/, SD1.5 + LCM-LoRA on CPU).
-# LCM collapses 25 diffusion steps to 4-6 at guidance ~1.0-1.5; one 512px
-# image takes ~1.5-3 min on the 4 vCPU host, so the client polls the async
-# job API instead of holding a request open.
-IMAGEGEN_STEPS = 6
+# Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
+# Karras). Standard multi-step sampling, not an LCM speed hack: low-step/
+# low-guidance sampling reliably hallucinated compositions. One 512px image
+# is estimated at ~5-10 min on the 4 vCPU host (confirm at deploy), so the
+# client polls the async job API instead of holding a request open.
+IMAGEGEN_STEPS = 20
 IMAGEGEN_SIZE = 512
-IMAGEGEN_GUIDANCE = 1.5
+IMAGEGEN_GUIDANCE = 6.0
 IMAGEGEN_POLL_SECONDS = 10
-IMAGEGEN_DEADLINE_SECONDS = 900
+IMAGEGEN_DEADLINE_SECONDS = 1200
+
+# Best-of-N photo selection: SD1.5 renders subject interactions
+# stochastically, so up to N candidates are generated per photo post and a
+# vision-LLM judge (VISION_MODEL) scores each against the episode's
+# image_prompt (0-10, interaction-weighted). The first candidate scoring
+# >= PHOTO_JUDGE_PASS_SCORE ships immediately; otherwise the best one does —
+# the judge is a ranker, not a gate.
+IMAGEGEN_CANDIDATES = 3
+PHOTO_JUDGE_PASS_SCORE = 7
+PHOTO_JUDGE_MAX_TOKENS = 150
 
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly

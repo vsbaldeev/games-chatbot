@@ -16,8 +16,6 @@ import time
 import torch
 
 MODEL_ID = "Lykon/dreamshaper-8"
-LCM_LORA_ID = "latent-consistency/lcm-lora-sdv1-5"
-LCM_ADAPTER_NAME = "lcm"
 TORCH_THREADS = 4
 IDLE_UNLOAD_SECONDS = 15 * 60
 
@@ -50,8 +48,8 @@ class GenerationParams:
         negative_prompt: Optional negative prompt.
         width: Output width in pixels.
         height: Output height in pixels.
-        steps: Diffusion steps (4-6 with the LCM-LoRA).
-        guidance_scale: CFG scale (~1.0-1.5 with the LCM-LoRA).
+        steps: Diffusion steps (~20 with DPM++ 2M Karras).
+        guidance_scale: CFG scale (~6 for standard sampling).
         seed: Optional seed for reproducible output.
     """
 
@@ -176,16 +174,21 @@ class Engine:
         if self.__pipeline is not None:
             return self.__pipeline
         from compel import Compel
-        from diffusers import LCMScheduler, StableDiffusionPipeline
+        from diffusers import DPMSolverMultistepScheduler, StableDiffusionPipeline
 
         torch.set_num_threads(TORCH_THREADS)
         pipeline = StableDiffusionPipeline.from_pretrained(
             MODEL_ID, torch_dtype=torch.float32, safety_checker=None
         )
-        pipeline.scheduler = LCMScheduler.from_config(pipeline.scheduler.config)
-        # Named adapter, not fuse_lora(): Step 7 adds the character LoRA as a
-        # second adapter next to this one.
-        pipeline.load_lora_weights(LCM_LORA_ID, adapter_name=LCM_ADAPTER_NAME)
+        # Standard multi-step sampling, not the LCM-LoRA speed hack: LCM's
+        # 4-6 steps at guidance ~1.5 reliably hallucinated compositions
+        # (portraits crowding out the episode's scene, subjects present but
+        # not interacting). Verified locally: 20 steps of DPM++ 2M Karras at
+        # CFG ~6 renders coherent multi-subject scenes. Posts are scheduled,
+        # so minutes-per-image on the CPU host is an accepted cost.
+        pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
+            pipeline.scheduler.config, use_karras_sigmas=True, algorithm_type="dpmsolver++"
+        )
         pipeline.to(self.__device)
         self.__pipeline = pipeline
         # truncate_long_prompts=False: chunk-and-concatenate instead of the

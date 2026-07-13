@@ -30,8 +30,8 @@ class GenerationRequest(BaseModel):
         negative_prompt: Optional negative prompt.
         width: Output width in pixels.
         height: Output height in pixels.
-        steps: Diffusion steps (4-6 with the LCM-LoRA).
-        guidance_scale: CFG scale (~1.0-1.5 with the LCM-LoRA).
+        steps: Diffusion steps (~20 with DPM++ 2M Karras).
+        guidance_scale: CFG scale (~6 for standard sampling).
         seed: Optional seed for reproducible output.
     """
 
@@ -39,8 +39,8 @@ class GenerationRequest(BaseModel):
     negative_prompt: str | None = None
     width: int = 512
     height: int = 512
-    steps: int = 6
-    guidance_scale: float = 1.5
+    steps: int = 20
+    guidance_scale: float = 6.0
     seed: int | None = None
 
 
