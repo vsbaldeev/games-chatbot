@@ -26,10 +26,12 @@ logger = log.get_logger(__name__)
 EPISODE_CONTEXT_EPISODES = 10
 EPISODE_CONTEXT_ACTIVITIES = 7
 CURRENT_ACTIVITY_MAX_CHARS = 80
-# Formats grow as later steps ship: photo, then video_note.
+# Formats grow as later steps ship: video_note is next. The photo format is
+# only offered when the imagegen service is configured (see poster.live_formats).
 STORY_FORMAT = "story"
 VOICE_FORMAT = "voice"
-ALL_FORMATS: tuple[str, ...] = (STORY_FORMAT, VOICE_FORMAT)
+PHOTO_FORMAT = "photo"
+ALL_FORMATS: tuple[str, ...] = (STORY_FORMAT, VOICE_FORMAT, PHOTO_FORMAT)
 WRITE_ATTEMPTS = 2
 
 

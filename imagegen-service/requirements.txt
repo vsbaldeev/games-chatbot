@@ -1,0 +1,17 @@
+# CPU-only torch wheels — the default PyPI wheel drags in ~2 GB of CUDA
+# libraries this host can never use.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.4,<3
+diffusers>=0.31
+transformers>=4.44
+peft>=0.13
+accelerate>=1.0
+safetensors>=0.4
+pillow>=10
+# Builds prompt_embeds that bypass CLIP's 77-token cap (see engine.py) —
+# without this, CHARACTER_VISUAL_PROMPT + image_prompt silently truncates
+# and can drop the episode's scene, breaking text-photo coherence.
+compel>=2.0,<3
+fastapi>=0.115
+uvicorn>=0.30

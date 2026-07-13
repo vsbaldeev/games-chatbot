@@ -87,6 +87,16 @@ EPISODE_MAX_TOKENS = 2000
 # RESPONSE_MODEL_FALLBACKS above — casual Russian style.
 ACTIVITY_MODEL = "llama-3.3-70b-versatile"
 
+# Self-hosted image generation (imagegen-service/, SD1.5 + LCM-LoRA on CPU).
+# LCM collapses 25 diffusion steps to 4-6 at guidance ~1.0-1.5; one 512px
+# image takes ~1.5-3 min on the 4 vCPU host, so the client polls the async
+# job API instead of holding a request open.
+IMAGEGEN_STEPS = 6
+IMAGEGEN_SIZE = 512
+IMAGEGEN_GUIDANCE = 1.5
+IMAGEGEN_POLL_SECONDS = 10
+IMAGEGEN_DEADLINE_SECONDS = 900
+
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly
 # stressed words are the loudest tell of synthetic Russian speech.
