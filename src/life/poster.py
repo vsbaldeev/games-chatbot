@@ -7,6 +7,8 @@ catch-up retries the slot later.
 """
 
 import asyncio
+import dataclasses
+import io
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -15,8 +17,9 @@ from langchain_groq import ChatGroq
 from src import achievements, config, log
 from src.agent.middleware import ainvoke_with_backoff, strip_thinking
 from src.config.prompts import BOT_FACT_DISTILL_SYSTEM
-from src.life.writer import Episode, episode_writer_agent
+from src.life.writer import STORY_FORMAT, VOICE_FORMAT, Episode, episode_writer_agent
 from src.store import bot_memories, embedder, unified_messages
+from src.tts import SynthesizedVoice, prepare_tts_text, speech_service
 
 logger = log.get_logger(__name__)
 
@@ -33,58 +36,133 @@ async def post_life_episode(bot) -> None:
     if episode is None:
         logger.warning("Life post skipped: episode writer produced nothing usable")
         return
-    sent_count = await send_episode(bot, episode)
+    episode, voice = await resolve_voice_media(episode)
+    sent_count = await send_episode(bot, episode, voice)
     if sent_count == 0:
         logger.warning("Life post skipped: failed to send to any chat")
         return
     await record_episode(episode)
 
 
-async def send_episode(bot, episode: Episode) -> int:
+async def resolve_voice_media(episode: Episode) -> tuple[Episode, SynthesizedVoice | None]:
+    """Build the voice payload for a voice episode, degrading to story on failure.
+
+    The payload is synthesized once here and reused across the whole chat
+    fan-out. The demoted episode keeps the degraded format, so the recorded
+    canon (and the never-repeat-format rule) reflects what was actually
+    posted. A media failure demotes the post, never kills it.
+
+    Args:
+        episode: The freshly written episode.
+
+    Returns:
+        The episode paired with its synthesized voice, or the episode
+        demoted to the ``story`` format paired with None when it is not a
+        voice post or any part of the media build failed.
+    """
+    if episode.format != VOICE_FORMAT:
+        return episode, None
+    voice = await build_voice_payload(episode.voice_script)
+    if voice is None:
+        logger.warning("Voice media build failed — degrading life post to a text story")
+        return dataclasses.replace(episode, format=STORY_FORMAT), None
+    return episode, voice
+
+
+async def build_voice_payload(voice_script: str) -> SynthesizedVoice | None:
+    """Synthesize the spoken story for a voice life post.
+
+    Args:
+        voice_script: The episode's spoken story text.
+
+    Returns:
+        The synthesized payload, or None when the TTS service is not ready,
+        the script is unspeakable (the ``prepare_tts_text`` contract), or
+        synthesis failed — never raises.
+    """
+    if not speech_service.is_ready:
+        return None
+    prepared_text = prepare_tts_text(voice_script)
+    if prepared_text is None:
+        return None
+    return await speech_service.synthesize(prepared_text)
+
+
+async def send_episode(bot, episode: Episode, voice: SynthesizedVoice | None) -> int:
     """Send the episode to every known chat.
 
     Args:
         bot: Telegram Bot instance used to send messages.
         episode: The episode to post.
+        voice: Synthesized voice payload for voice posts, or None for text.
 
     Returns:
         Number of chats the post was successfully sent to.
     """
     chat_ids = await achievements.get_all_chat_ids()
     results = await asyncio.gather(
-        *[send_to_chat(bot, chat_id, episode) for chat_id in chat_ids],
+        *[send_to_chat(bot, chat_id, episode, voice) for chat_id in chat_ids],
         return_exceptions=True,
     )
     return sum(1 for result in results if result is True)
 
 
-async def send_to_chat(bot, chat_id: int, episode: Episode) -> bool:
+async def send_to_chat(bot, chat_id: int, episode: Episode, voice: SynthesizedVoice | None) -> bool:
     """Send one episode to one chat and record it in unified_messages.
+
+    A voice post shows only the teaser caption, but ``unified_messages``
+    records the full ``episode_text`` — the bot's own posts never need
+    transcription when a member replies to them.
 
     Args:
         bot: Telegram Bot instance used to send the message.
         chat_id: Target chat.
         episode: The episode to post.
+        voice: Synthesized voice payload for voice posts, or None for text.
 
     Returns:
         True on success, False on any failure — never raises, so one
         chat's failure cannot abort the fan-out to the others.
     """
     try:
-        sent = await bot.send_message(chat_id=chat_id, text=episode.episode_text)
+        sent, media_type = await send_media(bot, chat_id, episode, voice)
         await unified_messages.insert(
             chat_id=chat_id,
             message_id=sent.message_id,
             user_id=bot.id,
             username=config.BOT_USERNAME,
             content=episode.episode_text,
-            media_type="text",
+            media_type=media_type,
             reply_to_msg_id=None,
         )
         return True
     except Exception as error:
         logger.warning("Life post failed for chat %s: %s", chat_id, error)
         return False
+
+
+async def send_media(bot, chat_id: int, episode: Episode, voice: SynthesizedVoice | None) -> tuple:
+    """Send the episode's Telegram message in its format to one chat.
+
+    Args:
+        bot: Telegram Bot instance used to send the message.
+        chat_id: Target chat.
+        episode: The episode to post.
+        voice: Synthesized voice payload for voice posts, or None for text.
+
+    Returns:
+        ``(sent_message, media_type)`` for the ``unified_messages`` record.
+    """
+    if voice is not None:
+        sent = await bot.send_voice(
+            chat_id=chat_id,
+            voice=io.BytesIO(voice.ogg_bytes),
+            duration=voice.duration_seconds,
+            caption=episode.voice_teaser,
+        )
+        return sent, "voice"
+    sent = await bot.send_message(chat_id=chat_id, text=episode.episode_text)
+    return sent, "text"
 
 
 async def record_episode(episode: Episode) -> None:

@@ -10,7 +10,12 @@ from langchain_groq import ChatGroq
 
 from src import config, log
 from src.agent.middleware import GroqContextGuard, ThinkingStripper, guarded_ainvoke, should_retry
-from src.config.prompts import EPISODE_TEXT_MAX_CHARS, EPISODE_WRITER_SYSTEM
+from src.config.prompts import (
+    EPISODE_TEASER_MAX_CHARS,
+    EPISODE_TEXT_MAX_CHARS,
+    EPISODE_VOICE_SCRIPT_MAX_CHARS,
+    EPISODE_WRITER_SYSTEM,
+)
 from src.life import calendar_ru
 from src.life.engagement import MEMBER, choose_mode
 from src.store import bot_memories
@@ -21,8 +26,10 @@ logger = log.get_logger(__name__)
 EPISODE_CONTEXT_EPISODES = 10
 EPISODE_CONTEXT_ACTIVITIES = 7
 CURRENT_ACTIVITY_MAX_CHARS = 80
-# Formats grow as later steps ship: voice, then photo, then video_note.
-ALL_FORMATS: tuple[str, ...] = ("story",)
+# Formats grow as later steps ship: photo, then video_note.
+STORY_FORMAT = "story"
+VOICE_FORMAT = "voice"
+ALL_FORMATS: tuple[str, ...] = (STORY_FORMAT, VOICE_FORMAT)
 WRITE_ATTEMPTS = 2
 
 
@@ -35,7 +42,11 @@ class Episode:
             future media caption.
         image_prompt: English scene description for image generation —
             character appearance is prepended separately at generation time.
-        voice_script: Conversational retelling of the episode for TTS.
+        voice_script: Self-contained spoken telling of the episode for TTS —
+            for voice posts this IS the story members hear, including the
+            engagement question/mention.
+        voice_teaser: One dry hook line used as the voice note's caption; a
+            lure, never a summary of the episode.
         current_activity: Present-tense activity phrase answering "what are
             you doing right now", or None when missing or over-length.
         format: The chosen post format.
@@ -44,6 +55,7 @@ class Episode:
     episode_text: str
     image_prompt: str
     voice_script: str
+    voice_teaser: str
     current_activity: str | None
     format: str
 
@@ -193,15 +205,20 @@ def parse_episode(data: dict, allowed_formats: tuple[str, ...]) -> Episode | Non
 
     Returns:
         The validated Episode, or None when a required field is missing or
-        ``episode_text`` exceeds the length limit — a validation failure
-        that should trigger a retry, never a silent truncation.
+        any field exceeds its length limit — a validation failure that
+        should trigger a retry, never a silent truncation.
     """
     episode_text = str(data.get("episode_text") or "").strip()
     image_prompt = str(data.get("image_prompt") or "").strip()
     voice_script = str(data.get("voice_script") or "").strip()
-    if not episode_text or not image_prompt or not voice_script:
+    voice_teaser = str(data.get("voice_teaser") or "").strip()
+    if not episode_text or not image_prompt or not voice_script or not voice_teaser:
         return None
     if len(episode_text) > EPISODE_TEXT_MAX_CHARS:
+        return None
+    if len(voice_script) > EPISODE_VOICE_SCRIPT_MAX_CHARS:
+        return None
+    if len(voice_teaser) > EPISODE_TEASER_MAX_CHARS:
         return None
     post_format = str(data.get("format") or "").strip()
     if post_format not in allowed_formats:
@@ -210,6 +227,7 @@ def parse_episode(data: dict, allowed_formats: tuple[str, ...]) -> Episode | Non
         episode_text=episode_text,
         image_prompt=image_prompt,
         voice_script=voice_script,
+        voice_teaser=voice_teaser,
         current_activity=coerce_current_activity(data.get("current_activity")),
         format=post_format,
     )

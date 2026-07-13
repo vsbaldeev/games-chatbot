@@ -524,6 +524,16 @@ ROLES_SYSTEM_PROMPT = (
 # Telegram's 1024-char photo/voice caption cap once those formats ship.
 EPISODE_TEXT_MAX_CHARS = 450
 
+# Voice life posts must stay a low-commitment tap: Telegram shows the note's
+# duration before playing, and ~500 chars of Russian is roughly 25-40 s of
+# Silero speech. Tighter than and independent of the general TTS_MAX_CHARS
+# synthesis limit (800).
+EPISODE_VOICE_SCRIPT_MAX_CHARS = 500
+
+# The voice caption is a hook, not a summary: one dry line that sells the
+# play button without spoiling the story.
+EPISODE_TEASER_MAX_CHARS = 120
+
 EPISODE_WRITER_SYSTEM = f"""{CHARACTER_SHEET}
 Ты пишешь следующий эпизод этой жизни для поста в чат — рассказчик от первого лица,
 в своём обычном невозмутимом, немногословном стиле с сухим сарказмом.
@@ -549,18 +559,31 @@ EPISODE_WRITER_SYSTEM = f"""{CHARACTER_SHEET}
 - Пост не только про тебя — он должен вовлекать чат. В сообщении тебе передадут одно
   из двух заданий (вопрос к чату или упоминание конкретного участника) — выполни его,
   не игнорируй.
+- Формат «story» — текстовый пост: чат читает episode_text. Формат «voice» —
+  голосовое сообщение: чат слышит voice_script, а подписью под голосовым служит
+  только voice_teaser. Историю из голосового по тексту не узнать — поэтому
+  voice_script обязан быть самодостаточным рассказом эпизода и обязательно
+  содержать задание (вопрос к чату или упоминание участника) в самой озвучке.
 
 Ответь строго одним JSON-объектом, без markdown и пояснений, ровно с этими ключами:
 {{"episode_text": "текст поста (2-3 предложения)",
   "image_prompt": "english scene description for image generation, no character appearance",
-  "voice_script": "разговорный текст для озвучки, до 550 символов",
+  "voice_script": "разговорный текст для озвучки, до {EPISODE_VOICE_SCRIPT_MAX_CHARS} символов",
+  "voice_teaser": "одна строка-подводка к голосовому, до {EPISODE_TEASER_MAX_CHARS} символов",
   "current_activity": "чем ты занят прямо сейчас, настоящее время, до 80 символов",
   "format": "один из доступных форматов, который тебе передадут в сообщении"}}
 
 - episode_text: не длиннее {EPISODE_TEXT_MAX_CHARS} символов.
 - image_prompt: только сцена, действие и обстановка по-английски, без описания твоей
   внешности — она добавляется отдельно при генерации изображения.
-- voice_script: пересказ эпизода для озвучки вслух, без эмодзи и форматирования.
+- voice_script: полный устный рассказ эпизода, разговорный, без эмодзи и
+  форматирования, не длиннее {EPISODE_VOICE_SCRIPT_MAX_CHARS} символов (примерно
+  полминуты речи). Участника чата в озвучке называй по нику, но без «@».
+- voice_teaser: сухая интригующая подводка в твоём стиле («Про медведя, мёд и одну
+  плохую идею.») — крючок, а не пересказ: не раскрывай развязку, не задавай в ней
+  вопрос из задания, а если в эпизоде участвует человек из чата — не называй его,
+  максимум намекни («тут кое-что про одного из вас»). Не длиннее
+  {EPISODE_TEASER_MAX_CHARS} символов.
 - current_activity: короткая фраза в настоящем времени о том, чем ты занят прямо сейчас
   (даже для законченного разового события дай правдоподобный текущий «хвост»: например
   эпизод про медведя → «чинит улья после медведя», законченная покраска →
