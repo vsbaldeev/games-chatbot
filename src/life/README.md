@@ -20,9 +20,11 @@ src/jobs/life_post.py (schedule) ──► src/life/poster.py:post_life_episode(
     │        and required fields; one retry on a malformed/invalid
     │        response, then None (slot skipped, catch-up retries later)
     │
-    ├─ resolve_voice_media: for a voice episode, synthesize the spoken story
-    │      once (prepare_tts_text + speech_service.synthesize); any failure
-    │      (service not ready, unspeakable script, synthesis error) demotes
+    ├─ resolve_media: build the episode's media once, before the fan-out —
+    │      voice: synthesize the spoken story (prepare_tts_text +
+    │      speech_service.synthesize); photo: generate the selfie on the
+    │      imagegen service (CHARACTER_VISUAL_PROMPT + the episode's
+    │      image_prompt via src/imagegen/client.py). Any failure demotes
     │      the episode to a story — a media failure never kills a post
     │
     ├─ send_episode: fan out to every chat (achievements.get_all_chat_ids,
@@ -81,14 +83,41 @@ low-commitment tap. Reply-context needs no transcription:
 `unified_messages.content` records the full `episode_text` even though
 members see only the teaser.
 
+## Photo posts — text–photo coherence
+
+A photo post must never contradict its caption. Three layers guarantee it:
+one episode JSON produces both `episode_text` (the caption) and
+`image_prompt` (the scene), so they cannot describe different events by
+construction; the writer prompt requires `image_prompt` to render THE scene
+of `episode_text` (same action, place, season, key objects); and the poster
+always sends the image *with* `episode_text` as its caption — an image
+failure degrades the post to `story`, so a bare or mismatched photo is never
+posted. The character's appearance is deliberately absent from
+`image_prompt`: the fixed `CHARACTER_VISUAL_PROMPT` descriptor is prepended
+at generation time, so every selfie shares wardrobe/beard/style while the
+scene tracks the episode. The photo format is only offered to the writer
+when `IMAGEGEN_URL` is configured (`live_formats()`).
+
+A fourth layer lives on the service side: `CHARACTER_VISUAL_PROMPT +
+image_prompt` routinely exceeds CLIP's 77-token limit, and a plain
+`prompt=` string would silently truncate — dropping exactly the episode's
+scene detail. `imagegen-service/engine.py` builds embeddings via Compel
+instead, so the full prompt always reaches the model (see that service's
+README for the story of the bug this replaced).
+
+Recording uses `format_photo_content(episode_text)` plus the sent photo's
+`file_id`, which plugs Жора's selfies into the existing lazy
+vision-description path — a member replying to a selfie gets a real
+description of the generated frame, same as for member photos.
+
 ## Format degradation ladder
 
-`voice → story`: the voice payload is built once before the fan-out
-(`resolve_voice_media`), and any media failure demotes the episode to a text
-story — the recorded format is the demoted one, so the never-repeat-format
-rule sees what was actually posted. Later releases extend the mapping
-(`photo → story`, `video_note → voice → story`); a media failure always
-demotes the post, never kills it.
+`voice → story`, `photo → story`: media payloads are built once before the
+fan-out (`resolve_media`), and any media failure demotes the episode to a
+text story — the recorded format is the demoted one, so the
+never-repeat-format rule sees what was actually posted. Step 8 extends the
+mapping with `video_note → voice → story`; a media failure always demotes
+the post, never kills it.
 
 ## Scheduling — `src/jobs/life_post.py`
 

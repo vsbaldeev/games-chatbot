@@ -46,6 +46,11 @@ MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 TMDB_API_KEY: str = os.getenv("TMDB_API_KEY", "")
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 
+# Base URL of the self-hosted image-generation service (imagegen-service/).
+# Empty disables photo life posts entirely — the format is never offered to
+# the episode writer.
+IMAGEGEN_URL: str = os.getenv("IMAGEGEN_URL", "")
+
 # Local path of the Silero TTS model file. Downloaded on first start when
 # missing; the Docker image pre-bakes it (see Dockerfile).
 TTS_MODEL_PATH: str = os.getenv("TTS_MODEL_PATH", ".cache/silero/v5_ru.pt")

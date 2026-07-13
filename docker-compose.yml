@@ -35,6 +35,23 @@ services:
         max-size: "10m"
         max-file: "2"
 
+  # Self-hosted CPU image generation for the bot's life posts (src/life/).
+  # The bot must start when imagegen is down — photo posts degrade to text.
+  # Idles at ~300 MB (model unloaded); the 3g peak exists only around the
+  # two weekly generations.
+  imagegen:
+    build: ./imagegen-service
+    restart: unless-stopped
+    mem_limit: 3g
+    memswap_limit: 3g
+    volumes:
+      - sd-models:/models
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   bot:
     build: .
     image: games-chatbot
@@ -42,6 +59,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://chatbot:${POSTGRES_PASSWORD}@postgres:5432/chatbot
+      IMAGEGEN_URL: http://imagegen:8000
       LOG_LEVEL: INFO
       ASYNCPG_LOG_LEVEL: WARNING
       TELEGRAM_APP_LOG_LEVEL: WARNING
@@ -53,8 +71,13 @@ services:
       # down — Shorts summaries degrade to silence, everything else works.
       pot-provider:
         condition: service_started
+      # Same: photo posts degrade to text stories when imagegen is down.
+      imagegen:
+        condition: service_started
     # 2g: CPU torch + the resident Silero TTS model do not fit in the old
-    # 800m cap; postgres keeps 1g, the OS keeps the rest of the 4GB VPS.
+    # 800m cap. Budget on the 8GB host: OS+Docker ~1.2g, postgres 1g,
+    # pot-provider 256m, bot 2g, imagegen 3g peak — ~7.5g worst case, and
+    # the imagegen peak only exists during the two weekly generations.
     mem_limit: 2g
     memswap_limit: 2g
     logging:
@@ -65,3 +88,4 @@ services:
 
 volumes:
   pg-data:
+  sd-models:
