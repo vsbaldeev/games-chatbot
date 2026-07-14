@@ -137,9 +137,16 @@ REQUEST_WORDS = frozenset({
     "поясни", "поясните", "сделай", "сделайте", "найди", "найдите",
     "проверь", "проверьте", "посчитай", "придумай", "кинь", "скинь",
     "дай", "давай", "помоги", "помогите",
+    "поищи", "поищите", "загугли", "загуглите", "погугли", "погуглите",
+    "гугли", "нагугли", "узнай", "узнайте",
     "translate", "tell", "show", "write", "make", "find", "check", "explain",
-    "say", "give", "help",
+    "say", "give", "help", "search", "google", "lookup",
 })
+
+# A message with more than this many non-laughter word tokens is treated as
+# substantive: every MEANINGLESS category is a SHORT reaction (laughter, «ок»,
+# «бля», emoji, «хз»), so a longer message is essentially never meaningless.
+SUBSTANTIVE_WORD_COUNT = 6
 
 # Tokens that are pure laughter — skipped when looking for the leading word,
 # so «ахаха что за бред» still reads as a question.
@@ -193,21 +200,27 @@ def looks_like_request(text: str) -> bool:
     to the bot always deserves a reply, however short it is — even when the
     classifier erred because the quoted content was opaque to it.
 
+    Every MEANINGLESS category is a SHORT reaction (laughter, «ок», «бля»,
+    emoji, «хз»), so a message with more than ``SUBSTANTIVE_WORD_COUNT``
+    non-laughter word tokens is treated as substantive regardless of its
+    leading word — this catches long requests like «поищи в интернете, когда…»
+    that a weak classifier mislabels and that no leading-word check would save.
+
     Args:
         text: Raw message text.
 
     Returns:
-        True when the text contains a question mark, or its first
+        True when the text contains a question mark, has more than
+        ``SUBSTANTIVE_WORD_COUNT`` non-laughter words, or its first
         non-laughter word is an interrogative from ``QUESTION_WORDS`` or an
         imperative from ``REQUEST_WORDS``.
     """
     if "?" in text:
         return True
-    for word in re.findall(r"\w+", text.lower()):
-        if LAUGHTER_RE.fullmatch(word):
-            continue
-        return word in QUESTION_WORDS or word in REQUEST_WORDS
-    return False
+    words = [word for word in re.findall(r"\w+", text.lower()) if not LAUGHTER_RE.fullmatch(word)]
+    if len(words) > SUBSTANTIVE_WORD_COUNT:
+        return True
+    return bool(words) and words[0] in (QUESTION_WORDS | REQUEST_WORDS)
 
 
 def replied_to_display_content(replied_to: dict) -> str:
