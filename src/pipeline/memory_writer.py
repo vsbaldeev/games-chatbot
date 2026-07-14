@@ -26,12 +26,16 @@ nightly cleanup job (user_memories.cleanup_stale), counters included.
 
 MEMORY_MODEL is a reasoning model, so every extraction call disables
 reasoning (reasoning_effort="none") — otherwise the whole token budget is
-burned inside a <think> block and no JSON answer is ever produced. As a
-backstop, _parse_facts strips any think blocks and logs unparsable output.
+burned inside a <think> block and no answer is ever produced. As a backstop,
+_parse_facts strips any think blocks first.
+
+Output is one fact per line rather than a JSON array: small models reliably
+emit bare, unquoted list items (e.g. "[fact one, fact two]"), which breaks
+JSON parsing and silently discards every fact in the batch. Line-splitting
+has no quoting failure mode.
 """
 
 import asyncio
-import json
 import re
 from collections import defaultdict
 
@@ -106,7 +110,7 @@ def make_extraction_llm() -> ChatGroq:
     """Return the fact-extraction LLM with reasoning disabled.
 
     MEMORY_MODEL is a reasoning model; without ``reasoning_effort="none"`` it
-    spends the whole max_tokens budget inside a ``<think>`` block and the JSON
+    spends the whole max_tokens budget inside a ``<think>`` block and the
     answer never appears, so extraction silently yields zero facts.
 
     Returns:
@@ -119,27 +123,27 @@ def make_extraction_llm() -> ChatGroq:
     )
 
 
+FACT_LINE_STRIP_RE = re.compile(r"^[\s\-*•\d.)]+")
+NO_FACTS_SENTINEL = "NONE"
+
+
 def _parse_facts(raw: str) -> list[str]:
+    """Parse one-fact-per-line extraction output into a list of facts.
+
+    Args:
+        raw: Raw LLM output, one fact per line, or the ``NONE`` sentinel
+            when nothing distinctive was learned.
+
+    Returns:
+        Non-empty fact strings with leading bullets/numbering stripped.
+    """
     cleaned = strip_thinking(raw)
-    try:
-        data = json.loads(cleaned)
-        if not isinstance(data, list):
-            logger.warning("Fact extraction returned non-list JSON: %.200s", cleaned)
-            return []
-        facts = []
-        for item in data:
-            if isinstance(item, str):
-                fact = item.strip()
-            elif isinstance(item, dict):
-                fact = next((str(value).strip() for value in item.values() if value), "")
-            else:
-                fact = str(item).strip()
-            if fact:
-                facts.append(fact)
-        return facts
-    except json.JSONDecodeError:
-        logger.warning("Fact extraction returned unparsable output: %.200s", cleaned)
-        return []
+    facts = []
+    for line in cleaned.splitlines():
+        fact = FACT_LINE_STRIP_RE.sub("", line).strip()
+        if fact and fact.upper() != NO_FACTS_SENTINEL:
+            facts.append(fact)
+    return facts
 
 
 async def _extract_facts(
@@ -175,7 +179,7 @@ async def _extract_facts(
     media_rule = f"{MEDIA_DESCRIPTION_RULE}\n\n" if source_kind == "media_description" else ""
     prompt = (
         f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
-        f"{media_rule}{context_section}{exchange}\n\nNew facts to add (JSON array):"
+        f"{media_rule}{context_section}{exchange}\n\nNew facts to add (one per line):"
     )
     llm = make_extraction_llm()
     async with memory_call_semaphore:
@@ -281,7 +285,7 @@ async def _extract_facts_about(
             f"Пользователь: @{username}\nИзвестные факты:\n{existing_block}\n\n"
             f"{CROSS_USER_SINCERITY_RULE}\n\n"
             f"Наблюдение от @{observer_username}: {observation}\n\n"
-            f"Что это говорит нам о @{username}? Новые факты (JSON-массив):"
+            f"Что это говорит нам о @{username}? Новые факты (по одному на строку):"
         )
         llm = make_extraction_llm()
         async with memory_call_semaphore:
