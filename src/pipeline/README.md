@@ -239,10 +239,12 @@ filter  (runs after ingester)
     │   placeholder is hidden and the reply classifies context-free instead
     │   of against a token the classifier cannot see
     ├─ text, LLM → MEANINGLESS
-    │       ├─ text looks like a question or request («?», leading
+    │       ├─ text looks like a question or request («?», more than
+    │       │   SUBSTANTIVE_WORD_COUNT non-laughter words, leading
     │       │   interrogative, or imperative request verb like «переведи»/
-    │       │   «расскажи»; laughter tokens skipped) → overridden to
-    │       │   MEANINGFUL: a question or request is never meaningless
+    │       │   «расскажи»/«поищи»/«загугли»; laughter tokens skipped) →
+    │       │   overridden to MEANINGFUL: every MEANINGLESS category is a
+    │       │   SHORT reaction, so a longer message is never meaningless
     │       └─ otherwise → should_respond=False
     │               + asyncio.create_task(react with random emoji)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → insult ladder

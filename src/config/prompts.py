@@ -49,7 +49,9 @@ FILTER_SYSTEM = (
     "BOT_INSULT — an insult, mockery or provocation aimed at the bot itself:\n"
     + BOT_INSULT_EXAMPLES
     + "\n"
-    "MEANINGLESS — a reaction that does NOT require a response:\n"
+    "MEANINGLESS — a reaction that does NOT require a response. Every category "
+    "below is a SHORT reaction of a few words; a longer message is essentially "
+    "never MEANINGLESS:\n"
     "- Laughter: 'ахаха', 'hahaha', 'lol', 'rofl', 'ыыы', '😂😂😂'\n"
     "- Short swearing/interjections about the situation, NOT about the bot: "
     "'бля', 'пиздец', 'wtf', 'офигеть', 'жесть'\n"
@@ -59,6 +61,8 @@ FILTER_SYSTEM = (
     "MEANINGFUL — everything else that deserves a reply:\n"
     "- Questions: 'Как дела?', 'Что нового?'\n"
     "- Commands/Requests: 'Расскажи анекдот', '/duel @user'\n"
+    "- Factual / web-search requests: 'поищи в интернете когда вышла игра', "
+    "'загугли счёт матча', 'узнай когда следующий патч'\n"
     "- Opinions/Descriptions: 'Эта игра просто супер, мне нравится графика'\n"
     "- Greetings: 'Привет', 'Добрый вечер' (bot should greet back)\n"
     "- Laughter or emoji followed by ANY question or request: "
@@ -75,7 +79,8 @@ FILTER_SYSTEM = (
     "used as an intensifier for praise, excitement or agreement ('ахуенный', 'охуенно', "
     "'пиздато') is MEANINGFUL, never BOT_INSULT or MEANINGLESS — judge the sentiment, "
     "not the presence of a swear word.\n"
-    "4. A question is never MEANINGLESS.\n"
+    "4. A question is never MEANINGLESS. A request to look something up, search "
+    "the web, or answer a factual question is always MEANINGFUL.\n"
     "5. If unsure between MEANINGLESS and MEANINGFUL, err on the side of 'MEANINGFUL'."
 )
 
