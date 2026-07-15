@@ -10,7 +10,7 @@ One small class covers two usage patterns:
   the number of hits within the window (including the current one). Used by
   the guard flag counter.
 
-State is intentionally in-memory (mirrors ``humor_gate``/``insult_gate``):
+State is intentionally in-memory (mirrors ``humor_gate``):
 losing it on restart is harmless for every consumer. Entries are pruned
 lazily on access; a full sweep runs only when the key map grows large.
 """

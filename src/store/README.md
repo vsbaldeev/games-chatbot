@@ -110,6 +110,21 @@ bot_memories (
 INDEX idx_bot_memories_kind_time ON (kind, updated_at DESC)
 INDEX idx_bot_memories_hnsw      ON (embedding vector_cosine_ops) WHERE embedding IS NOT NULL
 
+-- One leaky-bucket attention score per (chat, user) for the conversation
+-- wind-down engine (src/pipeline/engagement_gate.py). Decay (30-min
+-- half-life) is computed lazily in SQL on each access; writing is a single
+-- atomic INSERT … ON CONFLICT DO UPDATE … RETURNING, so concurrent messages
+-- from the same user serialize on the row lock. Persisted so a redeploy
+-- never resets a wound-down user. No retention — dormant rows are tiny and
+-- decay to the full-reply tier on next read.
+engagement_scores (
+    chat_id        BIGINT,
+    user_id        BIGINT,
+    score          DOUBLE PRECISION,
+    last_signal_at DOUBLE PRECISION,
+    PRIMARY KEY (chat_id, user_id)
+)
+
 -- Vision descriptions per sticker identity. file_unique_id is stable across
 -- resends and bots (unlike file_id), so each distinct sticker is described
 -- by the vision LLM at most once ever. No retention — rows are tiny and
@@ -138,6 +153,7 @@ db.py               asyncpg Pool; acquire() context manager; init() / close() li
 unified_messages.py insert (ON CONFLICT DO NOTHING), update_content, get_by_id, get_chain (max 10 hops), get_recent (last N), get_media_group, get_user_messages, cleanup_old
 user_memories.py    upsert_facts (cap 30 per user), upsert_hack_attempt, get_facts, get_facts_for_users, get_facts_with_embeddings, find_similar_fact, refresh_updated_at, cleanup_stale (90-day retention)
 bot_memories.py     insert_episode (cap 100, prunes oldest), get_recent_episodes, get_latest_posted_at, get_current_activity, get_facts, get_writer_facts (newest + sampled older), find_similar_facts, find_similar_episodes (similarity floor), upsert_facts (cap 300, semantic dedup, newest wins)
+engagement.py       add_signal (atomic decay-and-charge, returns new score), peek_score (read-only decayed score, 0.0 when absent)
 thread_history.py   append_turn, get_history (thread-scoped, oldest-first), cleanup_old (60-day retention)
 sticker_descriptions.py get_description / save_description — permanent vision-description cache keyed by sticker file_unique_id
 embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[float] (384-dim)

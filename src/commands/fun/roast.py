@@ -2,10 +2,10 @@
 "Прожарка" (roast) feature — roast text generation.
 
 Roaster encapsulates LLM-based roast generation. Insults aimed at the bot are
-now handled by the insult ladder in ``src.pipeline.filter_node`` /
-``src.pipeline.insult_gate``, so this generator currently has no automatic
-trigger — it is kept as a reusable building block (e.g. for future commands,
-jobs or engagement features).
+now handled by the engagement wind-down engine in ``src.pipeline.filter_node``
+/ ``src.pipeline.engagement_gate``, so this generator currently has no
+automatic trigger — it is kept as a reusable building block (e.g. for future
+commands, jobs or engagement features).
 """
 
 import random

@@ -2,9 +2,11 @@ Roast ("прожарка") text generation and the /meme command.
 
 The `/roast` command and the weekly scheduled roast were retired in favour of
 autonomous humor (see `src/pipeline/` HumorNode). The regex-based **offense
-auto-roast** was retired too, replaced by the LLM-classified insult ladder in
-`src/pipeline/filter_node.py` / `src/pipeline/insult_gate.py` (comeback →
-dismissive one-liner → bored emoji). Roast generation (`Roaster.generate` /
+auto-roast** was retired too, replaced by the LLM-classified engagement
+wind-down engine in `src/pipeline/filter_node.py` /
+`src/pipeline/engagement_gate.py` (comeback → LLM brush-off → bored emoji →
+silence, driven by a persistent per-user attention score). Roast generation
+(`Roaster.generate` /
 `generate_roast_text`) currently has no automatic trigger and is kept as a
 reusable building block for future commands, jobs or engagement features.
 
@@ -78,9 +80,12 @@ GuardNode (src/pipeline/guard_node.py)
     → random refusal sent to user
     → hack attempt recorded in user_memories as "Пытался взломать бота N раз"
 
-Insult ladder (src/pipeline/filter_node.py + insult_gate.py)
-    LLM-confirmed insult aimed at the bot
-    → 1st in 30 min: witty comeback; 2nd–3rd: canned dismissive line; 4+: bored emoji
+Engagement wind-down engine (src/pipeline/filter_node.py + engagement_gate.py)
+    LLM-confirmed insult aimed at the bot charges the sender's persistent
+    attention score (30-min half-life, Postgres)
+    → low score: witty comeback (two rapid insults both qualify — the
+      classifier has false positives); then: short LLM brush-off; then:
+      bored emoji; finally: silence
     → each insult recorded in user_memories as "Оскорблял бота N раз"
 ```
 

@@ -61,6 +61,7 @@ class BotState(TypedDict):
     response_messages: NotRequired[list]  # assembled LangChain messages forwarded to LanguageCorrectionNode
     humor_reply_to_msg_id: NotRequired[int | None]  # validated joke anchor; None sends the joke un-anchored
     is_bot_insult: NotRequired[bool]  # True when the filter classified the message as an insult aimed at the bot
+    wind_down: NotRequired[bool]   # True when the engagement gate wants a short conversation-closing reply instead of a full one
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
     media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified

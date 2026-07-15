@@ -84,11 +84,16 @@ class WorkerNode:
             DailyLimitError: Propagated from ``agent.invoke_worker`` on daily quota exhaustion.
             RateLimitError: Propagated from ``agent.invoke_worker`` on transient rate limits.
         """
-        if state.get("is_bot_insult") or state.get("response_trigger") == "youtube_short":
+        if (
+            state.get("is_bot_insult")
+            or state.get("wind_down")
+            or state.get("response_trigger") == "youtube_short"
+        ):
             # A comeback needs personality, not IGDB lookups: skipping the
             # worker avoids a «🔍 Ищу…» notification before the burn and junk
             # search output steering it. Same for Shorts summaries — the
-            # source material is already in processed_text.
+            # source material is already in processed_text — and for wind-down
+            # brush-offs, which are one short phrase closing the conversation.
             return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")

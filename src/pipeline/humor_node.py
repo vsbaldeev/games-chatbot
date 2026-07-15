@@ -5,15 +5,17 @@ Reached only when the opportunity gate fires. Gathers the live conversation
 participant material, asks the comedian whether to joke, and — when it acts —
 sets ``state["response"]`` plus a validated ``humor_reply_to_msg_id`` so
 ``run_pipeline`` anchors the joke to the message it is actually about (or sends
-it un-anchored when no valid target was cited). On an abstain or any error it
-stays silent (fail-safe to silence), then the graph continues to
-``memory_writer`` so facts are still extracted.
+it un-anchored when no valid target was cited). A joke whose cited target
+belongs to a user the engagement gate has wound down is dropped entirely —
+bot-initiated humor must not restart a conversation the gate is ending. On an
+abstain or any error it stays silent (fail-safe to silence), then the graph
+continues to ``memory_writer`` so facts are still extracted.
 """
 
 from src import config, log
 from src.agent.comedian import ComedianDecision
 from src.agent.roast_material import format_member_material, gather_member_material
-from src.pipeline import humor_gate
+from src.pipeline import engagement_gate, humor_gate
 from src.pipeline.response_node import render_row
 from src.pipeline.state import BotState
 from src.store import unified_messages
@@ -137,6 +139,9 @@ class HumorNode:
             return {}
         if decision.act and decision.text.strip():
             target = validate_reply_target(decision.reply_to_message_id, recent, config.BOT_ID)
+            if target is not None and await self.__target_wound_down(chat_id, target, recent):
+                humor_gate.mark_considered(chat_id)
+                return {}
             humor_gate.mark_joke_sent(chat_id)
             logger.info(
                 "Autonomous %s joke in chat %s (reply_to=%s)", decision.register, chat_id, target
@@ -148,6 +153,34 @@ class HumorNode:
             }
         humor_gate.mark_considered(chat_id)
         return {}
+
+    async def __target_wound_down(self, chat_id: int, target: int, recent: list[dict]) -> bool:
+        """Check whether the joke target's author is past bot-initiated attention.
+
+        A joke aimed at a user the engagement gate is winding down would
+        restart the very conversation the gate is ending, so the joke is
+        dropped entirely (an un-anchored send would still be about them).
+
+        Args:
+            chat_id: Chat the joke would be posted in.
+            target: Validated message id the joke replies to.
+            recent: Messages newest-first, source of the target's author.
+
+        Returns:
+            True when the target message's author is wound down.
+        """
+        author_row = next((row for row in recent if row["message_id"] == target), None)
+        if author_row is None:
+            return False
+        wound_down = await engagement_gate.is_wound_down(
+            chat_id=chat_id, user_id=author_row["user_id"]
+        )
+        if wound_down:
+            logger.info(
+                "Humor: target @%s is wound down (score high) — abstaining",
+                author_row["username"],
+            )
+        return wound_down
 
     async def __decide(self, chat_id: int, recent: list[dict]) -> ComedianDecision:
         """Build context and ask the comedian for a decision.
