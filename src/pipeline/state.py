@@ -64,4 +64,7 @@ class BotState(TypedDict):
     wind_down: NotRequired[bool]   # True when the engagement gate wants a short conversation-closing reply instead of a full one
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
+    filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "SHORTS", set by the filter node
+    engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node
+    drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line
     media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified

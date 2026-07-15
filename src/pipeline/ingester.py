@@ -167,18 +167,18 @@ def is_garbage_transcript(text: str, segments: list[dict]) -> bool:
         True when the transcript should be discarded as hallucinated.
     """
     if len(text) <= BOILERPLATE_MAX_LENGTH and BOILERPLATE_RE.search(text):
-        logger.info("Transcript rejected (boilerplate): %r", text)
+        logger.debug("Transcript rejected (boilerplate): %s", log.snippet(text))
         return True
     if not segments:
         return False
     if all(seg.get("no_speech_prob", 0.0) > NO_SPEECH_PROB_LIMIT for seg in segments):
-        logger.info("Transcript rejected (no_speech_prob): %r", text)
+        logger.debug("Transcript rejected (no_speech_prob): %s", log.snippet(text))
         return True
     if all(seg.get("avg_logprob", 0.0) < AVG_LOGPROB_LIMIT for seg in segments):
-        logger.info("Transcript rejected (avg_logprob): %r", text)
+        logger.debug("Transcript rejected (avg_logprob): %s", log.snippet(text))
         return True
     if all(seg.get("compression_ratio", 0.0) > COMPRESSION_RATIO_LIMIT for seg in segments):
-        logger.info("Transcript rejected (compression_ratio): %r", text)
+        logger.debug("Transcript rejected (compression_ratio): %s", log.snippet(text))
         return True
     return False
 

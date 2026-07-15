@@ -196,7 +196,7 @@ async def apply_language_correction(llm, ai_message, messages: list):
     visible = strip_thinking(ai_message.content)
     if not visible or not needs_russian_correction(visible):
         return ai_message
-    logger.warning("Foreign script detected, retrying in Russian")
+    logger.info("Foreign script detected, retrying in Russian")
     correction = messages + [HumanMessage(content=LANGUAGE_CORRECTION_PROMPT)]
     try:
         corrected = await llm.ainvoke(correction)

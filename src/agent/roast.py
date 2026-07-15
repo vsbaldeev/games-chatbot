@@ -128,7 +128,7 @@ class RoastAgent:
         visible = strip_thinking(reply)
         if not visible or not needs_russian_correction(visible):
             return reply
-        logger.warning("Foreign script detected in roast, retrying in Russian")
+        logger.info("Foreign script detected in roast, retrying in Russian")
         correction_messages = [
             HumanMessage(content=user_prompt),
             AIMessage(content=reply),

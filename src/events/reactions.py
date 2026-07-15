@@ -61,7 +61,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     author_id, author_username = author
     if reaction.user and reaction.user.id == author_id:
         return
-    logger.info(
+    logger.debug(
         "Reaction %s on message %s in chat %s credited to %s",
         added_emojis, reaction.message_id, chat_id, author_username,
     )

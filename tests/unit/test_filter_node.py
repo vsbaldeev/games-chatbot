@@ -81,7 +81,12 @@ class TestTextClassification:
         with patch("asyncio.create_task", side_effect=close_coroutine):
             state = make_state(make_incoming(raw_text="ахаха"), should_respond=True)
             result = await node(state)
-        assert result == {"should_respond": False}
+        assert result == {
+            "should_respond": False,
+            "drop_reason": "meaningless",
+            "filter_verdict": "MEANINGLESS",
+            "engagement_tier": 1,
+        }
 
     async def test_meaningless_text_fires_reaction_task(self):
         node, _ = make_node_with_mock_llm("MEANINGLESS")
@@ -94,7 +99,11 @@ class TestTextClassification:
         node, _ = make_node_with_mock_llm("MEANINGFUL")
         state = make_state(make_incoming(raw_text="расскажи про GTA 6"), should_respond=True)
         result = await node(state)
-        assert result == {"should_respond": True}
+        assert result == {
+            "should_respond": True,
+            "filter_verdict": "MEANINGFUL",
+            "engagement_tier": 1,
+        }
 
     async def test_meaningful_text_does_not_fire_reaction(self):
         node, _ = make_node_with_mock_llm("MEANINGFUL")
@@ -154,7 +163,7 @@ class TestMediaMessages:
                 response_trigger="random",
             )
             result = await node(state)
-        assert result == {"should_respond": False}
+        assert result == {"should_respond": False, "drop_reason": "no_transcription"}
 
     async def test_no_transcription_random_fires_reaction(self):
         node, _ = make_node_with_mock_llm()
@@ -185,7 +194,7 @@ class TestMediaMessages:
                 response_trigger="random",
             )
             result = await node(state)
-        assert result == {"should_respond": False}
+        assert result == {"should_respond": False, "drop_reason": "no_transcription"}
 
 
 class TestClassify:
