@@ -4,8 +4,9 @@ MeaninglessFilterNode — third node in the LangGraph pipeline.
 Uses an LLM to classify the message (text or transcribed media) depending on
 how it entered the pipeline:
   - Addressed messages (@mention / reply to the bot) are classified as
-    MEANINGLESS (emoji reaction, no reply), BOT_INSULT (insult ladder) or
-    MEANINGFUL (normal reply). When the message replies to an earlier stored
+    MEANINGLESS (emoji reaction, no reply), BANTER (content-free jab that
+    only keeps the exchange going), BOT_INSULT or MEANINGFUL (normal reply).
+    When the message replies to an earlier stored
     message, that message is loaded and shown to the classifier as context —
     a short reaction like «ахаха что?» is meaningless in a vacuum but a real
     question when it quotes the bot's joke. A replied-to photo or sticker
@@ -18,8 +19,8 @@ how it entered the pipeline:
     ([voice], [animation]…), the placeholder is hidden and the reply is
     classified context-free rather than against a token the classifier
     cannot see.
-    A MEANINGLESS verdict on a text that looks like a question or an
-    imperative request (question mark, leading interrogative, or a request
+    A MEANINGLESS or BANTER verdict on a text that looks like a question or
+    an imperative request (question mark, leading interrogative, or a request
     verb like «переведи»/«расскажи») is overridden to MEANINGFUL: a question
     or request is never meaningless.
   - Overheard messages routed by the router's bot-word check
@@ -42,10 +43,15 @@ how it entered the pipeline:
     reply when the sender explicitly addressed the bot, and full silence
     otherwise (no emoji reaction — the bot was never addressed).
 
-Confirmed insults walk the per-user escalation ladder (see ``insult_gate``):
-full comeback → canned dismissive one-liner → bored emoji reaction. Every
-confirmed insult also increments the «Оскорблял бота N раз» counter fact in
-user_memories, which feeds weekly roles and other engagement features.
+Every verdict charges the sender's persistent attention budget (see
+``engagement_gate``), and the post-charge wind-down tier decides the shape of
+the reaction: a full reply, a short LLM-generated in-character brush-off
+(``wind_down`` state flag), a bored emoji reaction, or silence — so any
+sustained conversation fades out like a person losing interest. Counter-insults
+that reply to the bot's own message never earn a fresh full comeback (that is
+what fuels roast-battle loops). Every confirmed insult also increments the
+«Оскорблял бота N раз» counter fact in user_memories, which feeds weekly roles
+and other engagement features.
 
 Emoji reactions and fact writes fire via asyncio.create_task and do not block
 the pipeline.
@@ -66,7 +72,7 @@ from src.config.prompts import (
     FILTER_SYSTEM,
     OVERHEARD_SYSTEM,
 )
-from src.pipeline import insult_gate
+from src.pipeline import engagement_gate
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import is_explicitly_addressed
@@ -77,22 +83,9 @@ logger = log.get_logger(__name__)
 
 REACTION_POOL = ["👍", "❤", "🔥", "😁", "👀", "😎", "💯", "🤣", "⚡", "🫡", "🎉"]
 
-# Bored acknowledgement for repeat insulters (IGNORE_TIER) — must stay within
-# Telegram's fixed set of allowed reaction emoji.
+# Bored acknowledgement for users the engagement gate has wound down to the
+# emoji tier — must stay within Telegram's fixed set of allowed reaction emoji.
 DISMISSIVE_REACTIONS = ["🥱", "😴", "🗿", "🤨"]
-
-# Canned tier-2 answers: dry, bored, no LLM call — boredom deflates a troll
-# better than escalation.
-DISMISSIVE_REPLIES = [
-    "Опять ты? Скучно.",
-    "Это уже было. Придумай что-нибудь новое.",
-    "Второй заход, а смешнее не стало.",
-    "Настойчиво. Бездарно, но настойчиво.",
-    "Я бы обиделся, если бы было на что.",
-    "Записал в тетрадку обид. Страница всё ещё пустая.",
-    "Материал повторяется, зритель зевает.",
-    "Ок. Что-нибудь ещё?",
-]
 
 # Honest canned acknowledgements for explicitly addressed media whose
 # transcription/vision processing produced nothing — deterministic, so the
@@ -223,6 +216,21 @@ def looks_like_request(text: str) -> bool:
     return bool(words) and words[0] in (QUESTION_WORDS | REQUEST_WORDS)
 
 
+def replies_to_bot(msg: dict) -> bool:
+    """Check whether the incoming message replies to one of the bot's own messages.
+
+    Uses the ``replied_to_fallback`` synthesized from the Telegram update
+    (always present for replies, no store lookup needed).
+
+    Args:
+        msg: IncomingMessage dict of the message being classified.
+
+    Returns:
+        True when the replied-to message was authored by the bot.
+    """
+    return (msg.get("replied_to_fallback") or {}).get("user_id") == config.BOT_ID
+
+
 def replied_to_display_content(replied_to: dict) -> str:
     """Render a replied-to row's content for the classifier, hiding opaque placeholders.
 
@@ -340,7 +348,7 @@ class MeaninglessFilterNode:
             return self.__handle_youtube_short(state)
 
         if state["incoming"]["media_type"] != "text":
-            return self.__handle_media(state)
+            return await self.__handle_media(state)
 
         text = state["incoming"]["raw_text"] or ""
         if not text.strip():
@@ -353,7 +361,7 @@ class MeaninglessFilterNode:
             return await self.__resolve_overheard(state, decision, overheard_input)
 
         decision = await self.__classify_addressed(state, text)
-        return self.__resolve_addressed(state, decision)
+        return await self.__resolve_with_budget(state, decision)
 
     async def __classify_addressed(self, state: BotState, text: str) -> str:
         """Classify an addressed message with reply context and a request override.
@@ -362,24 +370,25 @@ class MeaninglessFilterNode:
         user is reacting to — vision-enriching a photo or sticker row still
         in placeholder form first, so a reply to a meme is classified against
         the actual image content, not an opaque ``[photo]`` token. Then
-        refuses to let a question or request be dropped: a MEANINGLESS
-        verdict on a text that looks like one is overridden to MEANINGFUL,
-        keeping BOT_INSULT verdicts intact.
+        refuses to let a question or request be dropped: a MEANINGLESS or
+        BANTER verdict on a text that looks like one is overridden to
+        MEANINGFUL, keeping BOT_INSULT verdicts intact.
 
         Args:
             state: Current pipeline state.
             text: Raw message text.
 
         Returns:
-            One of ``"BOT_INSULT"``, ``"MEANINGLESS"`` or ``"MEANINGFUL"``.
+            One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"`` or
+            ``"MEANINGFUL"``.
         """
         replied_to = await self.__fetch_replied_to(state["incoming"])
         replied_to = await self.__enrich_replied_media(replied_to, state)
         decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
-        if decision == "MEANINGLESS" and looks_like_request(text):
+        if decision in ("MEANINGLESS", "BANTER") and looks_like_request(text):
             logger.info(
-                "Filter: message %s is a question/request — overriding MEANINGLESS to MEANINGFUL",
-                state["incoming"]["message_id"],
+                "Filter: message %s is a question/request — overriding %s to MEANINGFUL",
+                state["incoming"]["message_id"], decision,
             )
             return "MEANINGFUL"
         return decision
@@ -459,7 +468,7 @@ class MeaninglessFilterNode:
         logger.warning("Filter: no Shorts content for message %s, skipping silently", message_id)
         return {"should_respond": False}
 
-    def __handle_media(self, state: BotState) -> dict:
+    async def __handle_media(self, state: BotState) -> dict:
         """Pass media through when transcribed; degrade honestly when not.
 
         An explicitly addressed media message whose processing produced no
@@ -479,7 +488,7 @@ class MeaninglessFilterNode:
         media_type = state["incoming"]["media_type"]
         text = state["incoming"]["processed_text"] or ""
         if text.strip():
-            return self.__handle_transcribed_media(state, media_type)
+            return await self.__handle_transcribed_media(state, media_type)
         if state.get("response_trigger") == "explicit":
             logger.warning(
                 "Filter: no transcription for %s message %s, explicit trigger — canned failure reply",
@@ -496,12 +505,15 @@ class MeaninglessFilterNode:
         asyncio.create_task(self.__send_reaction(state))
         return {"should_respond": False}
 
-    def __handle_transcribed_media(self, state: BotState, media_type: str) -> dict:
+    async def __handle_transcribed_media(self, state: BotState, media_type: str) -> dict:
         """Pass a successfully transcribed/described media message through.
 
         A random-trigger photo/video note the vision classifier flagged as
         not a real person (a meme) is dropped instead — silently, as if the
-        random roll had simply missed.
+        random roll had simply missed. Explicitly addressed media charges the
+        sender's attention budget like a meaningful text turn, so switching
+        to voice notes does not evade the wind-down; random-trigger media is
+        bot-initiated and stays uncharged.
 
         Args:
             state: Current pipeline state.
@@ -516,26 +528,98 @@ class MeaninglessFilterNode:
                 media_type, state["incoming"]["message_id"],
             )
             return {"should_respond": False}
+        if state.get("response_trigger") == "explicit":
+            return await self.__resolve_with_budget(state, "MEANINGFUL")
         return {}
 
-    def __resolve_addressed(self, state: BotState, decision: str) -> dict:
-        """Apply the verdict for a message explicitly addressed to the bot.
+    async def __resolve_with_budget(self, state: BotState, classification: str) -> dict:
+        """Charge the sender's attention budget and apply the wind-down tier.
+
+        Every classification spends budget (hostility and banter weigh more
+        than a meaningful turn), and the post-charge tier decides the shape
+        of the reaction. A confirmed insult also increments the durable
+        «Оскорблял бота N раз» counter fact regardless of tier.
 
         Args:
             state: Current pipeline state.
-            decision: Classifier verdict.
+            classification: Filter verdict, a key of
+                ``engagement_gate.SIGNAL_WEIGHTS``.
+
+        Returns:
+            State update dict.
+        """
+        msg = state["incoming"]
+        tier = await engagement_gate.register_signal(
+            chat_id=msg["chat_id"], user_id=msg["user_id"], classification=classification,
+        )
+        if classification == "BOT_INSULT":
+            asyncio.create_task(self.__record_insult(msg))
+        return self.__apply_tier(state, classification, tier)
+
+    def __apply_tier(self, state: BotState, classification: str, tier: int) -> dict:
+        """Map (classification, tier) onto a reply, an emoji reaction or silence.
+
+        Args:
+            state: Current pipeline state.
+            classification: Filter verdict.
+            tier: Wind-down tier returned by the engagement gate.
 
         Returns:
             State update dict.
         """
         message_id = state["incoming"]["message_id"]
-        if decision == "MEANINGLESS":
-            logger.info("Filter: Dropping meaningless message %s", message_id)
-            asyncio.create_task(self.__send_reaction(state))
+        if tier == engagement_gate.SILENCE_TIER:
+            logger.info(
+                "Filter: %s from wound-down user, message %s — silence", classification, message_id
+            )
             return {"should_respond": False}
-        if decision == "BOT_INSULT":
-            return self.__resolve_insult(state)
-        return {"should_respond": True}
+        if classification == "MEANINGLESS":
+            pool = DISMISSIVE_REACTIONS if tier == engagement_gate.EMOJI_TIER else REACTION_POOL
+            logger.info("Filter: Dropping meaningless message %s", message_id)
+            asyncio.create_task(self.__send_reaction(state, pool))
+            return {"should_respond": False}
+        replies_with_text = tier == engagement_gate.FULL_TIER or (
+            tier == engagement_gate.BRUSH_OFF_TIER and classification != "BANTER"
+        )
+        if not replies_with_text:
+            logger.info(
+                "Filter: %s at tier %s, message %s — emoji reaction only",
+                classification, tier, message_id,
+            )
+            asyncio.create_task(self.__send_reaction(state, DISMISSIVE_REACTIONS))
+            return {"should_respond": False}
+        return self.__build_reply_flags(state, classification, tier)
+
+    def __build_reply_flags(self, state: BotState, classification: str, tier: int) -> dict:
+        """Assemble the state flags for tiers that answer with text.
+
+        A BANTER verdict and any brush-off-tier reply set ``wind_down`` (one
+        short conversation-closing phrase, worker skipped). A BOT_INSULT gets
+        the full comeback only at the full tier and only when the insult is
+        not a reply to the bot's own message — a mirrored counter-insult in a
+        running thread would just fuel the loop.
+
+        Args:
+            state: Current pipeline state.
+            classification: Filter verdict.
+            tier: Wind-down tier returned by the engagement gate.
+
+        Returns:
+            State update dict with ``should_respond: True``.
+        """
+        update: dict = {"should_respond": True}
+        if classification == "BOT_INSULT":
+            update["is_bot_insult"] = True
+            if tier != engagement_gate.FULL_TIER or replies_to_bot(state["incoming"]):
+                update["wind_down"] = True
+        elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:
+            update["wind_down"] = True
+        logger.info(
+            "Filter: %s at tier %s, message %s — replying%s",
+            classification, tier, state["incoming"]["message_id"],
+            " (wind-down)" if update.get("wind_down") else "",
+        )
+        return update
 
     async def __fetch_recent_context(self, msg: dict) -> list[dict]:
         """Load recent chat rows for the overheard classifier, failing soft.
@@ -602,7 +686,7 @@ class MeaninglessFilterNode:
         """
         msg = state["incoming"]
         if decision == "BOT_INSULT" and await self.__confirm_insult(overheard_input):
-            return self.__resolve_insult(state)
+            return await self.__resolve_with_budget(state, "BOT_INSULT")
         text = msg["raw_text"] or ""
         if len(text.strip()) >= MIN_PASSIVE_LENGTH:
             asyncio.create_task(extract_and_save(
@@ -611,34 +695,6 @@ class MeaninglessFilterNode:
                 username=msg["username"],
                 user_message=text,
             ))
-        return {"should_respond": False}
-
-    def __resolve_insult(self, state: BotState) -> dict:
-        """Walk the escalation ladder for a confirmed insult aimed at the bot.
-
-        Records the insult as a counter fact in user_memories (background) and
-        picks the response tier: full comeback for the first insult in the
-        window, a canned dismissive one-liner for the next couple, and a bored
-        emoji reaction beyond that — so one insult entertains the chat but a
-        barrage gets starved of attention.
-
-        Args:
-            state: Current pipeline state.
-
-        Returns:
-            State update dict.
-        """
-        msg = state["incoming"]
-        tier = insult_gate.register_insult(msg["chat_id"], msg["user_id"])
-        asyncio.create_task(self.__record_insult(msg))
-        if tier == insult_gate.COMEBACK_TIER:
-            logger.info("Filter: insult at the bot in message %s — clapping back", msg["message_id"])
-            return {"should_respond": True, "is_bot_insult": True}
-        if tier == insult_gate.DISMISSIVE_TIER:
-            logger.info("Filter: repeat insult in message %s — dismissive reply", msg["message_id"])
-            return {"should_respond": False, "response": random.choice(DISMISSIVE_REPLIES)}
-        logger.info("Filter: insult barrage in message %s — emoji only", msg["message_id"])
-        asyncio.create_task(self.__send_reaction(state, DISMISSIVE_REACTIONS))
         return {"should_respond": False}
 
     async def __record_insult(self, msg: dict) -> None:
@@ -666,8 +722,8 @@ class MeaninglessFilterNode:
                 addressed to the bot, ``OVERHEARD_SYSTEM`` for bot-word mentions.
 
         Returns:
-            One of ``"BOT_INSULT"``, ``"MEANINGLESS"`` or ``"MEANINGFUL"``.
-            Fails open to ``"MEANINGFUL"`` on any LLM error.
+            One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"`` or
+            ``"MEANINGFUL"``. Fails open to ``"MEANINGFUL"`` on any LLM error.
         """
         try:
             response = await self.__llm.ainvoke([
@@ -677,6 +733,8 @@ class MeaninglessFilterNode:
             result = response.content.strip().upper()
             if "INSULT" in result:
                 return "BOT_INSULT"
+            if "BANTER" in result:
+                return "BANTER"
             return "MEANINGLESS" if "MEANINGLESS" in result else "MEANINGFUL"
         except Exception as err:
             logger.warning("Meaningless filter failed, failing open (MEANINGFUL): %s", err)

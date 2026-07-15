@@ -83,7 +83,10 @@ participant material (`src/agent/roast_material.py`), and asks the `ComedianAgen
 (`src/agent/comedian.py`) for a strict-JSON decision that includes a `reply_to`
 citation — the id of the message the joke is actually about. On `act` the node
 validates the citation against the fetched messages (a hallucinated id or a
-citation of the bot's own message degrades to no anchor), sets
+citation of the bot's own message degrades to no anchor), drops the joke
+entirely when the cited target's author is wound down by the engagement gate
+(`engagement_gate.is_wound_down`, read-only score peek — bot-initiated humor
+must not restart a conversation the gate is ending), sets
 `state["response"]`, `response_trigger="humor"` and `humor_reply_to_msg_id`, and
 stamps the cooldown via `mark_joke_sent`. `run_pipeline` then anchors the joke as
 a Telegram reply to the cited message, or posts it un-anchored when there is no
@@ -238,17 +241,16 @@ filter  (runs after ingester)
     │   is another bare media placeholder ([voice], [animation]…), the
     │   placeholder is hidden and the reply classifies context-free instead
     │   of against a token the classifier cannot see
-    ├─ text, LLM → MEANINGLESS
+    ├─ text, LLM → MEANINGLESS or BANTER
     │       ├─ text looks like a question or request («?», more than
     │       │   SUBSTANTIVE_WORD_COUNT non-laughter words, leading
     │       │   interrogative, or imperative request verb like «переведи»/
     │       │   «расскажи»/«поищи»/«загугли»; laughter tokens skipped) →
-    │       │   overridden to MEANINGFUL: every MEANINGLESS category is a
-    │       │   SHORT reaction, so a longer message is never meaningless
-    │       └─ otherwise → should_respond=False
-    │               + asyncio.create_task(react with random emoji)
-    ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → insult ladder
-    ├─ text, LLM → MEANINGFUL → should_respond=True
+    │       │   overridden to MEANINGFUL: every MEANINGLESS/BANTER category
+    │       │   is a SHORT reaction, so a longer message is never meaningless
+    │       └─ otherwise → engagement gate (see wind-down engine below)
+    ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
+    ├─ text, LLM → MEANINGFUL → engagement gate
     └─ text, LLM error       → should_respond=True (fails open)
 
     overheard messages (trigger="insult_check", OVERHEARD_SYSTEM prompt —
@@ -259,26 +261,38 @@ filter  (runs after ingester)
     ├─ LLM → BOT_INSULT → confirmed by the stronger INSULT_CONFIRM_MODEL
     │    (llama-3.3-70b-versatile) on the same input; only agreement acts —
     │    disagreement or a confirmation error resolves to silence
-    │       → insult ladder
+    │       → engagement gate (as BOT_INSULT)
     └─ anything else / LLM error → should_respond=False, silent drop
             (no emoji — the bot was never addressed; long texts still get
              passive memory extraction, mirroring the router's behaviour)
 
-insult ladder (insult_gate.py — per (chat_id, user_id), 30-min rolling window,
-in-memory; the «Оскорблял бота N раз» counter fact in user_memories is
-incremented only for addressed or double-confirmed insults, via
-asyncio.create_task):
-    ├─ 1st insult   → should_respond=True, is_bot_insult=True
-    │       response node injects a comeback hint with two guardrails:
-    │       mirror the incoming crudeness (never escalate above it) and land
-    │       one punch without inviting the exchange to continue
-    │       the worker is skipped on insult paths (is_bot_insult) — a comeback
-    │       needs personality, not tools; no «🔍 Ищу…» before the burn
-    ├─ 2nd–3rd      → should_respond=False, response = canned dismissive
-    │       one-liner (DISMISSIVE_REPLIES pool, no LLM) — sent by run_pipeline
-    │       the same way guard refusals are
-    └─ 4th and on   → should_respond=False + bored emoji reaction
-            (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨)
+engagement gate — conversation wind-down engine (engagement_gate.py +
+store/engagement.py, table engagement_scores): one leaky-bucket attention
+score per (chat_id, user_id), persisted in Postgres so a redeploy never resets
+a wound-down user. Every addressed verdict (and every double-confirmed
+overheard insult, and explicitly addressed transcribed media as MEANINGFUL)
+charges a weight — BOT_INSULT 3.0, BANTER/MEANINGLESS 2.0, MEANINGFUL 1.0 —
+decayed with a 30-min half-life in a single atomic UPSERT; the post-charge
+score maps onto a tier (brush-off >7, emoji >13, silence >19), so any
+sustained conversation fades out like a person losing interest. The
+«Оскорблял бота N раз» counter fact in user_memories is still incremented for
+every addressed or double-confirmed insult at any tier, via
+asyncio.create_task. Store errors fail open to the full tier.
+    ├─ FULL tier      → should_respond=True — full reply; BOT_INSULT sets
+    │       is_bot_insult=True (comeback hint, worker skipped; two rapid
+    │       insults both land here by design — the classifier has false
+    │       positives). A BOT_INSULT that *replies to the bot's own message*
+    │       and any BANTER verdict additionally set wind_down=True: a
+    │       mirrored counter-insult mid-thread never earns a fresh full
+    │       comeback (that is what fuels roast-battle loops)
+    ├─ BRUSH_OFF tier → should_respond=True + wind_down=True — the response
+    │       node injects a close-the-conversation hint (one short in-character
+    │       phrase, no questions, no invitations) and the worker is skipped;
+    │       BANTER at this tier degrades straight to the bored emoji reaction
+    ├─ EMOJI tier     → should_respond=False + bored emoji reaction
+    │       (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨; MEANINGLESS keeps the
+    │       friendly REACTION_POOL until this tier)
+    └─ SILENCE tier   → should_respond=False, nothing at all
     │
     ├─ should_respond=False → END
     └─ should_respond=True  → guard
@@ -343,9 +357,10 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
     │          random triggers receive only the reply chain — no recent history bleed
     ├─ provenance: invoke_worker returns (output, tools_used) from a mechanical
     │          ToolMessage scan → worker_tools_used in state
-    ├─ skipped entirely on insult paths (is_bot_insult) and Shorts summaries
-    │          (trigger="youtube_short" — the source material is already in
-    │          processed_text; tools would only add junk) → empty output
+    ├─ skipped entirely on insult paths (is_bot_insult), wind-down brush-offs
+    │          (wind_down — one short closing phrase needs no tools) and Shorts
+    │          summaries (trigger="youtube_short" — the source material is
+    │          already in processed_text; tools would only add junk) → empty output
     ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search
     ├─ DailyLimitError → advance_model(), retry with next fallback
     ├─ ContextLengthError → worker_output="" (response node still runs)
@@ -406,6 +421,9 @@ response   personality LLM (ReAct executor, no tools)
     │          when the filter set is_bot_insult=True, a hint is injected before the
     │            trigger line telling the model the message is an attack on it and to
     │            answer with a sharp comeback instead of a neutral reply
+    │          when the engagement gate set wind_down=True, a hint is injected telling
+    │            the model it is bored of this conversation: answer in one short
+    │            in-character phrase, close the exchange, no questions or invitations
     ├─ normalizes homoglyphs first (normalize_homoglyphs): Greek/Latin look-alike
     │    letters spliced into a mostly-Cyrillic word (e.g. Greek μ/ά in "тμάксимс")
     │    are mapped back to Cyrillic deterministically, with no extra LLM call;

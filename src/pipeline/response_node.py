@@ -332,6 +332,7 @@ def build_response_input(
     has_thread_history: bool = False,
     media_type: str = "text",
     is_bot_insult: bool = False,
+    wind_down: bool = False,
     worker_tools_used: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
@@ -350,6 +351,8 @@ def build_response_input(
             :func:`build_trigger_line`).
         is_bot_insult: ``True`` when the filter classified the message as an
             insult aimed at the bot; adds a hint telling the model to clap back.
+        wind_down: ``True`` when the engagement gate wants the conversation
+            closed; adds a hint to answer in one short phrase and disengage.
         worker_tools_used: ``True`` when the worker actually ran a tool;
             selects the tool-verified data frame instead of the unverified
             context-derived frame.
@@ -389,6 +392,14 @@ def build_response_input(
             "а не по больным местам человека; держи примерно тот же уровень грубости, "
             "что и он — не жёстче; один удар — и всё: без встречных вопросов "
             "и без приглашений продолжить перепалку.]\n"
+        )
+
+    if wind_down:
+        parts.append(
+            "[Тебе уже надоел этот разговор. Ответь очень коротко — одной фразой, "
+            "в своём характере: дай понять, что сворачиваешь болтовню (дела, "
+            "работа, некогда). Без встречных вопросов и без приглашений "
+            "продолжить.]\n"
         )
 
     parts.append(build_trigger_line(username, user_input, media_type, replied_to, response_trigger))
@@ -476,6 +487,7 @@ class ResponseNode:
             has_thread_history=bool(past_messages),
             media_type=media_type,
             is_bot_insult=bool(state.get("is_bot_insult")),
+            wind_down=bool(state.get("wind_down")),
             worker_tools_used=bool(state.get("worker_tools_used")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
