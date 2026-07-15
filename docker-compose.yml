@@ -61,6 +61,9 @@ services:
       DATABASE_URL: postgresql://chatbot:${POSTGRES_PASSWORD}@postgres:5432/chatbot
       IMAGEGEN_URL: http://imagegen:8000
       LOG_LEVEL: INFO
+      # Container stdout is not a tty; force ANSI colors so `docker compose
+      # logs` renders them in a terminal.
+      LOG_COLOR: always
       ASYNCPG_LOG_LEVEL: WARNING
       TELEGRAM_APP_LOG_LEVEL: WARNING
       TELEGRAM_UPDATER_LOG_LEVEL: WARNING

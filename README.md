@@ -99,6 +99,36 @@ index on Linux) — the bot container's memory limit is 2g to fit the torch runt
 plus the resident Silero model. A TTS load failure is not fatal: the bot starts and
 answers everything in text.
 
+### Logging
+
+Log lines follow a compact aligned format — `DD.MM HH:MM:SS L corr logger message`,
+where `L` is the one-character level and `corr` is a per-message correlation id
+derived from the Telegram update id. Every handled message produces exactly one
+**canonical INFO line** (logger `pipeline`) summarizing the whole run:
+
+```
+14.07 21:03:12 I 842137 pipeline  chat=-100123 user=@vasya kind=voice msg=5121 trigger=explicit filter=MEANINGFUL tier=0 guard=ok action=replied len=214 dur=3.42s
+```
+
+`action` is `replied`, `joked`, `ignored` (with `reason=…`: `not_addressed`,
+`meaningless`, `wound_down`, `guard_blocked`, …) or `error:<kind>`.
+
+Policy: INFO carries metadata only — no message text, transcripts or reply bodies.
+Content excerpts appear only at DEBUG, truncated. Per-node decision traces
+(filter/guard/engagement) are DEBUG and share the canonical line's correlation id.
+
+Env knobs (set on the bot service in `docker-compose.yml`):
+
+- `LOG_LEVEL` — root level, default `INFO`; set `DEBUG` to see per-node traces.
+- `LOG_COLOR` — `always` / `never` / `auto` (tty detection). The compose file sets
+  `always`; note `docker compose logs --no-color` does not strip app-emitted ANSI,
+  so set `LOG_COLOR: never` if logs are shipped to a plain-text collector.
+- `ASYNCPG_LOG_LEVEL`, `TELEGRAM_APP_LOG_LEVEL`, `TELEGRAM_UPDATER_LOG_LEVEL` —
+  per-library overrides (default WARNING in compose). `httpx`, `httpcore`,
+  `telegram.ext.ExtBot` and `apscheduler` are always muted to WARNING.
+
+The imagegen sidecar keeps uvicorn's own logging and is not affected.
+
 ## Database migrations
 
 The schema is owned entirely by **Alembic** — the bot no longer creates tables at

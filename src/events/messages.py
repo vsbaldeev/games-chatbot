@@ -2,6 +2,8 @@
 
 import datetime
 import re
+import time
+
 from src import log
 
 from telegram import ReplyParameters, Update
@@ -18,6 +20,7 @@ from src.agent import (
     RateLimitError,
     normalize_homoglyphs,
 )
+from src.pipeline import canonical
 from src.pipeline.graph import build_pipeline
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
@@ -285,6 +288,68 @@ def build_context_length_notice(msg) -> str:
     )
 
 
+async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) -> None:
+    """Deliver the pipeline response and store the sent message.
+
+    Args:
+        final_state: Final pipeline state (drives the delivery mode).
+        msg: The triggering ``telegram.Message``.
+        bot_id: The bot's own user id, recorded as the message author.
+        response_text: Raw response text produced by the pipeline.
+    """
+    clean = normalize_homoglyphs(strip_markdown(response_text))
+    sent_id, anchored_to, sent_media_type = await deliver_response(final_state, msg, clean)
+    await unified_messages.insert(
+        chat_id=msg.chat_id,
+        message_id=sent_id,
+        user_id=bot_id,
+        username=config.BOT_USERNAME,
+        content=clean,
+        media_type=sent_media_type,
+        reply_to_msg_id=anchored_to,
+    )
+
+
+async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed: bool) -> str:
+    """Log a pipeline failure, notify the chat when addressed, name the kind.
+
+    Args:
+        error: The exception raised by the pipeline.
+        msg: The triggering ``telegram.Message``.
+        chat_id: Chat the failure happened in.
+        addressed: True when the user explicitly addressed the bot; only then
+            is a notice posted to the chat.
+
+    Returns:
+        Short error kind for the canonical log line, e.g. ``"DailyLimit"``.
+    """
+    if isinstance(error, DailyLimitError):
+        logger.warning("Daily token quota exhausted for chat %s", chat_id)
+        if addressed:
+            await send_limit_notice(msg, chat_id, DAILY_LIMIT_NOTICE)
+        return "DailyLimit"
+    if isinstance(error, ContextLengthError):
+        logger.warning("Context length exceeded for chat %s", chat_id)
+        if addressed:
+            await send_and_store(
+                msg.get_bot(), chat_id, build_context_length_notice(msg),
+                reply_to=msg.message_id,
+            )
+        return "ContextLength"
+    if isinstance(error, RateLimitError):
+        logger.warning("Rate limit reached for chat %s", chat_id)
+        if addressed:
+            await send_limit_notice(msg, chat_id, RATE_LIMIT_NOTICE)
+        return "RateLimit"
+    logger.error("Pipeline error for chat %s: %s", chat_id, error, exc_info=True)
+    if addressed:
+        await send_and_store(
+            msg.get_bot(), chat_id, GENERIC_FAILURE_NOTICE,
+            reply_to=msg.message_id,
+        )
+    return "Exception"
+
+
 async def run_pipeline(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -293,10 +358,14 @@ async def run_pipeline(
 ) -> bool:
     """Run the LangGraph pipeline and return True if the bot sent a response.
 
-    Errors are reported in chat only when the user explicitly addressed the
-    bot (mention or reply-to-bot); autonomous paths (random media rolls,
-    overheard insult checks) fail silently with a log-only warning.
+    Binds a per-update correlation id for log grouping and emits one
+    canonical INFO log line summarizing the run outcome. Errors are reported
+    in chat only when the user explicitly addressed the bot (mention or
+    reply-to-bot); autonomous paths (random media rolls, overheard insult
+    checks) fail silently with a log-only warning.
     """
+    log.bind_correlation_id(str(update.update_id)[-6:])
+    started_at = time.monotonic()
     msg = update.message
     chat = update.effective_chat
     reply_to_msg_id = msg.reply_to_message.message_id if msg.reply_to_message else None
@@ -305,45 +374,21 @@ async def run_pipeline(
     initial_state["thread_id"] = thread_id
     initial_state["is_flat_thread"] = reply_to_msg_id is None
     addressed = is_explicitly_addressed(msg, config.BOT_USERNAME, config.BOT_ID)
+    final_state = initial_state
 
     try:
         final_state = await PIPELINE.ainvoke(initial_state)
         response = final_state.get("response") or ""
         if response.strip():
-            clean = normalize_homoglyphs(strip_markdown(response))
-            sent_id, anchored_to, sent_media_type = await deliver_response(final_state, msg, clean)
-            await unified_messages.insert(
-                chat_id=chat.id,
-                message_id=sent_id,
-                user_id=context.bot.id,
-                username=config.BOT_USERNAME,
-                content=clean,
-                media_type=sent_media_type,
-                reply_to_msg_id=anchored_to,
-            )
+            await deliver_and_record(final_state, msg, context.bot.id, response)
+            action = "joked" if final_state.get("response_trigger") == "humor" else "replied"
+            canonical.emit(final_state, action, time.monotonic() - started_at)
             return True
-    except DailyLimitError:
-        logger.warning("Daily token quota exhausted for chat %s", chat.id)
-        if addressed:
-            await send_limit_notice(msg, chat.id, DAILY_LIMIT_NOTICE)
-    except ContextLengthError:
-        logger.warning("Context length exceeded for chat %s", chat.id)
-        if addressed:
-            await send_and_store(
-                msg.get_bot(), chat.id, build_context_length_notice(msg),
-                reply_to=msg.message_id,
-            )
-    except RateLimitError:
-        logger.warning("Rate limit reached for chat %s", chat.id)
-        if addressed:
-            await send_limit_notice(msg, chat.id, RATE_LIMIT_NOTICE)
     except Exception as error:
-        logger.error("Pipeline error for chat %s: %s", chat.id, error)
-        if addressed:
-            await send_and_store(
-                msg.get_bot(), chat.id, GENERIC_FAILURE_NOTICE,
-                reply_to=msg.message_id,
-            )
+        error_kind = await notify_pipeline_failure(error, msg, chat.id, addressed)
+        canonical.emit(final_state, f"error:{error_kind}", time.monotonic() - started_at)
+        return False
+    canonical.emit(final_state, "ignored", time.monotonic() - started_at)
     return False
 
 
@@ -442,7 +487,6 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     username = get_username(update)
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    logger.info("Voice/video_note from @%s in chat %s", username, chat_id)
 
     if msg.forward_origin is not None:
         await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")

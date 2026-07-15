@@ -176,7 +176,7 @@ class HumorNode:
             chat_id=chat_id, user_id=author_row["user_id"]
         )
         if wound_down:
-            logger.info(
+            logger.debug(
                 "Humor: target @%s is wound down (score high) — abstaining",
                 author_row["username"],
             )

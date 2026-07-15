@@ -386,7 +386,7 @@ class MeaninglessFilterNode:
         replied_to = await self.__enrich_replied_media(replied_to, state)
         decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
         if decision in ("MEANINGLESS", "BANTER") and looks_like_request(text):
-            logger.info(
+            logger.debug(
                 "Filter: message %s is a question/request — overriding %s to MEANINGFUL",
                 state["incoming"]["message_id"], decision,
             )
@@ -454,19 +454,19 @@ class MeaninglessFilterNode:
             State update dict.
         """
         if state.get("youtube_short_content"):
-            return {}
+            return {"filter_verdict": "SHORTS"}
         message_id = state["incoming"]["message_id"]
         telegram_message = state["incoming"]["update"].message
         if telegram_message is not None and is_explicitly_addressed(
             telegram_message, config.BOT_USERNAME, config.BOT_ID
         ):
-            logger.warning(
+            logger.info(
                 "Filter: no Shorts content for message %s, explicit trigger — canned failure reply",
                 message_id,
             )
             return {"should_respond": False, "response": random.choice(SHORTS_FAILED_REPLIES)}
-        logger.warning("Filter: no Shorts content for message %s, skipping silently", message_id)
-        return {"should_respond": False}
+        logger.info("Filter: no Shorts content for message %s, skipping silently", message_id)
+        return {"should_respond": False, "drop_reason": "shorts_failed"}
 
     async def __handle_media(self, state: BotState) -> dict:
         """Pass media through when transcribed; degrade honestly when not.
@@ -490,20 +490,20 @@ class MeaninglessFilterNode:
         if text.strip():
             return await self.__handle_transcribed_media(state, media_type)
         if state.get("response_trigger") == "explicit":
-            logger.warning(
+            logger.info(
                 "Filter: no transcription for %s message %s, explicit trigger — canned failure reply",
                 media_type,
                 state["incoming"]["message_id"],
             )
             pool = VISION_FAILED_REPLIES if media_type == "photo" else TRANSCRIPTION_FAILED_REPLIES
             return {"should_respond": False, "response": random.choice(pool)}
-        logger.warning(
+        logger.info(
             "Filter: no transcription for %s message %s, skipping",
             media_type,
             state["incoming"]["message_id"],
         )
         asyncio.create_task(self.__send_reaction(state))
-        return {"should_respond": False}
+        return {"should_respond": False, "drop_reason": "no_transcription"}
 
     async def __handle_transcribed_media(self, state: BotState, media_type: str) -> dict:
         """Pass a successfully transcribed/described media message through.
@@ -523,11 +523,11 @@ class MeaninglessFilterNode:
             State update dict.
         """
         if is_meme_random_trigger(state, media_type):
-            logger.info(
+            logger.debug(
                 "Filter: random-trigger %s message %s looks like a meme — skipping",
                 media_type, state["incoming"]["message_id"],
             )
-            return {"should_respond": False}
+            return {"should_respond": False, "drop_reason": "meme_skip"}
         if state.get("response_trigger") == "explicit":
             return await self.__resolve_with_budget(state, "MEANINGFUL")
         return {}
@@ -554,7 +554,8 @@ class MeaninglessFilterNode:
         )
         if classification == "BOT_INSULT":
             asyncio.create_task(self.__record_insult(msg))
-        return self.__apply_tier(state, classification, tier)
+        update = self.__apply_tier(state, classification, tier)
+        return {"filter_verdict": classification, "engagement_tier": tier, **update}
 
     def __apply_tier(self, state: BotState, classification: str, tier: int) -> dict:
         """Map (classification, tier) onto a reply, an emoji reaction or silence.
@@ -569,25 +570,25 @@ class MeaninglessFilterNode:
         """
         message_id = state["incoming"]["message_id"]
         if tier == engagement_gate.SILENCE_TIER:
-            logger.info(
+            logger.debug(
                 "Filter: %s from wound-down user, message %s — silence", classification, message_id
             )
-            return {"should_respond": False}
+            return {"should_respond": False, "drop_reason": "wound_down"}
         if classification == "MEANINGLESS":
             pool = DISMISSIVE_REACTIONS if tier == engagement_gate.EMOJI_TIER else REACTION_POOL
-            logger.info("Filter: Dropping meaningless message %s", message_id)
+            logger.debug("Filter: Dropping meaningless message %s", message_id)
             asyncio.create_task(self.__send_reaction(state, pool))
-            return {"should_respond": False}
+            return {"should_respond": False, "drop_reason": "meaningless"}
         replies_with_text = tier == engagement_gate.FULL_TIER or (
             tier == engagement_gate.BRUSH_OFF_TIER and classification != "BANTER"
         )
         if not replies_with_text:
-            logger.info(
+            logger.debug(
                 "Filter: %s at tier %s, message %s — emoji reaction only",
                 classification, tier, message_id,
             )
             asyncio.create_task(self.__send_reaction(state, DISMISSIVE_REACTIONS))
-            return {"should_respond": False}
+            return {"should_respond": False, "drop_reason": "wind_down_reaction"}
         return self.__build_reply_flags(state, classification, tier)
 
     def __build_reply_flags(self, state: BotState, classification: str, tier: int) -> dict:
@@ -614,7 +615,7 @@ class MeaninglessFilterNode:
                 update["wind_down"] = True
         elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:
             update["wind_down"] = True
-        logger.info(
+        logger.debug(
             "Filter: %s at tier %s, message %s — replying%s",
             classification, tier, state["incoming"]["message_id"],
             " (wind-down)" if update.get("wind_down") else "",
@@ -659,7 +660,7 @@ class MeaninglessFilterNode:
                 HumanMessage(content=overheard_input),
             ])
             verdict = response.content.strip().upper()
-            logger.info("Filter: overheard insult confirmation verdict: %s", verdict)
+            logger.debug("Filter: overheard insult confirmation verdict: %s", verdict)
             return "INSULT" in verdict
         except Exception as err:
             logger.warning("Insult confirmation failed — dropping overheard insult: %s", err)
@@ -695,7 +696,7 @@ class MeaninglessFilterNode:
                 username=msg["username"],
                 user_message=text,
             ))
-        return {"should_respond": False}
+        return {"should_respond": False, "drop_reason": "overheard_dropped"}
 
     async def __record_insult(self, msg: dict) -> None:
         """Increment the bot-insult counter fact for the insulter.

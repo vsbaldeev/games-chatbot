@@ -98,7 +98,7 @@ async def register_signal(*, chat_id: int, user_id: int, classification: str) ->
         )
         return FULL_TIER
     tier = tier_for_score(score)
-    logger.info(
+    logger.debug(
         "Engagement: chat=%s user=%s signal=%s score=%.1f tier=%s",
         chat_id, user_id, classification, score, tier,
     )

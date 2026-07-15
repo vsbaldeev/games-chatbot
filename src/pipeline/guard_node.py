@@ -86,7 +86,7 @@ class GuardNode:
                 if flags >= HACK_FLAGS_BEFORE_FACT:
                     asyncio.create_task(self.__record_hack_attempt(msg))
                 return {"blocked": True, "response": random.choice(GUARD_REFUSALS)}
-            return {"blocked": True}
+            return {"blocked": True, "drop_reason": "guard_blocked"}
 
         return {"blocked": False}
 
@@ -108,7 +108,7 @@ class GuardNode:
                 messages=[{"role": "user", "content": text}],
             )
             raw_label = result.choices[0].message.content.strip()
-            logger.info("Guard raw label: %s", raw_label)
+            logger.debug("Guard raw label: %s", raw_label)
             return float(raw_label) >= GUARD_SCORE_THRESHOLD
         except Exception as err:
             logger.warning("Guard classification failed, failing open: %s", err)
