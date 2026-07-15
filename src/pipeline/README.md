@@ -277,7 +277,9 @@ score maps onto a tier (brush-off >7, emoji >13, silence >19), so any
 sustained conversation fades out like a person losing interest. The
 «Оскорблял бота N раз» counter fact in user_memories is still incremented for
 every addressed or double-confirmed insult at any tier, via
-asyncio.create_task. Store errors fail open to the full tier.
+asyncio.create_task; it feeds weekly roles and roasts only — the context
+builder filters counter tallies out of reply prompts so the bot does not
+keep reciting the score. Store errors fail open to the full tier.
     ├─ FULL tier      → should_respond=True — full reply; BOT_INSULT sets
     │       is_bot_insult=True (comeback hint, worker skipped; two rapid
     │       insults both land here by design — the classifier has false
@@ -485,7 +487,7 @@ IncomingMessage:
     replied_to_fallback: dict | None  # row-shaped copy of msg.reply_to_message; read-side only
 
 AssembledContext:
-    user_facts: dict[str, list[str]]     # username → extracted fact strings
+    user_facts: dict[str, list[str]]     # username → extracted fact strings (counter tallies like «Оскорблял бота N раз» are filtered out — bookkeeping for roles/roasts, not reply material)
     recent_history: list[dict]           # flat window (last 20), newest-first
     replied_to: dict | None              # the specific message being replied to (for annotation)
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first

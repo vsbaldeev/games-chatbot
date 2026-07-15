@@ -22,7 +22,7 @@ MEMBER = "member"
 # whole chat: counter tallies (insult/hack-attempt stats) read as calling
 # the person out, and cross-user attributed facts («по словам @X, ...») are
 # hearsay, never confirmed by the person themselves.
-UNSAFE_FACT_PREFIXES = ("Оскорблял бота", "Пытался взломать бота", "по словам @")
+UNSAFE_FACT_PREFIXES = user_memories.COUNTER_FACT_PREFIXES + ("по словам @",)
 
 
 def is_safe_to_mention(fact: str) -> bool:

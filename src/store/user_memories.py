@@ -20,6 +20,12 @@ from src.store import db as database
 
 MAX_FACTS_PER_USER = 30
 
+# Prefixes of counter-tally facts (see format_insult_fact / format_hack_fact).
+# These are bookkeeping for weekly roles and roasts, not conversational
+# memory: surfacing them in ordinary replies reads as the bot holding a
+# grudge, so reply-context assembly filters them out via is_counter_fact.
+COUNTER_FACT_PREFIXES = ("Оскорблял бота", "Пытался взломать бота")
+
 # Facts untouched for this long are stale residue: real, current facts get
 # their updated_at refreshed by the dedup path whenever they are re-observed.
 FACT_RETENTION_DAYS = 90
@@ -117,6 +123,19 @@ def pluralize_times(count: int) -> str:
     if 2 <= last_one <= 4:
         return "раза"
     return "раз"
+
+
+def is_counter_fact(fact: str) -> bool:
+    """Tell whether a stored fact is a counter tally (insults, hack attempts).
+
+    Args:
+        fact: A stored ``user_memories`` fact string.
+
+    Returns:
+        True when the fact is one of the counter facts listed in
+        ``COUNTER_FACT_PREFIXES``.
+    """
+    return fact.startswith(COUNTER_FACT_PREFIXES)
 
 
 def format_hack_fact(count: int) -> str:
