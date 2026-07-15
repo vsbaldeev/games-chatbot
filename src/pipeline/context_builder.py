@@ -42,6 +42,22 @@ BOT_EPISODES_LIMIT = 2
 BOT_ACTIVITY_HISTORY_LIMIT = 7
 
 
+def keep_conversational_facts(facts: list[str]) -> list[str]:
+    """Drop counter-tally facts (insult/hack-attempt stats) from a fact list.
+
+    The tallies exist for weekly roles and roasts; in an ordinary reply the
+    bot bringing up «Оскорблял бота N раз» reads as holding a grudge, so
+    they never enter the reply prompt.
+
+    Args:
+        facts: Stored ``user_memories`` fact strings for one user.
+
+    Returns:
+        The facts safe to show to the response model; may be empty.
+    """
+    return [fact for fact in facts if not user_memories.is_counter_fact(fact)]
+
+
 class ContextBuilder:
     """Loads recent history, replied-to message, and user memories into AssembledContext."""
 
@@ -264,6 +280,20 @@ class ContextBuilder:
         initiating_username: str,
         recent: list[dict],
     ) -> dict[str, list[str]]:
+        """Gather reply-context facts for recent participants and the initiator.
+
+        Counter-tally facts are dropped via ``keep_conversational_facts`` —
+        users left with no facts are omitted entirely.
+
+        Args:
+            chat_id: Chat the conversation happens in.
+            initiating_user_id: Id of the user who triggered the pipeline.
+            initiating_username: Username of the initiating user.
+            recent: Recent-history rows already loaded for this chat.
+
+        Returns:
+            Mapping of username to conversational fact strings.
+        """
         participant_ids = list({row["user_id"] for row in recent})
         facts_by_id = await user_memories.get_facts_for_users(
             chat_id=chat_id, user_ids=participant_ids
@@ -273,11 +303,13 @@ class ContextBuilder:
             uid = row["user_id"]
             uname = row["username"]
             if uid in facts_by_id and uname not in user_facts:
-                user_facts[uname] = facts_by_id[uid]
+                facts = keep_conversational_facts(facts_by_id[uid])
+                if facts:
+                    user_facts[uname] = facts
 
         if initiating_user_id not in facts_by_id:
-            initiator_facts = await user_memories.get_facts(
-                chat_id=chat_id, user_id=initiating_user_id
+            initiator_facts = keep_conversational_facts(
+                await user_memories.get_facts(chat_id=chat_id, user_id=initiating_user_id)
             )
             if initiator_facts:
                 user_facts[initiating_username] = initiator_facts
