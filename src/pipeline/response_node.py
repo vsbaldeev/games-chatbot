@@ -1,6 +1,7 @@
 """ResponseNode — personality LLM that turns worker facts into a chat reply."""
 
 import datetime
+import logging
 import re
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -441,6 +442,31 @@ async def persist_thread_turn(state: BotState, response_text: str) -> None:
     )
 
 
+def log_response_input(past_messages: list, enriched: str) -> None:
+    """Dump the exact input the response LLM is about to see, at DEBUG level.
+
+    Absurd replies are usually caused by something in the assembled prompt
+    (a stale fact, a poisoned thread turn, a mis-framed trigger line), and
+    that assembly is ephemeral — without this dump there is no way to see
+    it after the fact. Thread history turns are logged as one-line excerpts
+    (their full text lives in the ``thread_history`` table); the enriched
+    final turn is logged verbatim because it exists nowhere else.
+
+    Args:
+        past_messages: Thread-history turns preceding the final human turn.
+        enriched: The assembled final human turn passed to the LLM.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    for position, message in enumerate(past_messages, start=1):
+        speaker = "human" if isinstance(message, HumanMessage) else "ai"
+        logger.debug(
+            "Response LLM history %d/%d (%s): %s",
+            position, len(past_messages), speaker, log.snippet(message.content),
+        )
+    logger.debug("Response LLM final turn:\n%s", enriched)
+
+
 class ResponseNode:
     """Generates the final personality-driven reply from gathered worker facts."""
 
@@ -491,6 +517,7 @@ class ResponseNode:
             worker_tools_used=bool(state.get("worker_tools_used")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
+        log_response_input(past_messages, enriched)
         response_text = normalize_homoglyphs(await self.__generate(messages))
 
         # Foreign-script responses are persisted by LanguageCorrectionNode

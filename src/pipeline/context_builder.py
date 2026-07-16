@@ -18,6 +18,7 @@ Assembles everything the Agent node needs for an enriched prompt:
                        placeholders.
 """
 
+import random
 import re
 import time
 
@@ -41,6 +42,23 @@ BOT_FACTS_CAP = 8
 BOT_EPISODES_LIMIT = 2
 BOT_ACTIVITY_HISTORY_LIMIT = 7
 
+# Activity gate: the daily refresh means a fresh current activity always
+# exists, so injecting it unconditionally made the bot narrate his routine in
+# nearly every reply. It now enters the prompt only when the message asks
+# what he is doing/did, or on a rare roll so he occasionally volunteers it.
+ACTIVITY_VOLUNTEER_PROBABILITY = 0.1
+ACTIVITY_QUESTION_RE = re.compile(
+    r"ч(?:то|е|ё)\s+(?:\w+\s+){0,2}?(?:по)?дел(?:а|ыва)\w*"  # что делаешь / чё поделываешь
+    r"|чем\s+(?:\w+\s+){0,2}?занима\w*"  # чем занимаешься / чем занимался
+    r"|чем\s+(?:\w+\s+){0,2}?занят\w*"  # чем занят / чем ты занята
+    r"|ч(?:то|е|ё)\s+(?:\w+\s+){0,2}?твори\w*"  # что творишь
+    r"|как\s+(?:\w+\s+){0,1}?дела\b"  # как дела / как твои дела
+    r"|как\s+прош(?:ел|ёл|ла|ло|ли)\b"  # как прошёл день / как прошли выходные
+    r"|что\s+нового\b"  # что нового
+    r"|как\s+(?:сам|сама|жизнь|оно)\b",  # как сам / как жизнь / как оно
+    re.IGNORECASE,
+)
+
 
 def keep_conversational_facts(facts: list[str]) -> list[str]:
     """Drop counter-tally facts (insult/hack-attempt stats) from a fact list.
@@ -56,6 +74,19 @@ def keep_conversational_facts(facts: list[str]) -> list[str]:
         The facts safe to show to the response model; may be empty.
     """
     return [fact for fact in facts if not user_memories.is_counter_fact(fact)]
+
+
+def is_activity_question(text: str) -> bool:
+    """Return True when the message asks what the bot is doing or did.
+
+    Args:
+        text: Incoming message text (processed transcript or raw text).
+
+    Returns:
+        True when the text matches a Russian "what are you doing / what did
+        you do / how are things" question aimed at the bot's activity.
+    """
+    return bool(ACTIVITY_QUESTION_RE.search(text))
 
 
 class ContextBuilder:
@@ -82,8 +113,7 @@ class ContextBuilder:
             chat_id, msg, replied_to, asker_username=msg["username"]
         )
         bot_self_facts, bot_self_episodes = await self.__collect_bot_canon(msg)
-        bot_current_activity = await self.__get_bot_current_activity()
-        bot_recent_activities = await self.__get_bot_recent_activities()
+        bot_current_activity, bot_recent_activities = await self.__collect_activity_context(msg)
 
         assembled: AssembledContext = {
             "user_facts": user_facts,
@@ -130,6 +160,35 @@ class ContextBuilder:
         except Exception as err:
             logger.warning("Failed to load bot canon context: %s", err)
             return [], []
+
+    async def __collect_activity_context(
+        self, msg: dict
+    ) -> tuple[tuple[str, str] | None, list[tuple[str, float]]]:
+        """Gate Жора's activity out of the prompt unless asked or a rare roll fires.
+
+        The daily refresh means a fresh activity always exists, so injecting
+        it unconditionally made the bot mention it in nearly every reply.
+        Include the current activity only when the message asks what he is
+        doing/did, or on a small random chance so he occasionally volunteers
+        it; the dated history is included only when actually asked — it
+        answers dated "what did you do" questions and is never volunteered.
+
+        Args:
+            msg: IncomingMessage dict of the message being processed.
+
+        Returns:
+            ``(bot_current_activity, bot_recent_activities)`` — ``(None, [])``
+            when the gate stays closed.
+        """
+        text = msg.get("processed_text") or msg.get("raw_text") or ""
+        asked = is_activity_question(text)
+        volunteered = not asked and random.random() < ACTIVITY_VOLUNTEER_PROBABILITY
+        if not asked and not volunteered:
+            return None, []
+        current = await self.__get_bot_current_activity()
+        recent = await self.__get_bot_recent_activities() if asked else []
+        logger.debug("Activity gate open (asked=%s, volunteered=%s)", asked, volunteered)
+        return current, recent
 
     async def __get_bot_current_activity(self) -> tuple[str, str] | None:
         """Bucket the newest episode's current-activity phrase by freshness.

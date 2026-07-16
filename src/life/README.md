@@ -171,7 +171,10 @@ cannot inject it. The episode writer sees the last 10 episodes plus a
 holds months of detail without blowing the prompt budget. `current_activity`
 is stored on both `episode` rows (life posts) and `activity` rows (the daily
 refresh below); whichever is newest is the pipeline's answer for «что делаешь
-сейчас» (see `src/pipeline/README.md`).
+сейчас». Reply-prompt injection is question-gated: the activity enters the
+prompt only when the message asks what he's doing/did, or on a rare volunteer
+roll (see `src/pipeline/README.md`) — the refresh mechanics here are
+unchanged by that gate.
 
 ## Daily activity refresh — `src/life/activity.py`, `src/jobs/daily_activity.py`
 
