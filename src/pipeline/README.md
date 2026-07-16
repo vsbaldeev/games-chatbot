@@ -340,14 +340,23 @@ context_builder
     │    → bot_self_facts; top-2 find_similar_episodes above a similarity
     │    floor → bot_self_episodes (Жора's own life canon; see src/life/README.md)
     │    degrades to [] on any failure (embed or DB error) — never fails the pipeline
-    ├─ bot current activity: newest current_activity across episode rows
-    │    (life posts) and activity rows (silent daily refresh, see
-    │    src/life/README.md), bucketed by age — < 14h "fresh", < 48h
+    ├─ activity gate: the daily refresh means a fresh activity always
+    │    exists, so injecting it unconditionally made the bot narrate his
+    │    routine in nearly every reply; both activity lookups now run only
+    │    when ACTIVITY_QUESTION_RE matches the incoming text («что делаешь /
+    │    чем занят / что делал / как дела…») or, for the current activity
+    │    alone, on an ACTIVITY_VOLUNTEER_PROBABILITY (10%) roll so he
+    │    occasionally volunteers it; gate closed → (None, []) and the model
+    │    improvises per the system prompt
+    ├─ bot current activity (gate open): newest current_activity across
+    │    episode rows (life posts) and activity rows (silent daily refresh,
+    │    see src/life/README.md), bucketed by age — < 14h "fresh", < 48h
     │    "recent", older → None (the bot improvises instead of reading a
     │    stale answer) → bot_current_activity
-    └─ bot recent activities: bot_memories.get_recent_activities(7), the
-         same newest-first (phrase, posted_at) history spanning episode and
-         activity rows, degrades to [] on failure → bot_recent_activities
+    └─ bot recent activities (asked only, never volunteered):
+         bot_memories.get_recent_activities(7), the same newest-first
+         (phrase, posted_at) history spanning episode and activity rows,
+         degrades to [] on failure → bot_recent_activities
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
@@ -400,6 +409,12 @@ response   personality LLM (ReAct executor, no tools)
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
     │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
+    │          genuinely ambiguous requests: when the missing detail would change
+    │            the answer (which game, which platform, about whom), the system
+    │            prompt tells the model to ask ONE short in-character clarifying
+    │            question instead of guessing; mild vagueness gets an answer with
+    │            the assumption stated («если ты про PS5-версию — …»); the
+    │            insult/wind-down hints override this — they forbid counter-questions
     │          joke requests: when literal execution is pointless in context (e.g.
     │            «переведи» under a meme whose text is already Russian), the system
     │            prompt tells the model to recognize the bit and play along (mock
@@ -419,13 +434,19 @@ response   personality LLM (ReAct executor, no tools)
     │            «[Чем ты занимался в последние дни]» block (build_activity_history_lines)
     │            from bot_recent_activities — skipping the newest entry already
     │            shown above — so «что делал вчера/на выходных» answers consistently
-    │            too instead of inventing a different past per questioner
+    │            too instead of inventing a different past per questioner;
+    │            both lines appear only when the ContextBuilder activity gate
+    │            opened (asked, or the rare volunteer roll for the current
+    │            activity) — most replies carry neither
     │          when the filter set is_bot_insult=True, a hint is injected before the
     │            trigger line telling the model the message is an attack on it and to
     │            answer with a sharp comeback instead of a neutral reply
     │          when the engagement gate set wind_down=True, a hint is injected telling
     │            the model it is bored of this conversation: answer in one short
     │            in-character phrase, close the exchange, no questions or invitations
+    ├─ at DEBUG, dumps the exact LLM input before generation (log_response_input):
+    │    thread-history turns as one-line excerpts, the assembled final turn
+    │    verbatim — the one place to see why a reply went absurd
     ├─ normalizes homoglyphs first (normalize_homoglyphs): Greek/Latin look-alike
     │    letters spliced into a mostly-Cyrillic word (e.g. Greek μ/ά in "тμάксимс")
     │    are mapped back to Cyrillic deterministically, with no extra LLM call;

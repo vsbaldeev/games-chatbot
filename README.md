@@ -116,6 +116,10 @@ derived from the Telegram update id. Every handled message produces exactly one
 Policy: INFO carries metadata only — no message text, transcripts or reply bodies.
 Content excerpts appear only at DEBUG, truncated. Per-node decision traces
 (filter/guard/engagement) are DEBUG and share the canonical line's correlation id.
+One deliberate exception: the response node dumps the exact input the reply LLM
+sees (`Response LLM final turn` — verbatim and multi-line, since that assembled
+prompt exists nowhere else; thread-history turns as one-line excerpts) at DEBUG,
+for diagnosing absurd replies.
 
 Env knobs (set on the bot service in `docker-compose.yml`):
 
