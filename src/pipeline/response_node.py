@@ -8,7 +8,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
-from src.config.prompts import SHORTS_TRIGGER_INSTRUCTION
+from src.config.prompts import (
+    ACTIVITY_FRESH_SUFFIX,
+    ACTIVITY_HISTORY_HEADER,
+    ACTIVITY_STALE_SUFFIX,
+    BOT_CANON_HEADER,
+    SHORTS_TRIGGER_INSTRUCTION,
+    USER_FACTS_HEADER,
+    WEEKLY_ROLES_RULE,
+    WORKER_DATA_UNVERIFIED_HEADER,
+    WORKER_DATA_VERIFIED_HEADER,
+)
 from src.life import calendar_ru
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
@@ -131,7 +141,7 @@ def build_user_facts_lines(context) -> list[str]:
     user_facts = (context or {}).get("user_facts") or {}
     if not user_facts:
         return []
-    parts = ["Что я знаю об участниках чата:"]
+    parts = [USER_FACTS_HEADER]
     for uname, facts in user_facts.items():
         parts.append(f"@{uname}: {'; '.join(facts)}")
     parts.append("")
@@ -202,7 +212,7 @@ def build_activity_history_lines(recent_activities: list[tuple[str, float]]) -> 
     if not history:
         return []
     now = datetime.datetime.now(calendar_ru.MOSCOW_TZ)
-    parts = ["[Чем ты занимался в последние дни]:"]
+    parts = [ACTIVITY_HISTORY_HEADER]
     parts.extend(
         f"- {calendar_ru.describe_relative_day(posted_at, now)} — {phrase}"
         for phrase, posted_at in history
@@ -227,7 +237,7 @@ def build_bot_life_lines(context) -> list[str]:
     parts: list[str] = []
     facts = context.get("bot_self_facts") or []
     if facts:
-        parts.append("[Твоя жизнь — фоновый канон]:")
+        parts.append(BOT_CANON_HEADER)
         parts.extend(f"- {fact}" for fact in facts)
         parts.append("")
     episodes = context.get("bot_self_episodes") or []
@@ -238,8 +248,11 @@ def build_bot_life_lines(context) -> list[str]:
     activity = context.get("bot_current_activity")
     if activity:
         phrase, freshness = activity
-        label = "Прямо сейчас ты" if freshness == "fresh" else "Недавно ты"
-        parts.append(f"[{label}]: {phrase}")
+        if freshness == "fresh":
+            label, suffix = "Прямо сейчас ты", ACTIVITY_FRESH_SUFFIX
+        else:
+            label, suffix = "Недавно ты", ACTIVITY_STALE_SUFFIX
+        parts.append(f"[{label}]: {phrase}{suffix}")
         parts.append("")
     parts += build_activity_history_lines(context.get("bot_recent_activities") or [])
     return parts
@@ -279,11 +292,12 @@ def build_trigger_line(
     if label:
         return (
             f"{speaker} прислал {label}. Ниже — его описание для тебя "
-            f"(не дословные слова автора; оригинал в чате все и так видят). "
-            f"Отреагируй и пошути, не пересказывай. "
-            f"Описание может ошибаться в именах и названиях: не строй шутку "
-            f"целиком на конкретном имени или названии, если его не "
-            f"подтверждает подпись или разговор:\n{user_input}"
+            f"(не дословные слова автора; оригинал в чате все и так видят — "
+            f"очевидное не описывай). Отреагируй и пошути: зацепись за самую "
+            f"смешную или нелепую деталь, преувеличить — можно и нужно; не "
+            f"пересказывай. Описание может ошибаться в именах и названиях: не "
+            f"строй шутку целиком на конкретном имени или названии, если его "
+            f"не подтверждает подпись или разговор:\n{user_input}"
         )
     return f"{speaker}: {user_input}"
 
@@ -420,8 +434,10 @@ def build_response_input(
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
     parts += build_user_facts_lines(context)
-    parts += build_asking_user_tag_lines(context, username)
-    parts += build_mentioned_tags_lines(context)
+    role_lines = build_asking_user_tag_lines(context, username) + build_mentioned_tags_lines(context)
+    if role_lines:
+        parts.append(WEEKLY_ROLES_RULE)
+        parts += role_lines
     parts += build_bot_life_lines(context)
 
     # Skip recent history when thread history is present (thread turns already
@@ -435,12 +451,8 @@ def build_response_input(
     parts += history_lines
 
     if worker_output:
-        if worker_tools_used:
-            parts.append(f"[Собранные данные (проверено через инструменты)]:\n{worker_output}\n")
-        else:
-            parts.append(
-                f"[Данные из контекста разговора (во внешних источниках НЕ проверялись)]:\n{worker_output}\n"
-            )
+        header = WORKER_DATA_VERIFIED_HEADER if worker_tools_used else WORKER_DATA_UNVERIFIED_HEADER
+        parts.append(f"{header}\n{worker_output}\n")
 
     parts += build_directive_lines(is_bot_insult, wind_down, photo_directive)
 
