@@ -30,7 +30,7 @@ COUNTER_FACT_PREFIXES = ("Оскорблял бота", "Пытался взло
 # their updated_at refreshed by the dedup path whenever they are re-observed.
 # Kept short so jokes/roasts about members stay current rather than dredging
 # up things from months ago.
-FACT_RETENTION_DAYS = 7
+FACT_RETENTION_DAYS = 14
 
 
 async def get_facts(*, chat_id: int, user_id: int) -> list[str]:
