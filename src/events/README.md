@@ -32,6 +32,15 @@ voice_reply.py
                                       the plain text reply
 ```
 
+## Chat-requested selfies
+
+When the pipeline accepted a photo request (`photo_request` state flag set by
+the filter, no selfie already in flight), `run_pipeline` launches
+`src/life/selfie.deliver_selfie` as a fire-and-forget task — but only after
+`deliver_and_record` actually delivered the in-character «ща сфоткаю» ack, so
+a pipeline failure never leaves a photo without its promise. The canonical
+log line records the run as `action=replied+photo`.
+
 ## Pipeline error handling
 
 Pipeline failures in `run_pipeline` are reported in chat only to users who

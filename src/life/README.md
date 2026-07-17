@@ -135,6 +135,35 @@ Recording uses `format_photo_content(episode_text)` plus the sent photo's
 vision-description path — a member replying to a selfie gets a real
 description of the generated frame, same as for member photos.
 
+## Chat-requested selfies — `src/life/selfie.py`
+
+Members can ask Жора for a photo of himself in chat («сфоткай себя», «покажи
+свой огород»). The pipeline's filter classifies the request (`PHOTO_REQUEST`
+verdict, the heaviest engagement-budget signal at 4.5) and the reply is an
+immediate in-character «ща сфоткаю» ack; `deliver_selfie` then runs as a
+fire-and-forget background task launched by the events layer:
+
+1. `write_selfie_scene` (`SELFIE_SCENE_MODEL`, one call, no fallback chain)
+   turns the Russian request into one English scene line under the same
+   contract as the episode writer's `image_prompt` — a named scene is
+   rendered as asked; a bare «сфоткай себя» shows the current activity from
+   the newest life post; no activity falls back to a village-yard shot.
+2. `generate_best_photo` (shared with scheduled photo posts) renders and
+   judges the candidates; the photo goes out as a reply to the requesting
+   message with a short canned caption and is recorded with
+   `format_photo_content` + `file_id`, plugging it into the lazy
+   vision-description path like every other selfie.
+3. Any failure degrades to a canned in-character excuse
+   (`SELFIE_FAILED_REPLIES`) — after promising a photo, silence is not an
+   option.
+
+One module-global generation slot serializes chat selfies: the imagegen
+service has a single worker shared with scheduled life posts, so a request
+arriving mid-render gets an «уже фоткаю» ack (the filter peeks
+`is_generation_in_flight`) and no second job. The peek and the acquire are
+separate moments, so two overlapping pipelines can both ack while only one
+generates — the loser logs and exits; rare and low-stakes by design.
+
 ## Format degradation ladder
 
 `voice → story`, `photo → story`: media payloads are built once before the

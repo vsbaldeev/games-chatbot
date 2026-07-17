@@ -23,8 +23,12 @@ logger = log.get_logger(__name__)
 # Weight each classification charges against the attention budget. BOT_INSULT
 # stays low enough that two rapid insults both land in the full-reply tier:
 # the classifier has false positives, and one mislabel must not cost the user
-# their comeback.
+# their comeback. PHOTO_REQUEST is the heaviest signal: each accepted request
+# occupies the single shared imagegen worker for minutes, so 4.5 keeps a
+# fresh user's first request below BRUSH_OFF_THRESHOLD (full tier, photo
+# ships) while a rapid second one lands past it and is refused in character.
 SIGNAL_WEIGHTS = {
+    "PHOTO_REQUEST": 4.5,
     "BOT_INSULT": 3.0,
     "BANTER": 2.0,
     "MEANINGLESS": 2.0,

@@ -250,6 +250,9 @@ filter  (runs after ingester)
     │       │   is a SHORT reaction, so a longer message is never meaningless
     │       └─ otherwise → engagement gate (see wind-down engine below)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
+    ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —
+    │       «сфоткай себя», «покажи свой огород»; pictures of anything else
+    │       stay MEANINGFUL) → engagement gate
     ├─ text, LLM → MEANINGFUL → engagement gate
     └─ text, LLM error       → should_respond=True (fails open)
 
@@ -271,8 +274,10 @@ store/engagement.py, table engagement_scores): one leaky-bucket attention
 score per (chat_id, user_id), persisted in Postgres so a redeploy never resets
 a wound-down user. Every addressed verdict (and every double-confirmed
 overheard insult, and explicitly addressed transcribed media as MEANINGFUL)
-charges a weight — BOT_INSULT 3.0, BANTER/MEANINGLESS 2.0, MEANINGFUL 1.0 —
-decayed with a 30-min half-life in a single atomic UPSERT; the post-charge
+charges a weight — PHOTO_REQUEST 4.5 (each accepted request occupies the
+single shared imagegen worker for minutes), BOT_INSULT 3.0, BANTER/MEANINGLESS
+2.0, MEANINGFUL 1.0 — decayed with a 30-min half-life in a single atomic
+UPSERT; the post-charge
 score maps onto a tier (brush-off >7, emoji >13, silence >19), so any
 sustained conversation fades out like a person losing interest. The
 «Оскорблял бота N раз» counter fact in user_memories is still incremented for
@@ -286,11 +291,21 @@ keep reciting the score. Store errors fail open to the full tier.
     │       positives). A BOT_INSULT that *replies to the bot's own message*
     │       and any BANTER verdict additionally set wind_down=True: a
     │       mirrored counter-insult mid-thread never earns a fresh full
-    │       comeback (that is what fuels roast-battle loops)
+    │       comeback (that is what fuels roast-battle loops).
+    │       PHOTO_REQUEST at this tier sets photo_request=True plus a
+    │       photo_in_flight peek of the single selfie slot: the worker is
+    │       skipped, the reply is an in-character «ща сфоткаю» ack («уже
+    │       фоткаю» when a selfie is already rendering), and after the ack is
+    │       delivered the events layer fire-and-forgets
+    │       src/life/selfie.deliver_selfie (weight 4.5 → a fresh user's first
+    │       request ships a photo, a rapid second one lands in the brush-off
+    │       refusal below)
     ├─ BRUSH_OFF tier → should_respond=True + wind_down=True — the response
     │       node injects a close-the-conversation hint (one short in-character
     │       phrase, no questions, no invitations) and the worker is skipped;
-    │       BANTER at this tier degrades straight to the bored emoji reaction
+    │       BANTER at this tier degrades straight to the bored emoji reaction;
+    │       a PHOTO_REQUEST here gets an explicit in-character photo refusal
+    │       directive instead of the generic brush-off — no generation runs
     ├─ EMOJI tier     → should_respond=False + bored emoji reaction
     │       (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨; MEANINGLESS keeps the
     │       friendly REACTION_POOL until this tier)

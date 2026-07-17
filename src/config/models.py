@@ -108,6 +108,13 @@ IMAGEGEN_CANDIDATES = 3
 PHOTO_JUDGE_PASS_SCORE = 7
 PHOTO_JUDGE_MAX_TOKENS = 150
 
+# Chat-requested selfie scene writer (src/life/selfie.py). One small call
+# turning a member's Russian photo request into an English scene line. No
+# fallback chain: a failure degrades to a canned in-character excuse. llama
+# for the same reliable bare-string output as ACTIVITY_MODEL above.
+SELFIE_SCENE_MODEL = "llama-3.3-70b-versatile"
+SELFIE_SCENE_MAX_TOKENS = 200
+
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly
 # stressed words are the loudest tell of synthetic Russian speech.
