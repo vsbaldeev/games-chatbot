@@ -24,10 +24,13 @@ LLM judgement. A duplicate refreshes the existing fact's updated_at instead
 of inserting a new row. Facts untouched for 90 days are deleted by the
 nightly cleanup job (user_memories.cleanup_stale), counters included.
 
-MEMORY_MODEL is a reasoning model, so every extraction call disables
-reasoning (reasoning_effort="none") — otherwise the whole token budget is
-burned inside a <think> block and no answer is ever produced. As a backstop,
-_parse_facts strips any think blocks first.
+The primary model in MEMORY_MODEL_FALLBACKS is a reasoning model, so every
+extraction call disables reasoning (reasoning_effort="none") — otherwise the
+whole token budget is burned inside a <think> block and no answer is ever
+produced. As a backstop, _parse_facts strips any think blocks first.
+make_extraction_llm() chains the fallback model behind it via
+with_fallbacks(), so a Groq daily-quota (or other rate-limit) 429 on the
+primary fails over instead of killing extraction for the rest of the day.
 
 Output is one fact per line rather than a JSON array: small models reliably
 emit bare, unquoted list items (e.g. "[fact one, fact two]"), which breaks
@@ -39,7 +42,9 @@ import asyncio
 import re
 from collections import defaultdict
 
+import groq
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
 
 from src import achievements, config, log
@@ -59,7 +64,7 @@ logger = log.get_logger(__name__)
 # check-then-insert window cannot be observed by a second concurrent task.
 user_dedup_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
 
-# Bounds how many extraction calls hit the shared MEMORY_MODEL token bucket at
+# Bounds how many extraction calls hit the shared MEMORY_MODEL_FALLBACKS[0] token bucket at
 # once. Fact extraction fires fire-and-forget per message plus once per @mention,
 # so without a cap a burst stampedes the model's tokens-per-minute limit. Excess
 # tasks queue on the semaphore instead of all racing for the same 429.
@@ -106,21 +111,32 @@ def _format_recent_context(recent: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def make_extraction_llm() -> ChatGroq:
-    """Return the fact-extraction LLM with reasoning disabled.
+def make_extraction_llm() -> Runnable:
+    """Return the fact-extraction LLM chain with reasoning disabled and a fallback.
 
-    MEMORY_MODEL is a reasoning model; without ``reasoning_effort="none"`` it
-    spends the whole max_tokens budget inside a ``<think>`` block and the
-    answer never appears, so extraction silently yields zero facts.
+    MEMORY_MODEL_FALLBACKS[0] is a reasoning model; without
+    ``reasoning_effort="none"`` it spends the whole max_tokens budget inside a
+    ``<think>`` block and the answer never appears, so extraction silently
+    yields zero facts. Only the primary gets that parameter — later models in
+    the chain are not reasoning models.
+
+    The chain fails over to the next model on any ``groq.RateLimitError``,
+    including Groq's daily-quota (TPD) 429 that a same-model retry can never
+    recover from.
 
     Returns:
-        Configured ``ChatGroq`` instance for fact extraction.
+        A ``Runnable`` chaining ``config.MEMORY_MODEL_FALLBACKS`` in order.
     """
-    return ChatGroq(
-        model=config.MEMORY_MODEL, api_key=config.GROQ_API_KEY,
+    primary_llm = ChatGroq(
+        model=config.MEMORY_MODEL_FALLBACKS[0], api_key=config.GROQ_API_KEY,
         temperature=0.2, max_tokens=256, max_retries=0,
         reasoning_effort="none",
     )
+    fallback_llms = [
+        ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256, max_retries=0)
+        for model in config.MEMORY_MODEL_FALLBACKS[1:]
+    ]
+    return primary_llm.with_fallbacks(fallback_llms, exceptions_to_handle=(groq.RateLimitError,))
 
 
 FACT_LINE_STRIP_RE = re.compile(r"^[\s\-*•\d.)]+")

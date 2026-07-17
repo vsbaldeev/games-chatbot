@@ -12,7 +12,6 @@ import io
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 
 from src import achievements, config, log
 from src.agent.middleware import ainvoke_with_backoff, strip_thinking
@@ -27,6 +26,7 @@ from src.life.writer import (
     Episode,
     episode_writer_agent,
 )
+from src.pipeline.memory_writer import make_extraction_llm
 from src.store import bot_memories, embedder, unified_messages
 from src.tts import SynthesizedVoice, prepare_tts_text, speech_service
 
@@ -304,9 +304,9 @@ async def record_episode(episode: Episode) -> None:
 async def distill_facts(episode_text: str) -> list[str]:
     """Extract durable canon facts from a posted episode.
 
-    MEMORY_MODEL is a reasoning model, so reasoning is disabled — otherwise
-    the whole token budget burns inside a ``<think>`` block and no JSON
-    answer is produced (same reasoning as ``memory_writer.make_extraction_llm``).
+    Uses the same reasoning-disabled, fallback-chained LLM as
+    ``memory_writer.make_extraction_llm`` — see that function's docstring for
+    why reasoning is disabled and how the fallback is wired.
 
     Args:
         episode_text: The episode text to distill.
@@ -314,11 +314,7 @@ async def distill_facts(episode_text: str) -> list[str]:
     Returns:
         Up to ``MAX_DISTILLED_FACTS`` fact strings, possibly empty.
     """
-    llm = ChatGroq(
-        model=config.MEMORY_MODEL, api_key=config.GROQ_API_KEY,
-        temperature=0.2, max_tokens=256, max_retries=0,
-        reasoning_effort="none",
-    )
+    llm = make_extraction_llm()
     result = await ainvoke_with_backoff(
         llm, [SystemMessage(content=BOT_FACT_DISTILL_SYSTEM), HumanMessage(content=episode_text)],
     )
