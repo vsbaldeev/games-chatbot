@@ -30,10 +30,17 @@ FILTER_MODEL = "llama-3.1-8b-instant"
 # stronger model before the bot claps back.
 INSULT_CONFIRM_MODEL = "llama-3.3-70b-versatile"
 
-# Memory fact extraction.
-# Reasoning model: callers must pass reasoning_effort="none" or the whole
-# max_tokens budget is burned inside a <think> block and no JSON is produced.
-MEMORY_MODEL = "qwen/qwen3.6-27b"
+# Memory fact extraction fallback chain (chat facts and posted-episode
+# canon-fact distillation both use this — see memory_writer.make_extraction_llm).
+# Primary is a reasoning model: callers must pass reasoning_effort="none" or
+# the whole max_tokens budget is burned inside a <think> block and no JSON is
+# produced. llama-3.1-8b-instant is the fallback for Groq daily-quota (TPD)
+# exhaustion on the primary — same model FILTER_MODEL uses for its far larger
+# free-tier RPD/TPD budget, so the two rarely run out on the same day.
+MEMORY_MODEL_FALLBACKS: list[str] = [
+    "qwen/qwen3.6-27b",       # primary
+    "llama-3.1-8b-instant",   # fallback: separate, larger daily quota
+]
 
 # Weekly member-role assignment
 TAG_MODEL = "llama-3.3-70b-versatile"
