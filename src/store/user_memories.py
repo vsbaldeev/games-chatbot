@@ -28,7 +28,9 @@ COUNTER_FACT_PREFIXES = ("Оскорблял бота", "Пытался взло
 
 # Facts untouched for this long are stale residue: real, current facts get
 # their updated_at refreshed by the dedup path whenever they are re-observed.
-FACT_RETENTION_DAYS = 90
+# Kept short so jokes/roasts about members stay current rather than dredging
+# up things from months ago.
+FACT_RETENTION_DAYS = 7
 
 
 async def get_facts(*, chat_id: int, user_id: int) -> list[str]:
