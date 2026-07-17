@@ -15,6 +15,13 @@ CPU-only) that illustrates exactly the scene the caption describes; the posts
 build a running, self-consistent canon (`src/life/`) that the bot also draws on
 casually in ordinary replies — mentioning a past episode when it is relevant, and
 answering "what are you up to" from whatever its latest post says it is doing.
+Members can also ask Жора for a photo of himself («сфоткай себя», «покажи свой
+огород»): the filter classifies the request, Жора immediately answers in
+character that he went to take the shot, and the generated photo arrives as a
+reply minutes later (CPU generation is slow). Photo requests are the heaviest
+signal of the per-user attention budget — a rapid second request gets an
+in-character refusal instead of a second render — and a single global
+generation slot keeps concurrent requests from queueing behind each other.
 Between posts, a silent daily job invents a new season-appropriate activity
 phrase each morning with no chat post, so the answer changes daily instead of
 sitting frozen for up to a week — and a dated history of recent activities
@@ -110,8 +117,10 @@ derived from the Telegram update id. Every handled message produces exactly one
 14.07 21:03:12 I 842137 pipeline  chat=-100123 user=@vasya kind=voice msg=5121 trigger=explicit filter=MEANINGFUL tier=0 guard=ok action=replied len=214 dur=3.42s
 ```
 
-`action` is `replied`, `joked`, `ignored` (with `reason=…`: `not_addressed`,
-`meaningless`, `wound_down`, `guard_blocked`, …) or `error:<kind>`.
+`action` is `replied`, `joked`, `replied+photo` (a photo-request ack whose
+background selfie generation was launched), `ignored` (with `reason=…`:
+`not_addressed`, `meaningless`, `wound_down`, `guard_blocked`, …) or
+`error:<kind>`.
 
 Policy: INFO carries metadata only — no message text, transcripts or reply bodies.
 Content excerpts appear only at DEBUG, truncated. Per-node decision traces

@@ -27,6 +27,7 @@ from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.events.sending import send_and_store
 from src.events.voice_reply import try_send_voice_reply
+from src.life import selfie
 from src.pipeline.router import is_explicitly_addressed
 from src.store import unified_messages
 from src.utils.ttl_gate import TtlGate
@@ -310,6 +311,30 @@ async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) 
     )
 
 
+def launch_selfie_task(bot, chat_id: int, reply_to_msg_id: int, final_state: BotState) -> None:
+    """Fire-and-forget the background selfie generation for an accepted photo request.
+
+    Launched only after the in-character «ща сфоткаю» acknowledgement was
+    actually delivered, so a pipeline failure never leaves a photo without
+    its promise. The current-activity phrase (when the context builder
+    loaded one) steers the scene of a bare «сфоткай себя» request.
+
+    Args:
+        bot: Telegram Bot instance to send with.
+        chat_id: Chat the request came from.
+        reply_to_msg_id: The requesting message id the photo will reply to.
+        final_state: Final pipeline state after the graph run.
+    """
+    activity = (final_state.get("context") or {}).get("bot_current_activity")
+    asyncio.create_task(selfie.deliver_selfie(
+        bot=bot,
+        chat_id=chat_id,
+        reply_to_msg_id=reply_to_msg_id,
+        request_text=final_state["incoming"]["raw_text"] or "",
+        current_activity=activity[0] if activity else None,
+    ))
+
+
 async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed: bool) -> str:
     """Log a pipeline failure, notify the chat when addressed, name the kind.
 
@@ -382,6 +407,9 @@ async def run_pipeline(
         if response.strip():
             await deliver_and_record(final_state, msg, context.bot.id, response)
             action = "joked" if final_state.get("response_trigger") == "humor" else "replied"
+            if final_state.get("photo_request") and not final_state.get("photo_in_flight"):
+                launch_selfie_task(context.bot, chat.id, msg.message_id, final_state)
+                action = "replied+photo"
             canonical.emit(final_state, action, time.monotonic() - started_at)
             return True
     except Exception as error:

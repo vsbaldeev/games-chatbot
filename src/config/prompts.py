@@ -41,7 +41,7 @@ CRUDE_PRAISE_EXAMPLES = (
 FILTER_SYSTEM = (
     "You are a telegram bot's message filter. The message you receive is addressed to the bot: "
     "the author @mentioned the bot or replied to one of its messages. "
-    "Classify the message into exactly one of four categories.\n\n"
+    "Classify the message into exactly one of five categories.\n\n"
     "When the user replies to an earlier message, that message is included as context under "
     "'Message being replied to'. Classify ONLY the user's reply, but use the context: a short "
     "reply that engages with the quoted message — asks about it, disputes it, wants it "
@@ -65,6 +65,15 @@ FILTER_SYSTEM = (
     "- Self-praise or comparison jabs: 'Я очень классный, а ты нет'\n"
     "- Counter-insults that merely mirror the bot's own jab back without new content: "
     "'сам такой', 'сам пидр', 'на себя посмотри'\n\n"
+    "PHOTO_REQUEST — the user asks the bot to send a photo OF THE BOT ITSELF: "
+    "its own appearance, life or surroundings:\n"
+    "- Appearance: 'сфоткай себя', 'сфоткайся', 'скинь свою фотку', "
+    "'покажи, как выглядишь'\n"
+    "- The bot's own life and surroundings: 'сфоткай свой огород', "
+    "'покажи свою избу', 'скинь фото своей мастерской'\n"
+    "- A request for a picture of anything else — memes, animals, other people, "
+    "screenshots ('скинь фотку котика', 'скинь мем') — is MEANINGFUL, "
+    "not PHOTO_REQUEST.\n\n"
     "MEANINGFUL — everything else that deserves a reply:\n"
     "- Questions: 'Как дела?', 'Что нового?'\n"
     "- Commands/Requests: 'Расскажи анекдот', '/duel @user'\n"
@@ -80,7 +89,8 @@ FILTER_SYSTEM = (
     + "- Starting or continuing a discussion.\n\n"
     "Instructions:\n"
     "1. Analyze the text (can be in Russian or English).\n"
-    "2. Reply with ONLY ONE word: 'BOT_INSULT', 'BANTER', 'MEANINGLESS' or 'MEANINGFUL'.\n"
+    "2. Reply with ONLY ONE word: 'BOT_INSULT', 'BANTER', 'MEANINGLESS', "
+    "'PHOTO_REQUEST' or 'MEANINGFUL'.\n"
     "3. Swearing directed AT THE BOT is BOT_INSULT only when it carries hostility, "
     "contempt or mockery (telling it to shut up, calling it useless/stupid). Swearing "
     "used as an intensifier for praise, excitement or agreement ('ахуенный', 'охуенно', "
@@ -91,7 +101,9 @@ FILTER_SYSTEM = (
     "5. A counter-insult that only echoes the bot's own jab back is BANTER, not "
     "BOT_INSULT — BOT_INSULT is fresh hostility, contempt or mockery the user initiates.\n"
     "6. If unsure between MEANINGLESS and MEANINGFUL, or between BANTER and "
-    "MEANINGFUL, err on the side of 'MEANINGFUL'."
+    "MEANINGFUL, err on the side of 'MEANINGFUL'.\n"
+    "7. PHOTO_REQUEST requires an actual request to send a photo of the bot "
+    "itself. If unsure between PHOTO_REQUEST and MEANINGFUL, choose 'MEANINGFUL'."
 )
 
 OVERHEARD_SYSTEM = (
@@ -238,6 +250,34 @@ PHOTO_JUDGE_SYSTEM = (
     "the image shows a different scene. Weight the action/interaction "
     "heaviest. Answer with strictly one JSON object, no other text: "
     '{"score": N}'
+)
+
+# Chat-requested selfie scene writer (src/life/selfie.py). English, like the
+# other image-model-adjacent text: the output is a generation prompt. Same
+# contract as the episode writer's image_prompt — the character descriptor
+# (CHARACTER_VISUAL_PROMPT) is appended separately at generation time, so the
+# scene must never describe the man's appearance.
+SELFIE_SCENE_SYSTEM = (
+    "You write a scene description for an image generation model. The input "
+    "is a chat member's Russian message asking a village man to send a photo "
+    "of himself, optionally followed by a line naming what the man is "
+    "currently busy with.\n"
+    "Rules:\n"
+    "- Output exactly ONE English scene description, a single line: no JSON, "
+    "no quotes, no explanations.\n"
+    "- One frame with one clear action the man explicitly performs, stated "
+    "subject-verb-object first ('man watering his vegetable garden...'), "
+    "then one or two objects and the setting. No lists, no other people or "
+    "creatures unless the request explicitly asks for them — a simple model "
+    "renders the frame, and the simpler the scene, the better it comes out.\n"
+    "- Never describe the man's appearance, clothes or face — they are "
+    "appended separately.\n"
+    "- The setting is a slavic countryside village.\n"
+    "- When the request names a scene, place or activity, render exactly "
+    "that.\n"
+    "- When the request is a bare 'photo of yourself' and a current activity "
+    "is given, show the man doing that activity.\n"
+    "- Otherwise show the man standing in his village yard."
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
