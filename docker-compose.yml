@@ -60,7 +60,7 @@ services:
     environment:
       DATABASE_URL: postgresql://chatbot:${POSTGRES_PASSWORD}@postgres:5432/chatbot
       IMAGEGEN_URL: http://imagegen:8000
-      LOG_LEVEL: INFO
+      LOG_LEVEL: DEBUG
       # Container stdout is not a tty; force ANSI colors so `docker compose
       # logs` renders them in a terminal.
       LOG_COLOR: always
