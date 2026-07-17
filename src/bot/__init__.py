@@ -4,7 +4,7 @@ Run with: python -m src.bot
 """
 
 from telegram import Update
-from telegram.ext import Application, ApplicationBuilder
+from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
 from src import log
 from src.agent import worker_agent, response_agent, roast_agent, comedian_agent
@@ -38,6 +38,17 @@ async def __on_startup(application: Application) -> None:
     logger.info("Bot started, all agents and jobs initialized")
 
 
+async def __on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log unhandled errors instead of letting PTB report them as "no error handlers".
+
+    Args:
+        update: The update that triggered the error, if any. Network errors from the
+            polling loop (already retried indefinitely by PTB) pass ``None`` here.
+        context: The callback context carrying the raised error in ``context.error``.
+    """
+    logger.warning("Unhandled error from PTB (auto-retried if network-related): %s", context.error)
+
+
 def main() -> None:
     from src import config
     from src.bot.handlers import (
@@ -47,6 +58,7 @@ def main() -> None:
     )
 
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(__on_startup).build()
+    app.add_error_handler(__on_error)
 
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
         manager.add_handlers(app)
