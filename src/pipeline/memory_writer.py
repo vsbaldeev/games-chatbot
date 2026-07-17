@@ -39,6 +39,7 @@ has no quoting failure mode.
 """
 
 import asyncio
+import logging
 import re
 from collections import defaultdict
 
@@ -162,6 +163,25 @@ def _parse_facts(raw: str) -> list[str]:
     return facts
 
 
+def log_extraction_call(label: str, prompt: str, facts: list[str]) -> None:
+    """Dump an extraction call's exact prompt and resulting facts, at DEBUG level.
+
+    Wrong or missing facts are usually caused by something in the assembled
+    prompt (stale existing facts, a mis-framed exchange) or by the model
+    itself, and neither is visible after the fact without this dump.
+
+    Args:
+        label: Short tag identifying the call site (e.g. the username the
+            facts are about), prefixed to the log lines.
+        prompt: The exact prompt string sent to the extraction LLM.
+        facts: Facts parsed from the LLM's response, possibly empty.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    logger.debug("Extraction prompt (%s):\n%s", label, prompt)
+    logger.debug("Extracted facts (%s): %s", label, facts or "(none)")
+
+
 async def _extract_facts(
     *, username: str, user_message: str, bot_reply: str, existing: list[str],
     recent_history: list[dict] | None = None, source_kind: str = "text",
@@ -202,7 +222,9 @@ async def _extract_facts(
         result = await ainvoke_with_backoff(
             llm, [SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)],
         )
-    return _parse_facts(result.content.strip())
+    facts = _parse_facts(result.content.strip())
+    log_extraction_call(f"@{username}", prompt, facts)
+    return facts
 
 
 async def _dedup_and_save(
@@ -227,6 +249,7 @@ async def _check_and_insert(
         )
         if matched_id is not None:
             await user_memories.refresh_updated_at(matched_id)
+            logger.debug("Dedup: @%s fact already known (id=%s), refreshed: %s", username, matched_id, fact)
         else:
             to_insert_facts.append(fact)
             to_insert_embeddings.append(fact_embedding)
@@ -235,7 +258,10 @@ async def _check_and_insert(
             chat_id=chat_id, user_id=user_id, username=username,
             facts=to_insert_facts, embeddings=to_insert_embeddings,
         )
-        logger.debug("Saved %d facts for @%s in chat %s", len(to_insert_facts), username, chat_id)
+        logger.debug(
+            "Saved %d facts for @%s in chat %s: %s",
+            len(to_insert_facts), username, chat_id, to_insert_facts,
+        )
 
 
 async def extract_and_save(
@@ -312,6 +338,7 @@ async def _extract_facts_about(
             f"по словам @{observer_username}, {fact}"
             for fact in _parse_facts(result.content.strip())
         ]
+        log_extraction_call(f"@{username} (cross-user, via @{observer_username})", prompt, new_facts)
         await _dedup_and_save(
             chat_id=chat_id, user_id=user_id, username=username, new_facts=new_facts,
         )

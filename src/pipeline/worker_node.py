@@ -1,6 +1,7 @@
 """WorkerNode — agent that gathers facts using tools."""
 
 import datetime
+import logging
 from typing import Literal
 
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -15,6 +16,25 @@ logger = log.get_logger(__name__)
 
 SEARCH_TOOLS = frozenset({"web_search"})
 RECENT_FILL_LIMIT = 10
+
+
+def log_worker_call(worker_input: str, output: str, tools_used: bool) -> None:
+    """Dump the worker's exact input and gathered output, at DEBUG level.
+
+    The worker's output is the only trace of what it actually found (or
+    fabricated); once it is folded into the response prompt there is no way
+    to tell whether a wrong answer came from the worker or from the
+    personality LLM without this dump.
+
+    Args:
+        worker_input: The exact prompt string sent to the worker agent.
+        output: The worker's returned text, possibly empty.
+        tools_used: Whether at least one tool actually ran.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    logger.debug("Worker input:\n%s", worker_input)
+    logger.debug("Worker output (tools_used=%s): %s", tools_used, output or "(empty)")
 
 
 class SearchNotificationCallback(AsyncCallbackHandler):
@@ -106,6 +126,7 @@ class WorkerNode:
 
         try:
             output, tools_used = await self.__agent.invoke_worker(worker_input, callbacks=callbacks)
+            log_worker_call(worker_input, output, tools_used)
             notification_msg = callback.sent_message if callback is not None else None
             return {
                 "worker_output": output,
