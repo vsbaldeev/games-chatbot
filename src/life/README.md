@@ -165,10 +165,32 @@ fire-and-forget background task launched by the events layer:
 
 One module-global generation slot serializes chat selfies: the imagegen
 service has a single worker shared with scheduled life posts, so a request
-arriving mid-render gets an «уже фоткаю» ack (the filter peeks
-`is_generation_in_flight`) and no second job. The peek and the acquire are
+arriving mid-render gets an «уже фоткаю» ack and no second job. The filter's
+peek is `selfie.is_generation_in_flight() or poster.is_post_in_flight()` —
+covering both image flows, because a scheduled photo post holds the worker
+for ~16 minutes and promising a selfie during one delivered a second image
+to the chat moments after the post's own. The peek and the acquire are
 separate moments, so two overlapping pipelines can both ack while only one
 generates — the loser logs and exits; rare and low-stakes by design.
+
+## One scheduled post at a time — `post_in_flight`
+
+`post_life_episode` drops a call made while another post is still being
+produced. Both triggers aim at the same slot — the daily 17:00 job and the
+startup catch-up, which runs 60 s after boot — and the watermark that tells
+catch-up "this slot is done" (`get_latest_posted_at`) is only written after a
+successful send. A photo post spends ~16 minutes rendering candidates, so for
+those minutes the slot still reads as unposted and catch-up would claim it
+again: two near-identical episodes, two images. Observed in production on the
+first Monday the photo slot ever fired, after a deploy landed in the minute
+before 17:00.
+
+The duplicate is dropped rather than queued: it targets the same slot, so
+posting it later is still a duplicate. Claiming the slot in `bot_memories`
+*before* generating would also close the race, but it would trade this bug
+for a worse one — a post that then failed would be recorded as done and
+silently lost, which is exactly what the write-after-send rule above exists
+to prevent.
 
 ## Format degradation ladder
 

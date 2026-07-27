@@ -33,15 +33,66 @@ logger = log.get_logger(__name__)
 
 MAX_DISTILLED_FACTS = 3
 
+# Rank of a candidate the vision judge could not score: below every real 0-10
+# score, so it loses to any scored candidate but still ships when it is the
+# only one that rendered. "Unknown", never "bad" — a judge outage must not
+# look like a mismatch.
+UNSCORED_RANK = -1
+
+# One scheduled post at a time, module-global like selfie.py's generation slot.
+# A photo post spends ~16 minutes rendering candidates, and the watermark that
+# tells catch-up "this slot is done" (bot_memories.get_latest_posted_at) is only
+# written after a successful send — so for those minutes the slot still looks
+# unposted. Without this guard the daily 17:00 job and the startup catch-up
+# (which runs 60 s after boot) both claim the same slot and post two
+# near-identical episodes, each with its own image. Deploying in the minute
+# before a slot is exactly what triggers it.
+post_in_flight = False
+
+
+def is_post_in_flight() -> bool:
+    """Peek whether a scheduled life post is currently being produced.
+
+    Synchronous read used by the filter node, so a photo request arriving
+    mid-post is acked «уже фоткаю» instead of starting a second generation.
+
+    Returns:
+        True while :func:`post_life_episode` is producing an episode.
+    """
+    return post_in_flight
+
 
 async def post_life_episode(bot, post_format: str) -> None:
     """Write, send and record one scheduled life-post episode.
+
+    Drops the call when a post is already in flight: both triggers (the daily
+    job and the startup catch-up) target the same slot, so a concurrent
+    second one would duplicate it. Queueing it instead would not help — it
+    would still be the same slot's episode, posted twice.
 
     Args:
         bot: Telegram Bot instance used to send messages.
         post_format: Format this slot posts in, assigned by the weekly
             schedule (``src/jobs/life_post.py``) — the writer is told which
             format to write for, it does not choose one.
+    """
+    global post_in_flight
+    if post_in_flight:
+        logger.warning("Life post already in flight — dropping duplicate %s post", post_format)
+        return
+    post_in_flight = True
+    try:
+        await publish_episode(bot, post_format)
+    finally:
+        post_in_flight = False
+
+
+async def publish_episode(bot, post_format: str) -> None:
+    """Write, send and record the episode; the guarded body of a life post.
+
+    Args:
+        bot: Telegram Bot instance used to send messages.
+        post_format: Format this slot posts in.
     """
     episode = await episode_writer_agent.write_episode(supported_format(post_format))
     if episode is None:
@@ -130,10 +181,8 @@ async def generate_best_photo(image_prompt: str) -> bytes | None:
     candidate the judge could not score ranks below any scored one but still
     ships if it is all there is.
 
-    The full generation prompt puts the scene before the character
-    descriptor: leading tokens dominate composition on this engine (see
-    ``PHOTO_FRAMING_HINT``), and the reversed order let scene objects render
-    instead of being crowded out by a close-up portrait.
+    Scene before character descriptor in the assembled prompt — see
+    ``PHOTO_FRAMING_HINT`` in ``src/config/prompts.py`` for why.
 
     Args:
         image_prompt: The episode's English scene description.
@@ -145,16 +194,14 @@ async def generate_best_photo(image_prompt: str) -> bytes | None:
     photo_prompt = f"{PHOTO_FRAMING_HINT}{image_prompt}, {CHARACTER_VISUAL_PROMPT}"
     logger.debug("Photo generation prompt: %s", log.snippet(photo_prompt, log.OUTGOING_TEXT_LIMIT))
     best_png = None
-    best_rank = -2
+    best_rank = UNSCORED_RANK - 1
     for attempt in range(config.IMAGEGEN_CANDIDATES):
         candidate = await generate_image(photo_prompt)
         if candidate is None:
             continue
-        score = await score_photo(candidate, image_prompt)
-        if score is not None and score >= config.PHOTO_JUDGE_PASS_SCORE:
-            logger.info("Photo candidate %d passed the judge (score %d)", attempt + 1, score)
+        rank = await rank_candidate(candidate, image_prompt, attempt)
+        if rank >= config.PHOTO_JUDGE_PASS_SCORE:
             return candidate
-        rank = -1 if score is None else score
         if rank > best_rank:
             best_png = candidate
             best_rank = rank
@@ -164,6 +211,27 @@ async def generate_best_photo(image_prompt: str) -> bytes | None:
             best_rank if best_rank >= 0 else "unknown",
         )
     return best_png
+
+
+async def rank_candidate(candidate: bytes, image_prompt: str, attempt: int) -> int:
+    """Score one candidate for ranking against its siblings.
+
+    Args:
+        candidate: PNG bytes of the generated candidate.
+        image_prompt: Scene the candidate is judged against.
+        attempt: Zero-based candidate index, for the log line.
+
+    Returns:
+        The judge's 0-10 score, or :data:`UNSCORED_RANK` when the judge could
+        not score it — below any real score, so an unscorable candidate loses
+        to a scored one but still ships when it is all there is.
+    """
+    score = await score_photo(candidate, image_prompt)
+    if score is None:
+        return UNSCORED_RANK
+    if score >= config.PHOTO_JUDGE_PASS_SCORE:
+        logger.info("Photo candidate %d passed the judge (score %d)", attempt + 1, score)
+    return score
 
 
 async def build_voice_payload(voice_script: str) -> SynthesizedVoice | None:

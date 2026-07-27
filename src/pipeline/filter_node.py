@@ -598,8 +598,9 @@ class MeaninglessFilterNode:
         not a reply to the bot's own message — a mirrored counter-insult in a
         running thread would just fuel the loop. A PHOTO_REQUEST at the full
         tier sets ``photo_request`` (the events layer launches generation
-        after the ack) plus a ``photo_in_flight`` peek of the single selfie
-        slot; at the brush-off tier it falls into the ``wind_down`` refusal.
+        after the ack) plus a ``photo_in_flight`` peek covering both image
+        flows (``selfie.image_generation_in_flight``); at the brush-off tier
+        it falls into the ``wind_down`` refusal.
 
         Args:
             state: Current pipeline state.
@@ -616,7 +617,7 @@ class MeaninglessFilterNode:
                 update["wind_down"] = True
         elif classification == "PHOTO_REQUEST" and tier == engagement_gate.FULL_TIER:
             update["photo_request"] = True
-            update["photo_in_flight"] = selfie.is_generation_in_flight()
+            update["photo_in_flight"] = selfie.image_generation_in_flight()
         elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:
             update["wind_down"] = True
         logger.debug(

@@ -9,11 +9,14 @@ the task never raises.
 
 One global generation slot guards the whole module: the imagegen service has
 a single worker shared with scheduled life posts, so a second chat request
-while one is rendering gets an «уже фоткаю» acknowledgement (the filter peeks
-``is_generation_in_flight``) and no second job. The peek happens at
-classification time and the acquire here, so two overlapping pipelines can
-both ack while only one generates; the loser logs and exits — a rare,
-low-stakes race (one user gets an ack with no photo).
+while one is rendering gets an «уже фоткаю» acknowledgement and no second
+job. The filter's peek combines this slot with
+``poster.is_post_in_flight()`` — a scheduled photo post holds the worker for
+minutes, and promising a selfie during one used to deliver a second image to
+the chat right after the post's own. The peek happens at classification time
+and the acquire here, so two overlapping pipelines can both ack while only
+one generates; the loser logs and exits — a rare, low-stakes race (one user
+gets an ack with no photo).
 """
 
 import random
@@ -26,6 +29,7 @@ from src import config, log
 from src.agent.middleware import ainvoke_with_backoff, strip_thinking
 from src.config.prompts import SELFIE_SCENE_SYSTEM
 from src.events.sending import send_and_store
+from src.life import poster
 from src.life.poster import generate_best_photo
 from src.store import unified_messages
 
@@ -57,13 +61,25 @@ generation_in_flight = False
 def is_generation_in_flight() -> bool:
     """Peek whether a chat-requested selfie is currently being generated.
 
-    Synchronous read used by the filter node to ack «уже фоткаю» instead of
-    promising a second photo.
-
     Returns:
-        True while :func:`deliver_selfie` holds the generation slot.
+        True while :func:`deliver_selfie` holds this module's slot.
     """
     return generation_in_flight
+
+
+def image_generation_in_flight() -> bool:
+    """Peek whether any image is being generated right now.
+
+    The authoritative "is the imagegen worker busy" answer, used by the
+    filter node to ack «уже фоткаю» instead of promising a photo it would
+    deliver on top of one already coming. Covers both flows that render
+    images: a chat-requested selfie and a scheduled photo life post, which
+    holds the worker for minutes at a time.
+
+    Returns:
+        True while either flow is producing an image.
+    """
+    return generation_in_flight or poster.is_post_in_flight()
 
 
 def build_scene_input(request_text: str, current_activity: str | None) -> str:

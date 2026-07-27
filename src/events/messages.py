@@ -209,10 +209,7 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
     Normal responses reply to the triggering message; when the trigger was a
     voice message or video note the reply goes out in kind as a voice note,
     degrading to text on any synthesis failure. Autonomous jokes
-    (``response_trigger == "humor"``) instead anchor to the message the comedian
-    cited, or go out un-anchored when there is no validated target; a cited
-    message deleted in the meantime degrades to un-anchored via
-    ``allow_sending_without_reply``.
+    (``response_trigger == "humor"``) go out via :func:`deliver_joke`.
 
     Args:
         final_state: Pipeline state after the graph run.
@@ -232,20 +229,39 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
         return notification_msg.message_id, msg.message_id, "text"
     await msg.chat.send_action("typing")
     if is_joke:
-        target = final_state.get("humor_reply_to_msg_id")
-        reply_parameters = None
-        if target is not None:
-            reply_parameters = ReplyParameters(message_id=target, allow_sending_without_reply=True)
-        sent = await msg.get_bot().send_message(
-            chat_id=msg.chat_id, text=clean, reply_parameters=reply_parameters
-        )
-        return sent.message_id, target, "text"
+        return await deliver_joke(final_state, msg, clean)
     if final_state["incoming"]["media_type"] in VOICE_REPLY_TRIGGER_MEDIA_TYPES:
         voice_message = await try_send_voice_reply(msg, clean)
         if voice_message is not None:
             return voice_message.message_id, msg.message_id, "voice"
     sent = await msg.reply_text(clean)
     return sent.message_id, msg.message_id, "text"
+
+
+async def deliver_joke(final_state: BotState, msg, clean: str) -> tuple[int, int | None, str]:
+    """Send an autonomous joke, anchored to the message the comedian cited.
+
+    Goes out un-anchored when there is no validated target; a cited message
+    deleted in the meantime degrades to un-anchored via
+    ``allow_sending_without_reply``.
+
+    Args:
+        final_state: Pipeline state after the graph run.
+        msg: The message that triggered the pipeline run.
+        clean: Markdown-stripped joke text.
+
+    Returns:
+        Tuple of the sent message id, the anchor message id (None when
+        un-anchored), and the media type (always ``"text"``).
+    """
+    target = final_state.get("humor_reply_to_msg_id")
+    reply_parameters = None
+    if target is not None:
+        reply_parameters = ReplyParameters(message_id=target, allow_sending_without_reply=True)
+    sent = await msg.get_bot().send_message(
+        chat_id=msg.chat_id, text=clean, reply_parameters=reply_parameters
+    )
+    return sent.message_id, target, "text"
 
 
 async def send_limit_notice(msg, chat_id: int, notice_text: str) -> None:

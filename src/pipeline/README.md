@@ -293,7 +293,9 @@ keep reciting the score. Store errors fail open to the full tier.
     │       mirrored counter-insult mid-thread never earns a fresh full
     │       comeback (that is what fuels roast-battle loops).
     │       PHOTO_REQUEST at this tier sets photo_request=True plus a
-    │       photo_in_flight peek of the single selfie slot: the worker is
+    │       photo_in_flight peek of both image flows (chat selfie and
+    │       scheduled life post — they share the imagegen worker, and a
+    │       photo post holds it for ~16 min): the worker is
     │       skipped, the reply is an in-character «ща сфоткаю» ack («уже
     │       фоткаю» when a selfie is already rendering), and after the ack is
     │       delivered the events layer fire-and-forgets
