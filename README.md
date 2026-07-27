@@ -140,6 +140,27 @@ Env knobs (set on the bot service in `docker-compose.yml`):
 - `ASYNCPG_LOG_LEVEL`, `TELEGRAM_APP_LOG_LEVEL`, `TELEGRAM_UPDATER_LOG_LEVEL` —
   per-library overrides (default WARNING in compose). `httpx`, `httpcore`,
   `telegram.ext.ExtBot` and `apscheduler` are always muted to WARNING.
+- `GROQ_LOG_LEVEL` — default `WARNING`. The Groq SDK logs whole request bodies at
+  DEBUG, and for the vision judge and the photo/sticker describers those bodies
+  embed a base64-encoded PNG — hundreds of KB of noise per call, which buries
+  everything else at `LOG_LEVEL=DEBUG`. Raise it to `DEBUG` only when debugging
+  the HTTP layer itself.
+
+#### Reading back what the bot said
+
+What the bot actually says is logged by the bot, not by the SDK. Every outgoing
+text shares the logger name `outgoing`, so one grep is a transcript:
+
+```
+docker compose logs bot | grep outgoing
+14.07 21:03:12 D 842137 outgoing         reply chat=-100123 Да не, я такое не сажаю…
+14.07 17:00:41 D -      outgoing         life:photo chat=-100123 Красил забор, вышло криво…
+```
+
+The first field is what went out — `reply`, `joke`, or `life:<format>` for a
+scheduled post. Voice posts log both halves (`[caption] … [spoken] …`), since the
+caption alone doesn't tell you what was said. These are DEBUG records, per the
+policy above; the canonical INFO line still carries only `len=`.
 
 The imagegen sidecar keeps uvicorn's own logging and is not affected.
 

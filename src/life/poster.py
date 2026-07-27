@@ -52,6 +52,7 @@ async def post_life_episode(bot, post_format: str) -> None:
     if sent_count == 0:
         logger.warning("Life post skipped: failed to send to any chat")
         return
+    logger.info("Life post sent as %s to %d chat(s)", episode.format, sent_count)
     await record_episode(episode)
 
 
@@ -142,6 +143,7 @@ async def generate_best_photo(image_prompt: str) -> bytes | None:
         call failed (service down) — the caller then degrades the post.
     """
     photo_prompt = f"{PHOTO_FRAMING_HINT}{image_prompt}, {CHARACTER_VISUAL_PROMPT}"
+    logger.debug("Photo generation prompt: %s", log.snippet(photo_prompt, log.OUTGOING_TEXT_LIMIT))
     best_png = None
     best_rank = -2
     for attempt in range(config.IMAGEGEN_CANDIDATES):
@@ -221,11 +223,29 @@ async def send_to_chat(bot, chat_id: int, episode: Episode, media: EpisodeMedia)
     """
     try:
         sent, media_type = await send_media(bot, chat_id, episode, media)
+        log.log_outgoing_text(f"life:{episode.format}", chat_id, chat_visible_text(episode))
         await record_sent_message(bot, chat_id, sent, media_type, episode)
         return True
     except Exception as error:
         logger.warning("Life post failed for chat %s: %s", chat_id, error)
         return False
+
+
+def chat_visible_text(episode: Episode) -> str:
+    """Return the episode text the chat actually reads or hears.
+
+    A voice post shows only its teaser but speaks the full script, so both
+    are returned: the caption alone would not tell you what Жора said.
+
+    Args:
+        episode: The episode being sent.
+
+    Returns:
+        The text worth reading back in the logs for this episode's format.
+    """
+    if episode.format == VOICE_FORMAT:
+        return f"[caption] {episode.voice_teaser} [spoken] {episode.voice_script}"
+    return episode.episode_text
 
 
 async def send_media(bot, chat_id: int, episode: Episode, media: EpisodeMedia) -> tuple:

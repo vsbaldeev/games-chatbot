@@ -224,12 +224,14 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
         to (None for an un-anchored joke), and the sent media type
         ("text" or "voice").
     """
+    is_joke = final_state.get("response_trigger") == "humor"
+    log.log_outgoing_text("joke" if is_joke else "reply", msg.chat_id, clean)
     notification_msg = final_state.get("search_notification_msg")
     if notification_msg:
         await notification_msg.edit_text(clean)
         return notification_msg.message_id, msg.message_id, "text"
     await msg.chat.send_action("typing")
-    if final_state.get("response_trigger") == "humor":
+    if is_joke:
         target = final_state.get("humor_reply_to_msg_id")
         reply_parameters = None
         if target is not None:

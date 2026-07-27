@@ -29,6 +29,22 @@ CORR_WIDTH = 6
 SNIPPET_LIMIT = 120
 MUTED_LOGGERS = ("httpx", "httpcore", "telegram.ext.ExtBot", "apscheduler")
 
+# The Groq SDK logs whole request bodies at DEBUG. For the vision judge and
+# the sticker/photo describers those bodies embed a base64-encoded PNG, so a
+# single call buries the run in hundreds of KB of unreadable payload. Muted by
+# default and overridable, like the other per-library knobs — what the bot
+# actually said is logged by the bot itself (see log_outgoing_text).
+GROQ_LOGGER = "groq"
+
+# Every outgoing bot text shares this logger name, so one grep reads back as
+# a transcript of what the bot said. Its limit is generous enough to hold a
+# whole life post (episode_text ≤ 450, or a voice teaser plus its ≤ 500-char
+# spoken script) without truncation.
+OUTGOING_LOGGER = "outgoing"
+OUTGOING_TEXT_LIMIT = 700
+
+outgoing_logger = logging.getLogger(OUTGOING_LOGGER)
+
 
 def bind_correlation_id(value: str) -> None:
     """Bind a correlation id to the current asyncio/contextvars context.
@@ -59,6 +75,27 @@ def snippet(text: str | None, limit: int = SNIPPET_LIMIT) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - 1] + "…"
+
+
+def log_outgoing_text(kind: str, chat_id: int, text: str) -> None:
+    """Log a piece of text the bot is sending to a chat.
+
+    The useful half of an LLM call is what the bot ended up saying, not the
+    request body it was said with — so the SDK's payload logging is muted
+    (:data:`GROQ_LOGGER`) and the outgoing text is logged here instead. All
+    such records share one logger name, so ``docker compose logs bot | grep
+    outgoing`` is a transcript of everything the bot said.
+
+    DEBUG, not INFO: the canonical INFO line stays metadata-only, and chat
+    content appears only at DEBUG (see the README's Logging section).
+
+    Args:
+        kind: What is going out — ``reply``, ``joke``, ``life:photo``, …
+        chat_id: Destination chat.
+        text: The exact text being sent; collapsed to one line and truncated
+            to :data:`OUTGOING_TEXT_LIMIT`.
+    """
+    outgoing_logger.debug("%s chat=%s %s", kind, chat_id, snippet(text, OUTGOING_TEXT_LIMIT))
 
 
 def shorten_logger_name(name: str) -> str:
@@ -182,6 +219,8 @@ def setup() -> None:
     logging.getLogger("telegram.ext.Application").setLevel(tg_app_level)
     tg_updater_level = logging.getLevelName(os.getenv("TELEGRAM_UPDATER_LOG_LEVEL", "INFO").upper())
     logging.getLogger("telegram.ext.Updater").setLevel(tg_updater_level)
+    groq_level = logging.getLevelName(os.getenv("GROQ_LOG_LEVEL", "WARNING").upper())
+    logging.getLogger(GROQ_LOGGER).setLevel(groq_level)
 
 
 def get_logger(name: str) -> logging.Logger:
