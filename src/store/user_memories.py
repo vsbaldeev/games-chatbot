@@ -20,11 +20,11 @@ from src.store import db as database
 
 MAX_FACTS_PER_USER = 30
 
-# Prefixes of counter-tally facts (see format_insult_fact / format_hack_fact).
-# These are bookkeeping for weekly roles and roasts, not conversational
-# memory: surfacing them in ordinary replies reads as the bot holding a
-# grudge, so reply-context assembly filters them out via is_counter_fact.
-COUNTER_FACT_PREFIXES = ("Оскорблял бота", "Пытался взломать бота")
+# Prefixes of counter-tally facts (see format_hack_fact). These are
+# bookkeeping for weekly roles and roasts, not conversational memory:
+# surfacing them in ordinary replies reads as the bot holding a grudge, so
+# reply-context assembly filters them out via is_counter_fact.
+COUNTER_FACT_PREFIXES = ("Пытался взломать бота",)
 
 # Facts untouched for this long are stale residue: real, current facts get
 # their updated_at refreshed by the dedup path whenever they are re-observed.
@@ -128,7 +128,7 @@ def pluralize_times(count: int) -> str:
 
 
 def is_counter_fact(fact: str) -> bool:
-    """Tell whether a stored fact is a counter tally (insults, hack attempts).
+    """Tell whether a stored fact is a counter tally (hack attempts).
 
     Args:
         fact: A stored ``user_memories`` fact string.
@@ -150,18 +150,6 @@ def format_hack_fact(count: int) -> str:
         Fact string, e.g. ``"Пытался взломать бота 3 раза"``.
     """
     return f"Пытался взломать бота {count} {pluralize_times(count)}"
-
-
-def format_insult_fact(count: int) -> str:
-    """Format the bot-insult counter fact text.
-
-    Args:
-        count: Total number of recorded insults aimed at the bot.
-
-    Returns:
-        Fact string, e.g. ``"Оскорблял бота 5 раз"``.
-    """
-    return f"Оскорблял бота {count} {pluralize_times(count)}"
 
 
 async def upsert_counter_fact(
@@ -212,15 +200,6 @@ async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> N
     )
 
 
-async def upsert_insult_attempt(*, chat_id: int, user_id: int, username: str) -> None:
-    """Increment (or create) the bot-insult counter fact for this user."""
-    await upsert_counter_fact(
-        chat_id=chat_id, user_id=user_id, username=username,
-        like_pattern="Оскорблял бота%", format_fact=format_insult_fact,
-    )
-
-
-
 async def upsert_facts(
     *, chat_id: int, user_id: int, username: str,
     facts: list[str], embeddings: list[list[float]]
@@ -259,8 +238,8 @@ async def upsert_facts(
 async def cleanup_stale(*, days: int = FACT_RETENTION_DAYS) -> int:
     """Delete facts whose ``updated_at`` is older than ``days`` days.
 
-    Applies to every fact, counter facts (insults, hack attempts) included —
-    a counter untouched for the whole window is stale by the same standard.
+    Applies to every fact, counter facts (hack attempts) included — a
+    counter untouched for the whole window is stale by the same standard.
     Genuinely repeated facts survive because the dedup path refreshes
     ``updated_at`` on every re-observation.
 

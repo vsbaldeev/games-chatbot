@@ -61,11 +61,11 @@ ACTIVITY_QUESTION_RE = re.compile(
 
 
 def keep_conversational_facts(facts: list[str]) -> list[str]:
-    """Drop counter-tally facts (insult/hack-attempt stats) from a fact list.
+    """Drop counter-tally facts (hack-attempt stats) from a fact list.
 
     The tallies exist for weekly roles and roasts; in an ordinary reply the
-    bot bringing up «Оскорблял бота N раз» reads as holding a grudge, so
-    they never enter the reply prompt.
+    bot bringing them up reads as holding a grudge, so they never enter the
+    reply prompt.
 
     Args:
         facts: Stored ``user_memories`` fact strings for one user.

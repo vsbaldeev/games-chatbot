@@ -34,8 +34,7 @@ how it entered the pipeline:
     acts only after a stronger model confirms it on the same input
     (disagreement or a confirmation error resolves to silence); everything
     else is dropped silently — no emoji reaction, because the bot was never
-    addressed and reacting would be noise. The insult counter fact is thus
-    recorded only for addressed or double-confirmed insults.
+    addressed and reacting would be noise.
   - Media whose transcription/vision processing produced no text: explicitly
     addressed messages get an honest canned «не расслышал / не разглядел»
     reply (no LLM call); random-trigger media gets an emoji reaction and
@@ -53,12 +52,9 @@ the reaction: a full reply, a short LLM-generated in-character brush-off
 (``wind_down`` state flag), a bored emoji reaction, or silence — so any
 sustained conversation fades out like a person losing interest. Counter-insults
 that reply to the bot's own message never earn a fresh full comeback (that is
-what fuels roast-battle loops). Every confirmed insult also increments the
-«Оскорблял бота N раз» counter fact in user_memories, which feeds weekly roles
-and other engagement features.
+what fuels roast-battle loops).
 
-Emoji reactions and fact writes fire via asyncio.create_task and do not block
-the pipeline.
+Emoji reactions fire via asyncio.create_task and do not block the pipeline.
 """
 
 import asyncio
@@ -82,7 +78,7 @@ from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import is_explicitly_addressed
 from src.pipeline.state import BotState
-from src.store import unified_messages, user_memories
+from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -542,8 +538,7 @@ class MeaninglessFilterNode:
 
         Every classification spends budget (hostility and banter weigh more
         than a meaningful turn), and the post-charge tier decides the shape
-        of the reaction. A confirmed insult also increments the durable
-        «Оскорблял бота N раз» counter fact regardless of tier.
+        of the reaction.
 
         Args:
             state: Current pipeline state.
@@ -557,8 +552,6 @@ class MeaninglessFilterNode:
         tier = await engagement_gate.register_signal(
             chat_id=msg["chat_id"], user_id=msg["user_id"], classification=classification,
         )
-        if classification == "BOT_INSULT":
-            asyncio.create_task(self.__record_insult(msg))
         update = self.__apply_tier(state, classification, tier)
         return {"filter_verdict": classification, "engagement_tier": tier, **update}
 
@@ -708,21 +701,6 @@ class MeaninglessFilterNode:
                 user_message=text,
             ))
         return {"should_respond": False, "drop_reason": "overheard_dropped"}
-
-    async def __record_insult(self, msg: dict) -> None:
-        """Increment the bot-insult counter fact for the insulter.
-
-        Args:
-            msg: IncomingMessage dict of the insulting message.
-        """
-        try:
-            await user_memories.upsert_insult_attempt(
-                chat_id=msg["chat_id"],
-                user_id=msg["user_id"],
-                username=msg["username"],
-            )
-        except Exception as err:
-            logger.warning("Failed to record insult fact for @%s: %s", msg["username"], err)
 
     async def __classify(self, text: str, system_prompt: str) -> str:
         """Classify the message text with the filter LLM.
