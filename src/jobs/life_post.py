@@ -1,65 +1,60 @@
-"""Scheduled job: post a life-story episode from Жора's life, twice a week.
+"""Scheduled job: post an episode from Жора's life on a fixed weekly schedule.
 
-Posts land at random daytime moments in Moscow Time — never at
-night, so a proactive post never lands while chat members are asleep (the
-reactive pipeline still answers mentions and replies around the clock; this
-job only governs proactive posting). The very first post ever fires right
-after deployment; after that, a deterministic per-week random plan decides
-which two days post, mirroring the seeded-plan pattern used elsewhere for
-weekly variety without a schedule table.
+Three posts a week, each at 17:00 Moscow Time, each in the format this
+schedule assigns:
+
+===========  =======  ==================================================
+Monday       photo    generated frame, ``episode_text`` as its caption
+Wednesday    voice    spoken story, ``voice_teaser`` as its caption
+Saturday     story    plain text
+===========  =======  ==================================================
+
+The format is a scheduling decision, not a creative one. It used to be the
+episode writer's free choice among the offered formats, constrained only by
+"don't repeat the previous post" — a rule that endless story/voice
+alternation satisfies forever, so ``photo`` was never once picked in
+production. Assigning the format here guarantees each one gets its slot.
+
+The very first post after a fresh deployment fires right away; a slot the
+bot was down for is recovered on startup.
 """
 
 import datetime
-import random
 from zoneinfo import ZoneInfo
 
 from telegram.ext import ContextTypes
 
 from src import log
 from src.life.poster import post_life_episode
+from src.life.writer import PHOTO_FORMAT, STORY_FORMAT, VOICE_FORMAT
 from src.store import bot_memories
 
 logger = log.get_logger(__name__)
 
 LIFE_POST_TIMEZONE = ZoneInfo("Europe/Moscow")
-LIFE_POST_WINDOW = (10, 22)  # local hours [start, end) — no night posts
-LIFE_POSTS_PER_WEEK = 2
+
+# Keyed by datetime.weekday() — Monday is 0. Days absent from the map post
+# nothing, so the number of posts per week is just this table's size.
+WEEKLY_SCHEDULE: dict[int, str] = {
+    0: PHOTO_FORMAT,
+    2: VOICE_FORMAT,
+    5: STORY_FORMAT,
+}
 
 # Moscow Time is a fixed UTC+3 offset (no DST), but APScheduler resolves this
 # tzinfo correctly either way (see JobQueue.run_daily), so the job reliably
-# fires at 10:00 local time year-round.
-LIFE_POST_RUN_TIME = datetime.time(hour=LIFE_POST_WINDOW[0], minute=0, tzinfo=LIFE_POST_TIMEZONE)
+# fires at 17:00 local time year-round.
+LIFE_POST_RUN_TIME = datetime.time(hour=17, minute=0, tzinfo=LIFE_POST_TIMEZONE)
+
+# Catch-up only: the scheduled slot is always 17:00, but a bot that starts at
+# 04:00 owing a missed post must not wake the chat to deliver it.
+LIFE_POST_WINDOW = (10, 22)  # local hours [start, end)
+
+# A fresh deployment's opener introduces Жора to the chat, so it is plain
+# text: there is no canon yet for a photo to depict or a voice note to tease.
+OPENER_FORMAT = STORY_FORMAT
 
 CATCH_UP_DELAY_SECONDS = 60
-
-
-def week_plan(now: datetime.datetime) -> list[datetime.datetime]:
-    """Return this ISO week's planned post moments, deterministic for the week.
-
-    Args:
-        now: A timezone-aware moment in Moscow Time; only its ISO
-            year/week identify the plan, so any moment during the week
-            returns the same result.
-
-    Returns:
-        ``LIFE_POSTS_PER_WEEK`` timezone-aware moments, chronologically
-        sorted, each a random minute inside :data:`LIFE_POST_WINDOW` on a
-        random day of that ISO week.
-    """
-    iso_year, iso_week, _ = now.isocalendar()
-    rng = random.Random(f"life-{iso_year}-{iso_week}")
-    days = rng.sample(range(7), LIFE_POSTS_PER_WEEK)
-    start_hour, end_hour = LIFE_POST_WINDOW
-    window_minutes = (end_hour - start_hour) * 60
-    week_start = (now - datetime.timedelta(days=now.isoweekday() - 1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    moments = [
-        week_start
-        + datetime.timedelta(days=day, hours=start_hour, minutes=rng.randrange(window_minutes))
-        for day in days
-    ]
-    return sorted(moments)
 
 
 def next_window_start(now: datetime.datetime) -> datetime.datetime:
@@ -80,49 +75,65 @@ def next_window_start(now: datetime.datetime) -> datetime.datetime:
     return today_start if now.hour < start_hour else today_start + datetime.timedelta(days=1)
 
 
-def most_recent_due_slot(now: datetime.datetime) -> datetime.datetime | None:
-    """Return the latest planned slot at or before ``now``.
-
-    Checks both this and the previous ISO week's plan, since a slot near a
-    week boundary can belong to either.
+def most_recent_due_slot(now: datetime.datetime) -> tuple[datetime.datetime, str] | None:
+    """Return the latest scheduled slot at or before ``now``, with its format.
 
     Args:
         now: Current timezone-aware moment in Moscow Time.
 
     Returns:
-        The latest planned moment at/before ``now``, or None if every
-        candidate slot is still in the future.
+        ``(moment, post_format)`` for the most recent slot already due, or
+        None when :data:`WEEKLY_SCHEDULE` is empty. Looks back 8 days so a
+        today-but-not-yet-17:00 slot still resolves to the previous one.
     """
-    candidates = week_plan(now) + week_plan(now - datetime.timedelta(days=7))
-    due = [moment for moment in candidates if moment <= now]
-    return max(due) if due else None
+    for days_back in range(8):
+        day = now - datetime.timedelta(days=days_back)
+        post_format = WEEKLY_SCHEDULE.get(day.weekday())
+        if post_format is None:
+            continue
+        slot = day.replace(
+            hour=LIFE_POST_RUN_TIME.hour, minute=LIFE_POST_RUN_TIME.minute,
+            second=0, microsecond=0,
+        )
+        if slot <= now:
+            return slot, post_format
+    return None
 
 
 async def run_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """JobQueue callback that actually sends the scheduled post."""
-    await post_life_episode(context.bot)
+    """JobQueue callback that actually sends a deferred post.
+
+    The format travels in ``job.data`` — the slot it was deferred from
+    decides it, not the moment it finally runs.
+    """
+    await post_life_episode(context.bot, context.job.data)
 
 
-async def schedule_deferred_post(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Post now if inside the daytime window, otherwise defer to the next window start."""
+async def schedule_deferred_post(context: ContextTypes.DEFAULT_TYPE, post_format: str) -> None:
+    """Post now if inside the daytime window, otherwise defer to the next window start.
+
+    Args:
+        context: Job context supplying the queue to schedule on.
+        post_format: Format the deferred post must use.
+    """
     now = datetime.datetime.now(LIFE_POST_TIMEZONE)
     target = next_window_start(now)
     delay_seconds = max(0, (target - now).total_seconds())
-    context.job_queue.run_once(run_post_job, when=delay_seconds)
+    context.job_queue.run_once(run_post_job, when=delay_seconds, data=post_format)
 
 
 async def life_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Post today's scheduled episode, if today is one of this week's planned days.
+    """Post today's episode when today is a scheduled day.
 
-    Registered to run daily at the window start (:data:`LIFE_POST_RUN_TIME`);
-    schedules a one-off run at the planned minute so the post lands at an
-    organic-feeling time rather than exactly on the hour.
+    Registered to run daily at :data:`LIFE_POST_RUN_TIME`; days missing from
+    :data:`WEEKLY_SCHEDULE` return without posting.
     """
     now = datetime.datetime.now(LIFE_POST_TIMEZONE)
-    for slot in week_plan(now):
-        if slot.date() == now.date():
-            delay_seconds = max(0, (slot - now).total_seconds())
-            context.job_queue.run_once(run_post_job, when=delay_seconds)
+    post_format = WEEKLY_SCHEDULE.get(now.weekday())
+    if post_format is None:
+        return
+    logger.info("Scheduled life post due — format %s", post_format)
+    await post_life_episode(context.bot, post_format)
 
 
 async def catch_up_life_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,18 +142,22 @@ async def catch_up_life_post_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     When no episode has ever been posted, this is a fresh deployment: the
     very first life post fires now (deferred to the next daytime window if
     started at night). Otherwise, recovers a scheduled slot the bot was down
-    for, using the same night-deferral rule.
+    for, in that slot's own format.
     """
     latest_posted_at = await bot_memories.get_latest_posted_at()
     if latest_posted_at is None:
         logger.info("No life post has ever been sent — posting the deployment opener")
-        await schedule_deferred_post(context)
+        await schedule_deferred_post(context, OPENER_FORMAT)
         return
 
     now = datetime.datetime.now(LIFE_POST_TIMEZONE)
-    last_due = most_recent_due_slot(now)
-    if last_due is not None and latest_posted_at < last_due.timestamp():
-        logger.info("Missed scheduled life post (%s) — running startup catch-up", last_due)
-        await schedule_deferred_post(context)
+    due = most_recent_due_slot(now)
+    if due is not None and latest_posted_at < due[0].timestamp():
+        last_due, post_format = due
+        logger.info(
+            "Missed scheduled life post (%s, format %s) — running startup catch-up",
+            last_due, post_format,
+        )
+        await schedule_deferred_post(context, post_format)
         return
     logger.info("Life posts up to date; skipping startup catch-up")

@@ -26,12 +26,11 @@ logger = log.get_logger(__name__)
 EPISODE_CONTEXT_EPISODES = 10
 EPISODE_CONTEXT_ACTIVITIES = 7
 CURRENT_ACTIVITY_MAX_CHARS = 80
-# Formats grow as later steps ship: video_note is next. The photo format is
-# only offered when the imagegen service is configured (see poster.live_formats).
+# Formats grow as later steps ship: video_note is next. Which format a post
+# uses is a scheduling decision — see WEEKLY_SCHEDULE in src/jobs/life_post.py.
 STORY_FORMAT = "story"
 VOICE_FORMAT = "voice"
 PHOTO_FORMAT = "photo"
-ALL_FORMATS: tuple[str, ...] = (STORY_FORMAT, VOICE_FORMAT, PHOTO_FORMAT)
 WRITE_ATTEMPTS = 2
 
 
@@ -51,7 +50,8 @@ class Episode:
             lure, never a summary of the episode.
         current_activity: Present-tense activity phrase answering "what are
             you doing right now", or None when missing or over-length.
-        format: The chosen post format.
+        format: The post format assigned by the weekly schedule, or the
+            format it was demoted to when its media build failed.
     """
 
     episode_text: str
@@ -145,8 +145,7 @@ def build_episode_prompt(
     recent_episodes: list[dict],
     facts: list[str],
     recent_activities: list[tuple[str, float]],
-    previous_format: str | None,
-    allowed_formats: tuple[str, ...],
+    post_format: str,
     mode: str,
     mention: tuple[str, str] | None,
 ) -> str:
@@ -158,9 +157,8 @@ def build_episode_prompt(
         facts: Canon facts to ground continuity (newest plus sampled older).
         recent_activities: Recent ``(phrase, posted_at)`` pairs, newest
             first, for season-consistent continuity.
-        previous_format: Format of the most recent post, or None when there
-            is no history yet.
-        allowed_formats: Formats the writer may currently choose from.
+        post_format: Format this post ships in, assigned by the weekly
+            schedule — the writer writes for it rather than picking one.
         mode: ``engagement.SOLO`` or ``engagement.MEMBER`` — how this post
             should engage the chat (see :func:`build_engagement_lines`).
         mention: ``(username, fact)`` when mode is ``MEMBER``; otherwise None.
@@ -171,9 +169,7 @@ def build_episode_prompt(
     now = datetime.datetime.now(calendar_ru.MOSCOW_TZ)
     parts = build_activity_lines(recent_activities, now)
     parts += build_history_lines(recent_episodes, facts)
-    parts.append(f"Доступные форматы: {', '.join(allowed_formats)}.")
-    if previous_format:
-        parts.append(f"Предыдущий пост был в формате «{previous_format}» — выбери другой, если можно.")
+    parts.append(f"Формат этого поста: {post_format}.")
     parts.append("")
     parts.extend(build_engagement_lines(mode, mention))
     parts.append("Напиши следующий эпизод. Ответь строго одним JSON-объектом.")
@@ -198,12 +194,17 @@ def coerce_current_activity(value: object) -> str | None:
     return trimmed
 
 
-def parse_episode(data: dict, allowed_formats: tuple[str, ...]) -> Episode | None:
+def parse_episode(data: dict, post_format: str) -> Episode | None:
     """Validate and coerce a parsed episode JSON object into an Episode.
+
+    Every episode carries all three bodies (text, image prompt, voice
+    script) whatever its format: that is what lets ``resolve_media`` demote
+    a failed photo or voice post to a text story without rewriting it.
 
     Args:
         data: Parsed JSON dict from the model.
-        allowed_formats: Formats currently offered to the writer.
+        post_format: Format assigned to this post; stamped onto the Episode
+            rather than read from the model's output.
 
     Returns:
         The validated Episode, or None when a required field is missing or
@@ -222,9 +223,6 @@ def parse_episode(data: dict, allowed_formats: tuple[str, ...]) -> Episode | Non
         return None
     if len(voice_teaser) > EPISODE_TEASER_MAX_CHARS:
         return None
-    post_format = str(data.get("format") or "").strip()
-    if post_format not in allowed_formats:
-        post_format = allowed_formats[0]
     return Episode(
         episode_text=episode_text,
         image_prompt=image_prompt,
@@ -258,11 +256,12 @@ class EpisodeWriterAgent:
             "EpisodeWriterAgent initialized with model: %s", config.EPISODE_MODEL_FALLBACKS[0]
         )
 
-    async def write_episode(self, allowed_formats: tuple[str, ...] = ALL_FORMATS) -> Episode | None:
+    async def write_episode(self, post_format: str) -> Episode | None:
         """Write the next life episode, retrying once on a malformed response.
 
         Args:
-            allowed_formats: Formats currently live; the writer must pick one.
+            post_format: Format this post ships in, assigned by the weekly
+                schedule (``src/jobs/life_post.py``).
 
         Returns:
             The generated Episode, or None when both the model call and the
@@ -277,24 +276,23 @@ class EpisodeWriterAgent:
         recent_episodes = await bot_memories.get_recent_episodes(EPISODE_CONTEXT_EPISODES)
         facts = await bot_memories.get_writer_facts()
         recent_activities = await bot_memories.get_recent_activities(EPISODE_CONTEXT_ACTIVITIES)
-        previous_format = recent_episodes[0]["post_format"] if recent_episodes else None
         mode, mention = await choose_mode()
         prompt = build_episode_prompt(
-            recent_episodes, facts, recent_activities, previous_format, allowed_formats, mode, mention
+            recent_episodes, facts, recent_activities, post_format, mode, mention
         )
         for attempt in range(WRITE_ATTEMPTS):
-            episode = await self.__attempt(prompt, allowed_formats)
+            episode = await self.__attempt(prompt, post_format)
             if episode is not None:
                 return episode
             logger.warning("Episode writer produced an unusable response (attempt %d)", attempt + 1)
         return None
 
-    async def __attempt(self, prompt: str, allowed_formats: tuple[str, ...]) -> Episode | None:
+    async def __attempt(self, prompt: str, post_format: str) -> Episode | None:
         """Run one model call and parse its output into an Episode.
 
         Args:
             prompt: Assembled human-turn prompt.
-            allowed_formats: Formats currently offered to the writer.
+            post_format: Format assigned to this post.
 
         Returns:
             The parsed Episode, or None on any parse/validation failure.
@@ -304,7 +302,7 @@ class EpisodeWriterAgent:
         data = load_json_object(raw, context="Episode generation")
         if data is None:
             return None
-        return parse_episode(data, allowed_formats)
+        return parse_episode(data, post_format)
 
     async def reset_model_index(self) -> None:
         """Rebuild the executor, resetting middleware state to the primary model."""

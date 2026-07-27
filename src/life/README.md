@@ -1,24 +1,29 @@
-Жора's scheduled life posts — the character's own story, told to every chat twice a
-week and remembered as canon — plus a silent daily activity refresh that keeps
-"what are you doing right now" fresh between posts.
+Жора's scheduled life posts — the character's own story, told to every chat three
+times a week and remembered as canon — plus a silent daily activity refresh that
+keeps "what are you doing right now" fresh between posts.
 
 ## Flow
 
 ```
-src/jobs/life_post.py (schedule) ──► src/life/poster.py:post_life_episode(bot)
+src/jobs/life_post.py (schedule + format) ──►
+                    src/life/poster.py:post_life_episode(bot, post_format)
     │
-    ├─ src/life/writer.py: EpisodeWriterAgent.write_episode()
+    ├─ supported_format: downgrade photo → story when IMAGEGEN_URL is unset
+    │
+    ├─ src/life/writer.py: EpisodeWriterAgent.write_episode(post_format)
     │      reads bot_memories.get_recent_episodes(10) + get_writer_facts()
     │      (20 newest + 10 sampled older) + get_recent_activities(7);
     │      src/life/engagement.choose_mode() picks how this post engages
     │      the chat (see below) → prompts EPISODE_WRITER_SYSTEM (today's
     │      date/season + dated recent activities via calendar_ru, for
-    │      season-appropriate and non-contradicting episodes) → strict JSON
-    │      {episode_text, image_prompt, voice_script, voice_teaser,
-    │        current_activity, format} → parse_episode validates lengths
-    │        (episode_text ≤ 450, voice_script ≤ 500, voice_teaser ≤ 120)
-    │        and required fields; one retry on a malformed/invalid
-    │        response, then None (slot skipped, catch-up retries later)
+    │      season-appropriate and non-contradicting episodes, plus «Формат
+    │      этого поста: X») → strict JSON {episode_text, image_prompt,
+    │        voice_script, voice_teaser, current_activity} → parse_episode
+    │        validates lengths (episode_text ≤ 450, voice_script ≤ 500,
+    │        voice_teaser ≤ 120) and required fields, and stamps the
+    │        scheduled format onto the Episode; one retry on a
+    │        malformed/invalid response, then None (slot skipped, catch-up
+    │        retries later)
     │
     ├─ resolve_media: build the episode's media once, before the fan-out —
     │      voice: synthesize the spoken story (prepare_tts_text +
@@ -104,8 +109,9 @@ one — exactly like a real chat post where the story is in the text and
 the attached photo shows one detail of it. The character's appearance is deliberately absent from
 `image_prompt`: the fixed `CHARACTER_VISUAL_PROMPT` descriptor is prepended
 at generation time, so every selfie shares wardrobe/beard/style while the
-scene tracks the episode. The photo format is only offered to the writer
-when `IMAGEGEN_URL` is configured (`live_formats()`).
+scene tracks the episode. When `IMAGEGEN_URL` is not configured, the Monday
+photo slot is written as a text story up front (`supported_format()`) rather
+than written for a photo that would then have to be demoted.
 
 A fourth layer lives on the service side: `CHARACTER_VISUAL_PROMPT +
 image_prompt` routinely exceeds CLIP's 77-token limit, and a plain
@@ -168,27 +174,49 @@ generates — the loser logs and exits; rare and low-stakes by design.
 
 `voice → story`, `photo → story`: media payloads are built once before the
 fan-out (`resolve_media`), and any media failure demotes the episode to a
-text story — the recorded format is the demoted one, so the
-never-repeat-format rule sees what was actually posted. Step 8 extends the
-mapping with `video_note → voice → story`; a media failure always demotes
-the post, never kills it.
+text story — the recorded format is the demoted one, so canon reflects what
+the chat actually saw. This is why every episode carries all three bodies
+(`episode_text`, `image_prompt`, `voice_script`) regardless of its format:
+a demotion never needs a second model call. Step 8 extends the mapping with
+`video_note → voice → story`; a media failure always demotes the post, never
+kills it.
+
+Note the blind spot this creates in canon: a Monday photo post that degraded
+is stored as `story`, and one that generated fine but failed to send to every
+chat is stored as nothing at all (`post_life_episode` returns before
+`record_episode`). Counting `post_format` in `bot_memories` therefore cannot
+tell you whether the photo path ran — check the imagegen service logs for
+that.
 
 ## Scheduling — `src/jobs/life_post.py`
 
-- Exactly `LIFE_POSTS_PER_WEEK = 2` posts per ISO week, on random days at a
-  random minute inside `LIFE_POST_WINDOW` (10:00–22:00, Moscow Time —
-  `Europe/Moscow`, fixed UTC+3, no DST). `week_plan(now)` is a deterministic seeded plan
-  (`random.Random(f"life-{iso_year}-{iso_week}")`) — no schedule table, and
-  calling it at any point during the week returns the same plan.
-- `life_post_job` runs daily at the window start (`LIFE_POST_RUN_TIME`,
-  10:00 local) and schedules a one-off `run_once` at the planned minute when
-  today is one of the week's two planned days.
+- Three posts a week on fixed days, all at 17:00 Moscow Time
+  (`LIFE_POST_RUN_TIME`; `Europe/Moscow` is a fixed UTC+3 offset, no DST).
+  `WEEKLY_SCHEDULE` maps `datetime.weekday()` → format and is the single
+  source of truth for both cadence and format:
+
+  | Day       | Format  | What the chat sees                        |
+  |-----------|---------|-------------------------------------------|
+  | Monday    | `photo` | generated frame, `episode_text` as caption |
+  | Wednesday | `voice` | voice note, `voice_teaser` as caption      |
+  | Saturday  | `story` | plain text                                 |
+
+  Days absent from the map post nothing, so the posts-per-week count is just
+  the table's size — adding a day is a one-line change.
+- `life_post_job` runs daily at 17:00 and returns immediately on unscheduled
+  days; on scheduled days it posts in that day's format.
 - `catch_up_life_post_job` runs once at startup (+60s):
   - no episode has ever been posted → this is a fresh deployment; the very
-    first life post is scheduled immediately (or deferred to the next
-    daytime window if the bot started at night) — Жора's opener.
-  - otherwise, recovers a missed scheduled slot the same way, comparing
-    `bot_memories.get_latest_posted_at()` against `most_recent_due_slot`.
+    first life post is scheduled immediately — Жора's opener, always
+    `OPENER_FORMAT` (`story`), since there is no canon yet for a photo to
+    depict or a voice note to tease.
+  - otherwise, recovers a missed slot in **that slot's own format**, comparing
+    `bot_memories.get_latest_posted_at()` against `most_recent_due_slot`, which
+    returns `(moment, format)`. The format travels to the deferred job in
+    `job.data`, so the slot decides it, not the moment the post finally runs.
+  - a catch-up landing outside `LIFE_POST_WINDOW` (10:00–22:00) is deferred to
+    the next window start: the scheduled slot is always 17:00, but a bot that
+    restarts at 04:00 owing a post must not wake the chat to deliver it.
 - Night is quiet hours for **proactive** posts only — the reactive pipeline
   (mentions, replies) is untouched and answers around the clock.
 
@@ -207,7 +235,7 @@ unchanged by that gate.
 
 ## Daily activity refresh — `src/life/activity.py`, `src/jobs/daily_activity.py`
 
-Life posts land only twice a week, so between them `current_activity` used
+Life posts land only three times a week, so between them `current_activity` used
 to sit frozen for days (the exact "рубит дрова for a week" bug this refresh
 fixes) and then go stale and get improvised inconsistently. A lightweight
 daily job closes that gap without ever posting to chat:

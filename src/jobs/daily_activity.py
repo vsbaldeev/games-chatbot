@@ -1,10 +1,9 @@
 """Scheduled job: silently refresh Жора's current activity once a day.
 
-Runs at :data:`DAILY_ACTIVITY_RUN_TIME` (09:30 Moscow Time), before the
-life-post window opens at 10:00 (``src/jobs/life_post.py``), so a life post
-scheduled for later today always ends up as the newer ``current_activity``
-row. Posts nothing to chat — see ``src/life/activity.py`` for the generation
-flow.
+Runs at :data:`DAILY_ACTIVITY_RUN_TIME` (09:30 Moscow Time), well before the
+17:00 life-post slot (``src/jobs/life_post.py``), so a life post landing
+later today always ends up as the newer ``current_activity`` row. Posts
+nothing to chat — see ``src/life/activity.py`` for the generation flow.
 """
 
 import datetime

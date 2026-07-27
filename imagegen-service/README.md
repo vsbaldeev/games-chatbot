@@ -23,10 +23,12 @@ action the prompt described. Side-by-side at the same seed (MPS, local),
 20-step DPM++ 2M Karras @ CFG 6 rendered the multi-subject test scene
 coherently, and 28 steps @ CFG 7 added nothing visible over 20. Current
 config: `DPMSolverMultistepScheduler` (`use_karras_sigmas=True`,
-`algorithm_type="dpmsolver++"`), 20 steps, `guidance_scale` 6 — estimated
-~5–10 min per 512² image on the 4 vCPU host (confirm at deploy; posts are
-scheduled twice a week, so minutes-per-image is an accepted cost, and the
-client deadline is 1200 s per generation).
+`algorithm_type="dpmsolver++"`), 20 steps, `guidance_scale` 6 — **measured on
+the 4 vCPU host: ~3 min per 512² image** (~9 s/step; three consecutive
+candidates ran 3:08, 2:56 and 3:00), comfortably inside the client's 1200 s
+per-generation deadline. A photo post is one weekly slot of `IMAGEGEN_CANDIDATES`
+= 3 candidates, so it occupies the single worker for ~10 min; a chat selfie
+requested in that window gets the «уже фоткаю» ack instead of a second job.
 
 Adherence techniques researched and rejected for this host: ELLA (T5-XL
 adapter, biggest SD1.5 prompt-following gain, but +2.6 GB weights / ~2-3 GB
@@ -100,10 +102,19 @@ loop are the layers that attack it.
 - **Lazy load**: the pipeline loads on the first job; a cold container
   idles at ~300 MB.
 - **Idle unload**: a watchdog frees the pipeline after 15 min without work,
-  so the ~3 GB peak exists only around the two weekly generations.
+  so the peak exists only around the weekly photo post and ad-hoc selfies.
 - **float32, not bfloat16**: bf16 halves the weight footprint but silently
   produces black frames on CPUs without native bf16 support; float32 is
-  universally correct and fits the 3 GB limit.
+  universally correct.
+- **Why fp32 fits a 3 GB cap at all**: the fp32 weights are ~4.0 GB on disk
+  (3.2 UNet + 0.47 text encoder + 0.32 VAE) and a naive `ru_maxrss` reading
+  of a local run peaks at ~4.15 GB — *above* the container limit. It still
+  fits because safetensors are mmap'd: those pages are file-backed and
+  reclaimable under cgroup pressure, so the anonymous footprint the limit
+  actually governs stays under it. Confirmed in production — generations
+  complete with no OOM kills and no restarts. Don't "fix" this by raising
+  `mem_limit` on the strength of an RSS number; measure `docker stats` and
+  check `State.OOMKilled` first.
 - One generation at a time (`asyncio.Semaphore(1)`); the diffusion run
   executes on a worker thread so `/healthz` stays responsive.
 - Weights download to `/models` (`HF_HOME`, a compose volume) on first
@@ -147,6 +158,8 @@ curl -X POST localhost:8000/generations -H 'Content-Type: application/json' \
 curl localhost:8000/generations/<id>   # poll until "done"
 ```
 
-Expect roughly 5–10 min wall time per image on the 4 vCPU host (record the
-actual number here after the first deploy) and peak RSS under 3 GB
-(`docker stats`).
+Expect ~3 min wall time per image on the 4 vCPU host (measured; the first
+job of a fresh volume additionally downloads ~4 GB of weights into
+`/models`). The container holds its 3 GB limit — see the memory-lifecycle
+section for why, and check with `docker stats` if you change dtype or
+resolution.

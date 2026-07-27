@@ -19,7 +19,6 @@ from src.config.prompts import BOT_FACT_DISTILL_SYSTEM, CHARACTER_VISUAL_PROMPT,
 from src.imagegen import generate_image
 from src.life.photo_judge import score_photo
 from src.life.writer import (
-    ALL_FORMATS,
     PHOTO_FORMAT,
     STORY_FORMAT,
     VOICE_FORMAT,
@@ -35,13 +34,16 @@ logger = log.get_logger(__name__)
 MAX_DISTILLED_FACTS = 3
 
 
-async def post_life_episode(bot) -> None:
-    """Write, send and record the next scheduled life-post episode.
+async def post_life_episode(bot, post_format: str) -> None:
+    """Write, send and record one scheduled life-post episode.
 
     Args:
         bot: Telegram Bot instance used to send messages.
+        post_format: Format this slot posts in, assigned by the weekly
+            schedule (``src/jobs/life_post.py``) — the writer is told which
+            format to write for, it does not choose one.
     """
-    episode = await episode_writer_agent.write_episode(live_formats())
+    episode = await episode_writer_agent.write_episode(supported_format(post_format))
     if episode is None:
         logger.warning("Life post skipped: episode writer produced nothing usable")
         return
@@ -53,18 +55,24 @@ async def post_life_episode(bot) -> None:
     await record_episode(episode)
 
 
-def live_formats() -> tuple[str, ...]:
-    """Return the formats currently offered to the episode writer.
+def supported_format(post_format: str) -> str:
+    """Return the scheduled format, downgraded when its backend is unavailable.
 
     The photo format needs the imagegen service; without ``IMAGEGEN_URL``
-    it is not offered at all rather than degrading on every draw.
+    the writer is asked for a text story up front rather than writing for a
+    photo that :func:`resolve_media` would then have to demote.
+
+    Args:
+        post_format: Format the weekly schedule assigned to this slot.
 
     Returns:
-        ``ALL_FORMATS``, minus ``photo`` when imagegen is not configured.
+        ``post_format``, or ``story`` when it is ``photo`` and imagegen is
+        not configured.
     """
-    if config.IMAGEGEN_URL:
-        return ALL_FORMATS
-    return tuple(post_format for post_format in ALL_FORMATS if post_format != PHOTO_FORMAT)
+    if post_format == PHOTO_FORMAT and not config.IMAGEGEN_URL:
+        logger.warning("IMAGEGEN_URL is not set — writing the scheduled photo post as a story")
+        return STORY_FORMAT
+    return post_format
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,9 +92,9 @@ async def resolve_media(episode: Episode) -> tuple[Episode, EpisodeMedia]:
     """Build the episode's media payload, degrading to story on failure.
 
     The payload is built once here and reused across the whole chat
-    fan-out. A demoted episode keeps the degraded format, so the recorded
-    canon (and the never-repeat-format rule) reflects what was actually
-    posted. A media failure demotes the post, never kills it.
+    fan-out. A demoted episode keeps the degraded format, so recorded canon
+    reflects what the chat actually saw rather than what was scheduled. A
+    media failure demotes the post, never kills it.
 
     Args:
         episode: The freshly written episode.
