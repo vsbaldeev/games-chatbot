@@ -23,8 +23,9 @@ STORE_GET_RECENT = "src.pipeline.context_builder.unified_messages.get_recent"
 STORE_GET_CHAIN = "src.pipeline.context_builder.unified_messages.get_chain"
 STORE_GET_BY_ID = "src.pipeline.context_builder.unified_messages.get_by_id"
 STORE_UPDATE_CONTENT = "src.pipeline.context_builder.unified_messages.update_content"
-STORE_GET_FACTS_FOR_USERS = "src.pipeline.context_builder.user_memories.get_facts_for_users"
-STORE_GET_FACTS = "src.pipeline.context_builder.user_memories.get_facts"
+STORE_FIND_RELEVANT_FACTS = (
+    "src.pipeline.context_builder.user_memories.find_relevant_facts_for_users"
+)
 STORE_GET_TAG = "src.pipeline.context_builder.user_tags.get_tag"
 DESCRIBE_PHOTO = "src.pipeline.ingester.describe_photo"
 
@@ -35,8 +36,7 @@ def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=N
     mock_chain = stack.enter_context(patch(STORE_GET_CHAIN, new_callable=AsyncMock, return_value=chain or []))
     mock_get_by_id = stack.enter_context(patch(STORE_GET_BY_ID, new_callable=AsyncMock, return_value=by_id))
     stack.enter_context(patch(STORE_UPDATE_CONTENT, new_callable=AsyncMock))
-    stack.enter_context(patch(STORE_GET_FACTS_FOR_USERS, new_callable=AsyncMock, return_value={}))
-    stack.enter_context(patch(STORE_GET_FACTS, new_callable=AsyncMock, return_value=[]))
+    stack.enter_context(patch(STORE_FIND_RELEVANT_FACTS, new_callable=AsyncMock, return_value={}))
     stack.enter_context(patch(STORE_GET_TAG, new_callable=AsyncMock, return_value=tag))
     return mock_chain, mock_get_by_id
 

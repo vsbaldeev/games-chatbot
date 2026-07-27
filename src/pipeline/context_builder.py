@@ -9,8 +9,9 @@ Assembles everything the Agent node needs for an enriched prompt:
                        when the store has no row (other bots' posts, command
                        outputs, expired messages) the fallback synthesized from
                        the Telegram update is used instead.
-  3. User facts      — per-user memories for every participant visible in recent history
-                       plus the initiating user.
+  3. User facts      — per-user memories for every participant visible in recent
+                       history plus the initiating user, similarity-gated against
+                       the incoming message (see USER_FACTS_SIMILAR_LIMIT).
   4. Reply chain     — full reply chain with photo and sticker rows lazily
                        enriched via the shared ingester.enrich_media_row helper
                        (also used by the filter node before classification) so
@@ -41,6 +42,20 @@ BOT_FACTS_NEWEST_LIMIT = 3
 BOT_FACTS_CAP = 8
 BOT_EPISODES_LIMIT = 2
 BOT_ACTIVITY_HISTORY_LIMIT = 7
+
+# User-fact retrieval, deliberately separate from the bot-canon knobs above:
+# these gate what the bot recalls about *other people*, where a mis-recall reads
+# as the bot being absurd rather than merely off-topic.
+#
+# Injecting every stored fact for every recent participant and asking the prompt
+# header to ignore the irrelevant ones did not work — the model surfaced
+# unrelated memories and produced absurd replies. Relevance is now decided by
+# retrieval, before the prompt is built, so an unrelated fact is never in
+# context to be misused. Facts are ranked by cosine similarity to the incoming
+# message; anything below the threshold is simply not recalled, even if it was
+# learned minutes ago.
+USER_FACTS_SIMILAR_LIMIT = 5
+USER_FACTS_SIMILARITY_THRESHOLD = 0.85
 
 # Activity gate: the daily refresh means a fresh current activity always
 # exists, so injecting it unconditionally made the bot narrate his routine in
@@ -76,6 +91,27 @@ def keep_conversational_facts(facts: list[str]) -> list[str]:
     return [fact for fact in facts if not user_memories.is_counter_fact(fact)]
 
 
+def key_facts_by_username(
+    facts_by_id: dict[int, list[str]], username_by_id: dict[int, str]
+) -> dict[str, list[str]]:
+    """Re-key retrieved facts by username, dropping counter tallies.
+
+    Args:
+        facts_by_id: Retrieved facts per user id, closest match first.
+        username_by_id: Username to render each user id as.
+
+    Returns:
+        Mapping of username to conversational facts; users left with nothing
+        after filtering are omitted entirely.
+    """
+    user_facts: dict[str, list[str]] = {}
+    for user_id, facts in facts_by_id.items():
+        conversational = keep_conversational_facts(facts)
+        if conversational:
+            user_facts[username_by_id[user_id]] = conversational
+    return user_facts
+
+
 def is_activity_question(text: str) -> bool:
     """Return True when the message asks what the bot is doing or did.
 
@@ -98,6 +134,7 @@ class ContextBuilder:
 
         bot = state["context_types"].bot
         fallback = msg.get("replied_to_fallback")
+        query_embedding = await self.__embed_message(msg)
         recent = await self.__get_recent(chat_id, msg["message_id"])
         replied_to = await self.__find_replied_to(
             chat_id, msg["reply_to_msg_id"], recent, fallback
@@ -106,13 +143,13 @@ class ContextBuilder:
             chat_id, msg["reply_to_msg_id"], bot, fallback
         )
         user_facts = await self.__collect_user_facts(
-            chat_id, msg["user_id"], msg["username"], recent
+            chat_id, msg["user_id"], msg["username"], recent, query_embedding
         )
         asking_user_tag = await user_tags.get_tag(chat_id=chat_id, user_id=msg["user_id"])
         mentioned_tags = await self.__collect_mentioned_tags(
             chat_id, msg, replied_to, asker_username=msg["username"]
         )
-        bot_self_facts, bot_self_episodes = await self.__collect_bot_canon(msg)
+        bot_self_facts, bot_self_episodes = await self.__collect_bot_canon(query_embedding)
         bot_current_activity, bot_recent_activities = await self.__collect_activity_context(msg)
 
         assembled: AssembledContext = {
@@ -129,25 +166,48 @@ class ContextBuilder:
         }
         return {"context": assembled}
 
-    async def __collect_bot_canon(self, msg: dict) -> tuple[list[str], list[str]]:
-        """Retrieve canon facts and past episodes relevant to the incoming message.
+    @staticmethod
+    async def __embed_message(msg: dict) -> list[float] | None:
+        """Embed the incoming message once for every similarity lookup.
 
-        Embeds the message once and reuses it for both the fact and episode
-        similarity queries. Degrades to empty lists on any failure (embedding
-        or database error) — a missing canon block must never fail the
-        pipeline.
+        Bot-canon retrieval and per-user fact retrieval rank against the same
+        query vector, so it is computed once here instead of once per collector.
 
         Args:
             msg: IncomingMessage dict of the message being processed.
 
         Returns:
-            ``(bot_self_facts, bot_self_episodes)``, each possibly empty.
+            The message embedding, or None when the message carries no text or
+            embedding failed — callers then skip similarity retrieval rather
+            than failing the pipeline.
         """
         text = msg.get("processed_text") or msg.get("raw_text") or ""
         if not text.strip():
+            return None
+        try:
+            return await embedder.embed(text)
+        except Exception as err:
+            logger.warning("Failed to embed incoming message: %s", err)
+            return None
+
+    async def __collect_bot_canon(
+        self, query_embedding: list[float] | None
+    ) -> tuple[list[str], list[str]]:
+        """Retrieve canon facts and past episodes relevant to the incoming message.
+
+        Degrades to empty lists on any database failure — a missing canon block
+        must never fail the pipeline.
+
+        Args:
+            query_embedding: Embedding of the incoming message, or None when it
+                could not be computed.
+
+        Returns:
+            ``(bot_self_facts, bot_self_episodes)``, each possibly empty.
+        """
+        if query_embedding is None:
             return [], []
         try:
-            query_embedding = await embedder.embed(text)
             similar_facts = await bot_memories.find_similar_facts(
                 query_embedding, BOT_FACTS_SIMILAR_LIMIT
             )
@@ -338,39 +398,37 @@ class ContextBuilder:
         initiating_user_id: int,
         initiating_username: str,
         recent: list[dict],
+        query_embedding: list[float] | None,
     ) -> dict[str, list[str]]:
-        """Gather reply-context facts for recent participants and the initiator.
+        """Gather facts relevant to the incoming message for recent participants.
 
-        Counter-tally facts are dropped via ``keep_conversational_facts`` —
-        users left with no facts are omitted entirely.
+        Retrieval is similarity-gated, not exhaustive — see the rationale on
+        USER_FACTS_SIMILAR_LIMIT. Counter-tally facts are dropped via
+        ``keep_conversational_facts``; users left with nothing are omitted.
 
         Args:
             chat_id: Chat the conversation happens in.
             initiating_user_id: Id of the user who triggered the pipeline.
             initiating_username: Username of the initiating user.
             recent: Recent-history rows already loaded for this chat.
+            query_embedding: Embedding of the incoming message, or None when it
+                could not be computed — no relevance can be judged, so no facts
+                are recalled.
 
         Returns:
-            Mapping of username to conversational fact strings.
+            Mapping of username to relevant fact strings, closest match first.
         """
-        participant_ids = list({row["user_id"] for row in recent})
-        facts_by_id = await user_memories.get_facts_for_users(
-            chat_id=chat_id, user_ids=participant_ids
+        if query_embedding is None:
+            return {}
+        username_by_id = {row["user_id"]: row["username"] for row in recent}
+        # The current message carries the freshest username, so it wins over
+        # whatever the same user was called in older history rows.
+        username_by_id[initiating_user_id] = initiating_username
+        facts_by_id = await user_memories.find_relevant_facts_for_users(
+            chat_id=chat_id,
+            user_ids=list(username_by_id),
+            embedding=query_embedding,
+            top_k=USER_FACTS_SIMILAR_LIMIT,
+            threshold=USER_FACTS_SIMILARITY_THRESHOLD,
         )
-        user_facts: dict[str, list[str]] = {}
-        for row in recent:
-            uid = row["user_id"]
-            uname = row["username"]
-            if uid in facts_by_id and uname not in user_facts:
-                facts = keep_conversational_facts(facts_by_id[uid])
-                if facts:
-                    user_facts[uname] = facts
-
-        if initiating_user_id not in facts_by_id:
-            initiator_facts = keep_conversational_facts(
-                await user_memories.get_facts(chat_id=chat_id, user_id=initiating_user_id)
-            )
-            if initiator_facts:
-                user_facts[initiating_username] = initiator_facts
-
-        return user_facts
+        return key_facts_by_username(facts_by_id, username_by_id)

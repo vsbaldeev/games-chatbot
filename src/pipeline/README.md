@@ -345,12 +345,24 @@ context_builder
     │    a row-shaped copy of msg.reply_to_message for rows the store never had)
     ├─ get_chain(reply_to_msg_id) → reply_chain (max 10 hops, oldest-first);
     │    empty chain + fallback → one-element chain from the fallback
-    ├─ load user_memories facts for all user_ids visible in recent history
-    ├─ load initiating user's facts if not already in recent participants
+    ├─ embed processed_text once (__embed_message) — shared by the user-fact
+    │    and bot-canon lookups below; no text or embed failure → None, and both
+    │    similarity retrievals are skipped rather than failing the pipeline
+    ├─ user facts: similarity-gated, NOT the whole stored list —
+    │    find_relevant_facts_for_users ranks every recent participant's facts
+    │    (plus the initiating user's) against the message embedding in one
+    │    window-function query, keeping the top USER_FACTS_SIMILAR_LIMIT (5)
+    │    per user above USER_FACTS_SIMILARITY_THRESHOLD (0.85) → user_facts.
+    │    Injecting every fact and asking the prompt header to ignore the
+    │    irrelevant ones produced absurd replies (the bot dragging unrelated
+    │    memories in), so relevance is decided by retrieval, before the prompt
+    │    exists. Pure similarity by design: a fact learned minutes ago is not
+    │    recalled unless the current message is actually about it.
+    │    Counter tallies have NULL embeddings and can never match
     ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
     ├─ resolve @mentions (in the question + replied_to) to members and load their
     │    weekly role + reason from user_tags → mentioned_tags
-    ├─ bot canon: embed processed_text once, reuse for both queries — top-5
+    ├─ bot canon (reuses the same embedding): top-5
     │    bot_memories.find_similar_facts + 3 newest get_facts (dedupe, cap 8)
     │    → bot_self_facts; top-2 find_similar_episodes above a similarity
     │    floor → bot_self_episodes (Жора's own life canon; see src/life/README.md)
@@ -523,7 +535,7 @@ IncomingMessage:
     replied_to_fallback: dict | None  # row-shaped copy of msg.reply_to_message; read-side only
 
 AssembledContext:
-    user_facts: dict[str, list[str]]     # username → extracted fact strings (counter tallies like «Оскорблял бота N раз» are filtered out — bookkeeping for roles/roasts, not reply material)
+    user_facts: dict[str, list[str]]     # username → facts relevant to THIS message (top-5 per user above 0.85 cosine), closest first; not the user's whole stored list. Counter tallies like «Оскорблял бота N раз» never appear — NULL embedding, plus an explicit is_counter_fact filter
     recent_history: list[dict]           # flat window (last 20), newest-first
     replied_to: dict | None              # the specific message being replied to (for annotation)
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first

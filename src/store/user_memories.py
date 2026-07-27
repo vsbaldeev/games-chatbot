@@ -64,6 +64,58 @@ async def get_facts_for_users(
     return result
 
 
+RELEVANT_FACTS_SQL = """
+    SELECT user_id, fact FROM (
+        SELECT user_id, fact,
+               1 - (embedding <=> $1) AS similarity,
+               ROW_NUMBER() OVER (
+                   PARTITION BY user_id ORDER BY embedding <=> $1
+               ) AS fact_rank
+        FROM user_memories
+        WHERE chat_id = $2 AND user_id = ANY($3)
+          AND embedding IS NOT NULL
+    ) ranked
+    WHERE fact_rank <= $4 AND similarity >= $5
+    ORDER BY user_id, fact_rank
+"""
+
+
+async def find_relevant_facts_for_users(
+    *, chat_id: int, user_ids: list[int], embedding: list[float],
+    top_k: int, threshold: float,
+) -> dict[int, list[str]]:
+    """Return each user's facts most similar to ``embedding``, closest first.
+
+    Ranking, thresholding and per-user truncation all happen in Postgres: one
+    window-function query covers every user at once, so the cost stays a single
+    round trip whether two or twenty participants are in scope. Facts stored
+    without an embedding (counter tallies from ``upsert_counter_fact``) can
+    never match and are excluded by the query.
+
+    Args:
+        chat_id: Chat the facts belong to.
+        user_ids: Users to retrieve facts for.
+        embedding: Query embedding, normally of the incoming message.
+        top_k: Maximum facts to return per user.
+        threshold: Minimum cosine similarity a fact must reach to be returned.
+
+    Returns:
+        Mapping of user id to that user's matching facts, closest first. Users
+        with no fact above ``threshold`` are absent from the mapping.
+    """
+    if not user_ids:
+        return {}
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            RELEVANT_FACTS_SQL,
+            np.array(embedding), chat_id, user_ids, top_k, threshold,
+        )
+    result: dict[int, list[str]] = {}
+    for row in rows:
+        result.setdefault(row["user_id"], []).append(row["fact"])
+    return result
+
+
 async def get_facts_with_embeddings(*, chat_id: int, user_id: int) -> list[tuple[str, np.ndarray]]:
     """Return (fact, embedding) pairs for all facts that have embeddings stored, newest first."""
     async with database.acquire() as conn:
@@ -79,23 +131,25 @@ async def get_facts_with_embeddings(*, chat_id: int, user_id: int) -> list[tuple
 async def find_similar_fact(
     *, chat_id: int, user_id: int, embedding: list[float], threshold: float
 ) -> int | None:
-    """Return the id of the most similar existing fact if similarity >= threshold, else None."""
-    vector = np.array(embedding)
+    """Return the id of the most similar existing fact if similarity >= threshold, else None.
+
+    The threshold is applied in SQL, so a below-threshold nearest neighbour
+    comes back as no row at all rather than as a row Python has to reject.
+    """
     async with database.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, 1 - (embedding <=> $1) AS similarity
+            SELECT id
             FROM user_memories
             WHERE chat_id = $2 AND user_id = $3
               AND embedding IS NOT NULL
+              AND 1 - (embedding <=> $1) >= $4
             ORDER BY embedding <=> $1
             LIMIT 1
             """,
-            vector, chat_id, user_id,
+            np.array(embedding), chat_id, user_id, threshold,
         )
-    if row is None:
-        return None
-    return row["id"] if row["similarity"] >= threshold else None
+    return row["id"] if row is not None else None
 
 
 async def refresh_updated_at(fact_id: int) -> None:
