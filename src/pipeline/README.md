@@ -245,9 +245,16 @@ filter  (runs after ingester)
     │       ├─ text looks like a question or request («?», more than
     │       │   SUBSTANTIVE_WORD_COUNT non-laughter words, leading
     │       │   interrogative, or imperative request verb like «переведи»/
-    │       │   «расскажи»/«поищи»/«загугли»; laughter tokens skipped) →
+    │       │   «расскажи»/«поищи»/«загугли»; laughter tokens skipped, and
+    │       │   @handles stripped first — the text arrives as typed, so
+    │       │   «@bot что это» would otherwise be judged on the bot's own
+    │       │   username and the handle would count toward the word total) →
     │       │   overridden to MEANINGFUL: every MEANINGLESS/BANTER category
     │       │   is a SHORT reaction, so a longer message is never meaningless
+    │       │   this override is the deterministic net under a small
+    │       │   classifier: FILTER_MODEL is llama-3.1-8b-instant and does
+    │       │   mislabel real questions, so a question addressed to the bot
+    │       │   must not depend on the model getting it right
     │       └─ otherwise → engagement gate (see wind-down engine below)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
     ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —

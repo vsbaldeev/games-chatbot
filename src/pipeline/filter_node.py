@@ -25,8 +25,11 @@ how it entered the pipeline:
     cannot see.
     A MEANINGLESS or BANTER verdict on a text that looks like a question or
     an imperative request (question mark, leading interrogative, or a request
-    verb like «переведи»/«расскажи») is overridden to MEANINGFUL: a question
-    or request is never meaningless.
+    verb like «переведи»/«расскажи», judged with @handles stripped) is
+    overridden to MEANINGFUL: a question or request is never meaningless.
+    The override is the deterministic net under a small classifier — the
+    8B FILTER_MODEL does mislabel real questions, and an addressed question
+    must not depend on it getting them right.
   - Overheard messages routed by the router's bot-word check
     (response_trigger="insult_check") are classified with the last few chat
     messages as context, so the model can tell this bot from game bots,
