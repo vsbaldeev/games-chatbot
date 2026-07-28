@@ -14,7 +14,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram import ReactionTypeEmoji
 
-from src.pipeline.filter_node import FILTER_SYSTEM, REACTION_POOL, MeaninglessFilterNode
+from src.pipeline.filter_node import (
+    FILTER_SYSTEM,
+    REACTION_POOL,
+    MeaninglessFilterNode,
+    looks_like_request,
+)
 from tests.builders import make_incoming, make_state
 
 
@@ -195,6 +200,55 @@ class TestMediaMessages:
             )
             result = await node(state)
         assert result == {"should_respond": False, "drop_reason": "no_transcription"}
+
+
+class TestRequestOverrideIgnoresMentions:
+    """The question/request override judges what the user typed, not the @handle.
+
+    An addressed message reaches the filter with its «@bot» prefix intact, so
+    the handle used to take the leading-word slot and inflate the word count —
+    silently disabling the override for every @mentioned short question.
+    """
+
+    @pytest.mark.parametrize("text", [
+        "@zhora_bot о чем я говорю",
+        "@zhora_bot что я описал",
+        "@zhora_bot как это работает",
+        "@zhora_bot переведи",
+        "@zhora_bot скинь мем",
+        "@zhora_bot ахаха что это было",
+        "@zhora_bot @vasya кто прав",
+    ])
+    def test_mentioned_question_or_request_is_recognized(self, text):
+        """Questions and imperatives behind an @handle still read as requests."""
+        assert looks_like_request(text) is True
+
+    @pytest.mark.parametrize("text", [
+        "@zhora_bot ок",
+        "@zhora_bot ахаха",
+        "@zhora_bot бля",
+        "@zhora_bot сам такой",
+        "@zhora_bot ну ты и фрукт",
+    ])
+    def test_mentioned_short_reaction_is_still_not_a_request(self, text):
+        """Genuine short reactions keep their MEANINGLESS/BANTER verdict."""
+        assert looks_like_request(text) is False
+
+    def test_handle_does_not_count_toward_substantive_word_count(self):
+        """A six-word message plus a handle is not promoted by word count alone."""
+        assert looks_like_request("@zhora_bot ну вот опять началось это всё") is False
+
+    async def test_mentioned_question_survives_a_meaningless_verdict(self):
+        """The reported bug: a mentioned question no longer drops to an emoji."""
+        node, _ = make_node_with_mock_llm("MEANINGLESS")
+        with patch("asyncio.create_task", side_effect=close_coroutine) as mock_create_task:
+            state = make_state(
+                make_incoming(raw_text="@zhora_bot о чем я говорю"), should_respond=True
+            )
+            result = await node(state)
+        assert result["should_respond"] is True
+        assert result["filter_verdict"] == "MEANINGFUL"
+        mock_create_task.assert_not_called()
 
 
 class TestClassify:

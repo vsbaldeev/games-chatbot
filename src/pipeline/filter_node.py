@@ -146,6 +146,12 @@ SUBSTANTIVE_WORD_COUNT = 6
 # so «ахаха что за бред» still reads as a question.
 LAUGHTER_RE = re.compile(r"^(?:[хаеоы]+|[ha]+|l[ol]+|лол|кек|rofl|lmao)$", re.IGNORECASE)
 
+# @handles are dropped before the leading-word analysis: an addressed message
+# usually opens with «@bot …», and the handle would otherwise take the
+# leading-word slot («@bot что это» reading as «bot») and inflate the word
+# count. No handle is ever an interrogative or an imperative.
+MENTION_RE = re.compile(r"@\w+")
+
 # Cap on how much replied-to text is fed to the classifier as context.
 REPLIED_TO_CHAR_LIMIT = 500
 
@@ -200,6 +206,10 @@ def looks_like_request(text: str) -> bool:
     leading word — this catches long requests like «поищи в интернете, когда…»
     that a weak classifier mislabels and that no leading-word check would save.
 
+    The text arrives as the user typed it, so an addressed message still
+    carries its «@bot» handle; handles are stripped before tokenizing, or
+    every @mentioned question would be judged on the bot's own username.
+
     Args:
         text: Raw message text.
 
@@ -207,11 +217,12 @@ def looks_like_request(text: str) -> bool:
         True when the text contains a question mark, has more than
         ``SUBSTANTIVE_WORD_COUNT`` non-laughter words, or its first
         non-laughter word is an interrogative from ``QUESTION_WORDS`` or an
-        imperative from ``REQUEST_WORDS``.
+        imperative from ``REQUEST_WORDS`` — all judged with @handles removed.
     """
     if "?" in text:
         return True
-    words = [word for word in re.findall(r"\w+", text.lower()) if not LAUGHTER_RE.fullmatch(word)]
+    without_mentions = MENTION_RE.sub(" ", text.lower())
+    words = [word for word in re.findall(r"\w+", without_mentions) if not LAUGHTER_RE.fullmatch(word)]
     if len(words) > SUBSTANTIVE_WORD_COUNT:
         return True
     return bool(words) and words[0] in (QUESTION_WORDS | REQUEST_WORDS)
