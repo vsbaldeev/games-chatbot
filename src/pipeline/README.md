@@ -251,10 +251,13 @@ filter  (runs after ingester)
     │       │   username and the handle would count toward the word total) →
     │       │   overridden to MEANINGFUL: every MEANINGLESS/BANTER category
     │       │   is a SHORT reaction, so a longer message is never meaningless
-    │       │   this override is the deterministic net under a small
-    │       │   classifier: FILTER_MODEL is llama-3.1-8b-instant and does
-    │       │   mislabel real questions, so a question addressed to the bot
-    │       │   must not depend on the model getting it right
+    │       │   the override is a free deterministic floor, not the primary
+    │       │   defence: FILTER_MODEL was llama-3.1-8b-instant, which labelled
+    │       │   plain questions MEANINGLESS (3/8 on 30 days of this chat's real
+    │       │   drops) and cost members an emoji instead of an answer; it is
+    │       │   now llama-3.3-70b-versatile, which scored 8/8 on the same set,
+    │       │   with an OpenRouter fallback so a Groq outage cannot turn an
+    │       │   addressed question into silence (make_filter_llm)
     │       └─ otherwise → engagement gate (see wind-down engine below)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
     ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —

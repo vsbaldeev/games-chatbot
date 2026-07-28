@@ -21,13 +21,29 @@ WHISPER_LANGUAGE = "ru"
 # max_tokens budget is burned inside a <think> block.
 VISION_MODEL = "qwen/qwen3.6-27b"
 
-# Meaningless-message filter (binary yes/no, max_tokens=5).
-# llama-3.1-8b-instant has 14.4K RPD vs 1K RPD for larger models.
-FILTER_MODEL = "llama-3.1-8b-instant"
+# Meaningless-message filter. Was llama-3.1-8b-instant for its 14.4K RPD, but
+# measured against 30 days of this chat's real addressed messages the 8B model
+# answered 3/8 of the drops it should not have made — it labelled plain
+# questions MEANINGLESS despite the prompt's rule 4 forbidding exactly that,
+# and each mislabel costs a member an emoji instead of an answer. The 70B model
+# scored 8/8 on the same set. Volume makes the RPD argument moot: this chat
+# sees ~11 addressed messages a day, nowhere near the smaller 1K RPD budget.
+FILTER_MODEL = "llama-3.3-70b-versatile"
+
+# Cross-provider fallback for the filter, used when Groq is out of quota or
+# unreachable (see filter_node.make_filter_llm). Same weights, different
+# vendor, so a Groq outage degrades to a paid call instead of to silence.
+# Requires OPENROUTER_API_KEY; without it the filter is Groq-only.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+FILTER_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 # Second opinion before acting on an overheard bot-word insult. The comeback
 # payload is aggressive, so the cheap filter's positives are confirmed by a
 # stronger model before the bot claps back.
+# NOTE: now identical to FILTER_MODEL, which makes the confirmation a
+# same-model re-ask at temperature 0 — it will nearly always agree, so the
+# overheard gate is effectively open. Needs a decision: point this at a
+# genuinely different model (openai/gpt-oss-120b) or drop the second call.
 INSULT_CONFIRM_MODEL = "llama-3.3-70b-versatile"
 
 # Memory fact extraction fallback chain (chat facts and posted-episode

@@ -27,9 +27,9 @@ how it entered the pipeline:
     an imperative request (question mark, leading interrogative, or a request
     verb like «переведи»/«расскажи», judged with @handles stripped) is
     overridden to MEANINGFUL: a question or request is never meaningless.
-    The override is the deterministic net under a small classifier — the
-    8B FILTER_MODEL does mislabel real questions, and an addressed question
-    must not depend on it getting them right.
+    The override is a free deterministic floor, not the primary defence:
+    that is FILTER_MODEL itself, moved off the 8B model for dropping real
+    questions and given a cross-provider fallback (make_filter_llm).
   - Overheard messages routed by the router's bot-word check
     (response_trigger="insult_check") are classified with the last few chat
     messages as context, so the model can tell this bot from game bots,
@@ -64,8 +64,11 @@ import asyncio
 import random
 import re
 
+import groq
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from telegram import ReactionTypeEmoji
 
 from src import config, log
@@ -86,6 +89,10 @@ from src.store import unified_messages
 logger = log.get_logger(__name__)
 
 REACTION_POOL = ["👍", "❤", "🔥", "😁", "👀", "😎", "💯", "🤣", "⚡", "🫡", "🎉"]
+
+# The classifiers answer with one label, so the completion budget only has to
+# cover the longest of them plus the odd stray token.
+FILTER_MAX_TOKENS = 10
 
 # Bored acknowledgement for users the engagement gate has wound down to the
 # emoji tier — must stay within Telegram's fixed set of allowed reaction emoji.
@@ -130,6 +137,7 @@ QUESTION_WORDS = frozenset({
 # it could not see, like «переведи» under an unenriched meme).
 REQUEST_WORDS = frozenset({
     "переведи", "переведите", "расскажи", "расскажите", "скажи", "скажите",
+    "подскажи", "подскажите", "назови", "назовите",
     "покажи", "покажите", "напиши", "напишите", "объясни", "объясните",
     "поясни", "поясните", "сделай", "сделайте", "найди", "найдите",
     "проверь", "проверьте", "посчитай", "придумай", "кинь", "скинь",
@@ -326,25 +334,54 @@ def build_overheard_input(text: str, recent: list[dict]) -> str:
     )
 
 
+def make_filter_llm(model: str) -> Runnable:
+    """Build a classification LLM with a cross-provider fallback.
+
+    The filter decides whether a member who addressed the bot gets an answer
+    at all, so a Groq quota exhaustion or outage must not turn into silence.
+    The fallback runs the same weights through OpenRouter; without
+    ``OPENROUTER_API_KEY`` the Groq client is returned bare and
+    ``__classify`` degrades on its own (fail-open to MEANINGFUL).
+
+    Any ``groq.APIError`` triggers the failover — rate limits, daily-quota
+    429s a same-model retry can never recover from, connection errors and
+    5xx alike. A request the fallback also rejects raises, and the caller's
+    fail-open handles it.
+
+    Args:
+        model: Groq model identifier for the primary client.
+
+    Returns:
+        A ``Runnable`` accepting a message list and returning one label.
+    """
+    primary_llm = ChatGroq(
+        model=model,
+        api_key=config.GROQ_API_KEY,
+        temperature=0.0,
+        max_tokens=FILTER_MAX_TOKENS,
+        max_retries=0,
+    )
+    if not config.OPENROUTER_API_KEY:
+        logger.warning("Filter: OPENROUTER_API_KEY unset — no fallback for %s", model)
+        return primary_llm
+    fallback_llm = ChatOpenAI(
+        model=config.FILTER_FALLBACK_MODEL,
+        api_key=config.OPENROUTER_API_KEY,
+        base_url=config.OPENROUTER_BASE_URL,
+        temperature=0.0,
+        max_tokens=FILTER_MAX_TOKENS,
+        max_retries=0,
+    )
+    return primary_llm.with_fallbacks([fallback_llm], exceptions_to_handle=(groq.APIError,))
+
+
 class MeaninglessFilterNode:
     """LLM filter separating meaningless reactions, bot insults and real messages."""
 
     def __init__(self) -> None:
         """Build the classification and confirmation LLMs from configuration."""
-        self.__llm = ChatGroq(
-            model=config.FILTER_MODEL,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.0,
-            max_tokens=10,
-            max_retries=0,
-        )
-        self.__confirm_llm = ChatGroq(
-            model=config.INSULT_CONFIRM_MODEL,
-            api_key=config.GROQ_API_KEY,
-            temperature=0.0,
-            max_tokens=10,
-            max_retries=0,
-        )
+        self.__llm = make_filter_llm(config.FILTER_MODEL)
+        self.__confirm_llm = make_filter_llm(config.INSULT_CONFIRM_MODEL)
 
     async def __call__(self, state: BotState) -> dict:
         """Classify the incoming message and decide whether the bot replies.
