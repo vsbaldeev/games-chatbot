@@ -430,6 +430,14 @@ response   personality LLM (ReAct executor, no tools)
     │            + recent history (last 10; random and youtube_short triggers get only
     │              the newest 3, RANDOM_TRIGGER_CONTEXT_LIMIT) + replied_to + worker
     │              findings + current message
+    │          recent history is dropped entirely when thread history is present —
+    │            the thread turns already carry the conversation. The replied_to
+    │            block («Сообщение, на которое отвечают») is then always rendered:
+    │            it is skipped only when that message was actually printed in the
+    │            recent-history block, never merely because it sits in the recent
+    │            window. Keying that check on the window let both blocks suppress
+    │            each other on reply chains, leaving the model an unanchored
+    │            «(↳ …)» arrow with no text to resolve a short follow-up against
     │          worker findings are framed by provenance: «[Собранные данные
     │            (проверено через инструменты)]» when a tool ran, «[Данные из
     │            контекста разговора (во внешних источниках НЕ проверялись)]»

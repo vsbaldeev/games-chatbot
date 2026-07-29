@@ -307,6 +307,14 @@ def build_recent_history_lines(
 ) -> tuple[list[str], dict | None]:
     """Return recent-history and replied-to prompt lines, plus the replied-to row.
 
+    The replied-to block is skipped only when that message was actually
+    rendered in the recent-history block above it — never merely because it
+    sits in the recent window. Keying the check on the window instead made
+    the two blocks suppress each other on reply chains (recent history
+    dropped by ``has_thread_history``, replied-to dropped as "already
+    shown"), leaving the model with an unanchored ``(↳ …)`` arrow and no way
+    to resolve a short follow-up like «На четвертом».
+
     Args:
         context: AssembledContext dict or None.
         response_trigger: Routing trigger; ``"random"``/``"youtube_short"``
@@ -322,16 +330,18 @@ def build_recent_history_lines(
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     if response_trigger in ("random", "youtube_short"):
         recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
+    rendered = [] if has_thread_history else recent
+
     parts: list[str] = []
-    if recent and not has_thread_history:
+    if rendered:
         parts.append("Недавние сообщения чата:")
-        parts.extend(render_row(row) for row in reversed(recent))
+        parts.extend(render_row(row) for row in reversed(rendered))
         parts.append("")
 
     replied_to = (context or {}).get("replied_to")
     if replied_to:
-        recent_ids = {row["message_id"] for row in recent}
-        if replied_to["message_id"] not in recent_ids:
+        rendered_ids = {row["message_id"] for row in rendered}
+        if replied_to["message_id"] not in rendered_ids:
             parts.append("Сообщение, на которое отвечают:")
             parts.append(render_row(replied_to))
             parts.append("")
