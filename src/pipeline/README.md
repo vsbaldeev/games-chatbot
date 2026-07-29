@@ -57,13 +57,12 @@ incoming message
     │
     ├─ every text message → humor_gate.observe(chat_id)   [counts toward joke cadence]
     │
-    ├─ should_respond=False + non-forwarded text (≥ 20 chars)
-    │       → asyncio.create_task(extract_and_save)   [passive memory, background]
-    │         forwarded messages are skipped — channel content must not be
-    │         attributed as facts about the person who forwarded it
-    │
     ├─ should_respond=False + humor gate fires → humor   [autonomous joke]
-    ├─ should_respond=False → memory_writer (long text) or END
+    ├─ should_respond=False + non-forwarded text (≥ 20 chars) → memory_writer
+    │       (route_after_router in graph.py; passive memory, background —
+    │        this is the only call site, the router itself no longer fires
+    │        extract_and_save inline)
+    ├─ should_respond=False → END
     └─ should_respond=True  → ingester
 ```
 
@@ -277,7 +276,8 @@ filter  (runs after ingester)
     │       → engagement gate (as BOT_INSULT)
     └─ anything else / LLM error → should_respond=False, silent drop
             (no emoji — the bot was never addressed; long texts still get
-             passive memory extraction, mirroring the router's behaviour)
+             passive memory extraction here, since should_respond=True routed
+             this message past the router's own memory_writer branch)
 
 engagement gate — conversation wind-down engine (engagement_gate.py +
 store/engagement.py, table engagement_scores): one leaky-bucket attention
@@ -515,6 +515,11 @@ memory_writer
     ├─ is_forwarded=True → skip entirely
     ├─ passive (no response): skip if user_message < 20 chars
     └─ asyncio.create_task() — does NOT block the reply
+          → "Existing facts" shown to the extraction model is retrieval-gated:
+            embeds the message, keeps the top 5 stored facts above 0.85 cosine
+            similarity to it (find_relevant_facts_for_users) — not the user's
+            whole stored list; an embed failure shows no existing facts rather
+            than falling back to everything
           → qwen/qwen3.6-27b (reasoning disabled) extracts up to 3 new facts
           → source rules: only the user's own words are evidence — the bot's
             reply is context, never a fact source; voice transcripts are

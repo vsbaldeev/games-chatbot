@@ -6,8 +6,11 @@ Runs in two modes:
     plus the recent conversation context from state["context"].
   - Passive (no reply): fed the user message alone — the bot "overheard" it.
 
-The module-level extract_and_save is also called directly from the router
-for plain text messages that don't trigger a bot response.
+The module-level extract_and_save is also called directly from the filter
+node (overheard "бот"-mention candidates the router routes past memory_writer)
+and from the voice message handler; the router itself no longer calls it —
+route_after_router sends passive text straight to the memory_writer node so
+extraction has exactly one call site per message.
 Cross-user facts are extracted automatically when @mentions are present.
 
 Source rules:
@@ -18,6 +21,14 @@ Source rules:
     NOT the user's words (the image content is not a fact about the poster).
   - Cross-user claims pass a sincerity rule (banter and insults are not
     facts) and are stored with a «по словам @X, …» attribution prefix.
+
+The "Existing facts" shown to the extraction model is retrieval-gated, not
+the user's whole stored list: _relevant_existing_facts ranks stored facts by
+cosine similarity to the message being processed and keeps only the top
+EXISTING_FACTS_LIMIT above EXISTING_FACTS_SIMILARITY_THRESHOLD (mirrors
+context_builder's USER_FACTS_SIMILAR_LIMIT gating for reply prompts, see
+2475ea05). This only affects what the model sees for dedup framing — the
+actual duplicate-safety net is the insert-time embedding check below.
 
 Deduplication uses cosine similarity between fastembed vectors rather than
 LLM judgement. A duplicate refreshes the existing fact's updated_at instead
@@ -74,6 +85,18 @@ memory_call_semaphore = asyncio.Semaphore(MEMORY_CALL_CONCURRENCY)
 MAX_NEW_FACTS = 3
 MIN_PASSIVE_LENGTH = 20
 SIMILARITY_THRESHOLD = 0.85
+
+# "Existing facts" shown to the extraction model, gated the same way as
+# context_builder gates USER_FACTS_SIMILAR_LIMIT/reply prompts (see 2475ea05):
+# dumping every stored fact (up to MAX_FACTS_PER_USER=30) into every extraction
+# call regardless of what the message is about is pure noise once a user has
+# been around a while. Any fact the model could extract from the current
+# message is necessarily topically close to it, so gating retrieval by
+# similarity to the message loses nothing for dedup purposes — the insert-time
+# check (find_similar_fact, same threshold) is the actual duplicate-safety net
+# and does not depend on what the prompt shows.
+EXISTING_FACTS_LIMIT = 5
+EXISTING_FACTS_SIMILARITY_THRESHOLD = SIMILARITY_THRESHOLD
 
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
@@ -182,6 +205,36 @@ def log_extraction_call(label: str, prompt: str, facts: list[str]) -> None:
     logger.debug("Extracted facts (%s): %s", label, facts or "(none)")
 
 
+async def _relevant_existing_facts(*, chat_id: int, user_id: int, query_text: str) -> list[str]:
+    """Return the user's stored facts most relevant to query_text, closest first.
+
+    Embeds query_text and delegates ranking, thresholding and truncation to
+    Postgres via find_relevant_facts_for_users. An embedding failure degrades
+    to no existing facts shown, rather than falling back to the whole stored
+    list — the insert-time dedup check does not depend on this list.
+
+    Args:
+        chat_id: Chat the facts belong to.
+        user_id: User whose facts are being retrieved.
+        query_text: Text to rank stored facts against — normally the message
+            being processed for extraction.
+
+    Returns:
+        Up to EXISTING_FACTS_LIMIT facts above EXISTING_FACTS_SIMILARITY_THRESHOLD,
+        closest first; possibly empty.
+    """
+    try:
+        query_embedding = await embedder.embed(query_text)
+    except Exception as err:
+        logger.warning("Failed to embed message for existing-facts retrieval: %s", err)
+        return []
+    facts_by_id = await user_memories.find_relevant_facts_for_users(
+        chat_id=chat_id, user_ids=[user_id], embedding=query_embedding,
+        top_k=EXISTING_FACTS_LIMIT, threshold=EXISTING_FACTS_SIMILARITY_THRESHOLD,
+    )
+    return facts_by_id.get(user_id, [])
+
+
 async def _extract_facts(
     *, username: str, user_message: str, bot_reply: str, existing: list[str],
     recent_history: list[dict] | None = None, source_kind: str = "text",
@@ -281,7 +334,9 @@ async def extract_and_save(
             or ``"media_description"``.
     """
     try:
-        existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
+        existing = await _relevant_existing_facts(
+            chat_id=chat_id, user_id=user_id, query_text=user_message,
+        )
         new_facts = await _extract_facts(
             username=username, user_message=user_message,
             bot_reply=bot_reply, existing=existing,
@@ -321,7 +376,9 @@ async def _extract_facts_about(
         observer_username: Who made the claim.
     """
     try:
-        existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
+        existing = await _relevant_existing_facts(
+            chat_id=chat_id, user_id=user_id, query_text=observation,
+        )
         existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
         prompt = (
             f"Пользователь: @{username}\nИзвестные факты:\n{existing_block}\n\n"

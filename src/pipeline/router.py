@@ -4,7 +4,10 @@ MessageRouter — first node in the LangGraph pipeline.
 Responsibilities:
   1. Persist every incoming message to unified_messages (as text or placeholder).
   2. Decide whether the bot should respond (sets should_respond).
-  3. Fire passive memory extraction for long plain-text messages that won't get a response.
+
+Passive memory extraction for long plain-text messages that won't get a
+response is not fired here — route_after_router (graph.py) sends those to the
+memory_writer node instead, so extraction has exactly one call site.
 
 Respond when:
   - The bot is @mentioned in the text / caption as a whole word
@@ -23,14 +26,12 @@ Respond when:
     dedup window and a daily summary cap (see ``src.pipeline.shorts``).
 """
 
-import asyncio
 import random
 import re
 from typing import Any
 
 from src import log
 from src.pipeline import humor_gate, shorts
-from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
 from src.utils.ttl_gate import TtlGate
@@ -107,16 +108,6 @@ class MessageRouter:
                 return shorts_update
 
         should_respond, response_trigger = self.__decide(msg, message)
-
-        if not should_respond and not msg.get("is_forwarded") and msg["media_type"] == "text":
-            text = msg["raw_text"] or ""
-            if len(text.strip()) >= MIN_PASSIVE_LENGTH:
-                asyncio.create_task(extract_and_save(
-                    chat_id=msg["chat_id"],
-                    user_id=msg["user_id"],
-                    username=msg["username"],
-                    user_message=text,
-                ))
 
         return {"should_respond": should_respond, "response_trigger": response_trigger}
 
