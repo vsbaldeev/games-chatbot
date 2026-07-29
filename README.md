@@ -68,7 +68,7 @@ LLM (memory) Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat th
 Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, local)
 LLM (roast)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → gpt-oss-20b (fallback chain)
 LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.6-27b (autonomous comedian; JSON decide-or-abstain)
-LLM (roles)  Groq llama-3.1-8b-instant
+LLM (roles)  Groq llama-3.3-70b-versatile
 LLM (filter) Groq llama-3.3-70b-versatile → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
 LLM (life posts) Groq llama-3.3-70b-versatile → gpt-oss-120b → qwen3.6-27b (fallback chain; llama only holds the casual Russian style)
 LLM (daily activity) Groq llama-3.3-70b-versatile (single tiny call, no fallback chain — on failure the previous activity just ages out)
