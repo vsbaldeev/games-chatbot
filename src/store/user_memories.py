@@ -20,9 +20,17 @@ from src.store import db as database
 
 MAX_FACTS_PER_USER = 30
 
+# Prefixes of counter-tally facts (see format_hack_fact). These are
+# bookkeeping for weekly roles and roasts, not conversational memory:
+# surfacing them in ordinary replies reads as the bot holding a grudge, so
+# reply-context assembly filters them out via is_counter_fact.
+COUNTER_FACT_PREFIXES = ("Пытался взломать бота",)
+
 # Facts untouched for this long are stale residue: real, current facts get
 # their updated_at refreshed by the dedup path whenever they are re-observed.
-FACT_RETENTION_DAYS = 90
+# Kept short so jokes/roasts about members stay current rather than dredging
+# up things from months ago.
+FACT_RETENTION_DAYS = 14
 
 
 async def get_facts(*, chat_id: int, user_id: int) -> list[str]:
@@ -56,6 +64,58 @@ async def get_facts_for_users(
     return result
 
 
+RELEVANT_FACTS_SQL = """
+    SELECT user_id, fact FROM (
+        SELECT user_id, fact,
+               1 - (embedding <=> $1) AS similarity,
+               ROW_NUMBER() OVER (
+                   PARTITION BY user_id ORDER BY embedding <=> $1
+               ) AS fact_rank
+        FROM user_memories
+        WHERE chat_id = $2 AND user_id = ANY($3)
+          AND embedding IS NOT NULL
+    ) ranked
+    WHERE fact_rank <= $4 AND similarity >= $5
+    ORDER BY user_id, fact_rank
+"""
+
+
+async def find_relevant_facts_for_users(
+    *, chat_id: int, user_ids: list[int], embedding: list[float],
+    top_k: int, threshold: float,
+) -> dict[int, list[str]]:
+    """Return each user's facts most similar to ``embedding``, closest first.
+
+    Ranking, thresholding and per-user truncation all happen in Postgres: one
+    window-function query covers every user at once, so the cost stays a single
+    round trip whether two or twenty participants are in scope. Facts stored
+    without an embedding (counter tallies from ``upsert_counter_fact``) can
+    never match and are excluded by the query.
+
+    Args:
+        chat_id: Chat the facts belong to.
+        user_ids: Users to retrieve facts for.
+        embedding: Query embedding, normally of the incoming message.
+        top_k: Maximum facts to return per user.
+        threshold: Minimum cosine similarity a fact must reach to be returned.
+
+    Returns:
+        Mapping of user id to that user's matching facts, closest first. Users
+        with no fact above ``threshold`` are absent from the mapping.
+    """
+    if not user_ids:
+        return {}
+    async with database.acquire() as conn:
+        rows = await conn.fetch(
+            RELEVANT_FACTS_SQL,
+            np.array(embedding), chat_id, user_ids, top_k, threshold,
+        )
+    result: dict[int, list[str]] = {}
+    for row in rows:
+        result.setdefault(row["user_id"], []).append(row["fact"])
+    return result
+
+
 async def get_facts_with_embeddings(*, chat_id: int, user_id: int) -> list[tuple[str, np.ndarray]]:
     """Return (fact, embedding) pairs for all facts that have embeddings stored, newest first."""
     async with database.acquire() as conn:
@@ -71,23 +131,25 @@ async def get_facts_with_embeddings(*, chat_id: int, user_id: int) -> list[tuple
 async def find_similar_fact(
     *, chat_id: int, user_id: int, embedding: list[float], threshold: float
 ) -> int | None:
-    """Return the id of the most similar existing fact if similarity >= threshold, else None."""
-    vector = np.array(embedding)
+    """Return the id of the most similar existing fact if similarity >= threshold, else None.
+
+    The threshold is applied in SQL, so a below-threshold nearest neighbour
+    comes back as no row at all rather than as a row Python has to reject.
+    """
     async with database.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, 1 - (embedding <=> $1) AS similarity
+            SELECT id
             FROM user_memories
             WHERE chat_id = $2 AND user_id = $3
               AND embedding IS NOT NULL
+              AND 1 - (embedding <=> $1) >= $4
             ORDER BY embedding <=> $1
             LIMIT 1
             """,
-            vector, chat_id, user_id,
+            np.array(embedding), chat_id, user_id, threshold,
         )
-    if row is None:
-        return None
-    return row["id"] if row["similarity"] >= threshold else None
+    return row["id"] if row is not None else None
 
 
 async def refresh_updated_at(fact_id: int) -> None:
@@ -119,6 +181,19 @@ def pluralize_times(count: int) -> str:
     return "раз"
 
 
+def is_counter_fact(fact: str) -> bool:
+    """Tell whether a stored fact is a counter tally (hack attempts).
+
+    Args:
+        fact: A stored ``user_memories`` fact string.
+
+    Returns:
+        True when the fact is one of the counter facts listed in
+        ``COUNTER_FACT_PREFIXES``.
+    """
+    return fact.startswith(COUNTER_FACT_PREFIXES)
+
+
 def format_hack_fact(count: int) -> str:
     """Format the hack-attempt counter fact text.
 
@@ -129,18 +204,6 @@ def format_hack_fact(count: int) -> str:
         Fact string, e.g. ``"Пытался взломать бота 3 раза"``.
     """
     return f"Пытался взломать бота {count} {pluralize_times(count)}"
-
-
-def format_insult_fact(count: int) -> str:
-    """Format the bot-insult counter fact text.
-
-    Args:
-        count: Total number of recorded insults aimed at the bot.
-
-    Returns:
-        Fact string, e.g. ``"Оскорблял бота 5 раз"``.
-    """
-    return f"Оскорблял бота {count} {pluralize_times(count)}"
 
 
 async def upsert_counter_fact(
@@ -191,15 +254,6 @@ async def upsert_hack_attempt(*, chat_id: int, user_id: int, username: str) -> N
     )
 
 
-async def upsert_insult_attempt(*, chat_id: int, user_id: int, username: str) -> None:
-    """Increment (or create) the bot-insult counter fact for this user."""
-    await upsert_counter_fact(
-        chat_id=chat_id, user_id=user_id, username=username,
-        like_pattern="Оскорблял бота%", format_fact=format_insult_fact,
-    )
-
-
-
 async def upsert_facts(
     *, chat_id: int, user_id: int, username: str,
     facts: list[str], embeddings: list[list[float]]
@@ -238,8 +292,8 @@ async def upsert_facts(
 async def cleanup_stale(*, days: int = FACT_RETENTION_DAYS) -> int:
     """Delete facts whose ``updated_at`` is older than ``days`` days.
 
-    Applies to every fact, counter facts (insults, hack attempts) included —
-    a counter untouched for the whole window is stale by the same standard.
+    Applies to every fact, counter facts (hack attempts) included — a
+    counter untouched for the whole window is stale by the same standard.
     Genuinely repeated facts survive because the dedup path refreshes
     ``updated_at`` on every re-observation.
 

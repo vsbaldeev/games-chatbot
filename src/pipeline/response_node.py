@@ -1,13 +1,25 @@
 """ResponseNode — personality LLM that turns worker facts into a chat reply."""
 
 import datetime
+import logging
 import re
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
-from src.config.prompts import SHORTS_TRIGGER_INSTRUCTION
+from src.config.prompts import (
+    ACTIVITY_FRESH_SUFFIX,
+    ACTIVITY_HISTORY_HEADER,
+    ACTIVITY_STALE_SUFFIX,
+    BOT_CANON_HEADER,
+    SHORTS_TRIGGER_INSTRUCTION,
+    USER_FACTS_HEADER,
+    WEEKLY_ROLES_RULE,
+    WORKER_DATA_UNVERIFIED_HEADER,
+    WORKER_DATA_VERIFIED_HEADER,
+)
+from src.life import calendar_ru
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -129,7 +141,7 @@ def build_user_facts_lines(context) -> list[str]:
     user_facts = (context or {}).get("user_facts") or {}
     if not user_facts:
         return []
-    parts = ["Что я знаю об участниках чата:"]
+    parts = [USER_FACTS_HEADER]
     for uname, facts in user_facts.items():
         parts.append(f"@{uname}: {'; '.join(facts)}")
     parts.append("")
@@ -183,6 +195,69 @@ def build_mentioned_tags_lines(context) -> list[str]:
     return lines
 
 
+def build_activity_history_lines(recent_activities: list[tuple[str, float]]) -> list[str]:
+    """Return dated activity-history lines, skipping the newest (already-shown) entry.
+
+    Args:
+        recent_activities: ``(phrase, posted_at)`` pairs, newest first, as
+            stored in ``AssembledContext.bot_recent_activities``. The first
+            entry is skipped — it is the same one already rendered as
+            ``[Прямо сейчас ты]``/``[Недавно ты]`` by the caller.
+
+    Returns:
+        Prompt lines for the remaining dated history, with a trailing blank
+        line, or an empty list when fewer than two entries exist.
+    """
+    history = recent_activities[1:]
+    if not history:
+        return []
+    now = datetime.datetime.now(calendar_ru.MOSCOW_TZ)
+    parts = [ACTIVITY_HISTORY_HEADER]
+    parts.extend(
+        f"- {calendar_ru.describe_relative_day(posted_at, now)} — {phrase}"
+        for phrase, posted_at in history
+    )
+    parts.append("")
+    return parts
+
+
+def build_bot_life_lines(context) -> list[str]:
+    """Return formatted bot-canon and current-activity lines for the response prompt.
+
+    Args:
+        context: AssembledContext dict or None.
+
+    Returns:
+        Prompt lines for relevant canon facts, relevant past episodes, the
+        current-activity line and dated activity history, each block only
+        present when data exists; empty list when there is no bot canon to
+        show (e.g. empty store).
+    """
+    context = context or {}
+    parts: list[str] = []
+    facts = context.get("bot_self_facts") or []
+    if facts:
+        parts.append(BOT_CANON_HEADER)
+        parts.extend(f"- {fact}" for fact in facts)
+        parts.append("")
+    episodes = context.get("bot_self_episodes") or []
+    if episodes:
+        parts.append("[Твои прошлые истории по теме]:")
+        parts.extend(episodes)
+        parts.append("")
+    activity = context.get("bot_current_activity")
+    if activity:
+        phrase, freshness = activity
+        if freshness == "fresh":
+            label, suffix = "Прямо сейчас ты", ACTIVITY_FRESH_SUFFIX
+        else:
+            label, suffix = "Недавно ты", ACTIVITY_STALE_SUFFIX
+        parts.append(f"[{label}]: {phrase}{suffix}")
+        parts.append("")
+    parts += build_activity_history_lines(context.get("bot_recent_activities") or [])
+    return parts
+
+
 def build_trigger_line(
     username: str, user_input: str, media_type: str, replied_to: dict | None,
     response_trigger: str = "explicit",
@@ -217,13 +292,113 @@ def build_trigger_line(
     if label:
         return (
             f"{speaker} прислал {label}. Ниже — его описание для тебя "
-            f"(не дословные слова автора; оригинал в чате все и так видят). "
-            f"Отреагируй и пошути, не пересказывай. "
-            f"Описание может ошибаться в именах и названиях: не строй шутку "
-            f"целиком на конкретном имени или названии, если его не "
-            f"подтверждает подпись или разговор:\n{user_input}"
+            f"(не дословные слова автора; оригинал в чате все и так видят — "
+            f"очевидное не описывай). Отреагируй и пошути: зацепись за самую "
+            f"смешную или нелепую деталь, преувеличить — можно и нужно; не "
+            f"пересказывай. Описание может ошибаться в именах и названиях: не "
+            f"строй шутку целиком на конкретном имени или названии, если его "
+            f"не подтверждает подпись или разговор:\n{user_input}"
         )
     return f"{speaker}: {user_input}"
+
+
+def build_recent_history_lines(
+    context, response_trigger: str, has_thread_history: bool
+) -> tuple[list[str], dict | None]:
+    """Return recent-history and replied-to prompt lines, plus the replied-to row.
+
+    The replied-to block is skipped only when that message was actually
+    rendered in the recent-history block above it — never merely because it
+    sits in the recent window. Keying the check on the window instead made
+    the two blocks suppress each other on reply chains (recent history
+    dropped by ``has_thread_history``, replied-to dropped as "already
+    shown"), leaving the model with an unanchored ``(↳ …)`` arrow and no way
+    to resolve a short follow-up like «На четвертом».
+
+    Args:
+        context: AssembledContext dict or None.
+        response_trigger: Routing trigger; ``"random"``/``"youtube_short"``
+            trim the recent-history slice further (see :func:`build_response_input`).
+        has_thread_history: ``True`` when per-thread turn history is available;
+            suppresses recent chat history to avoid double-context.
+
+    Returns:
+        Tuple of ``(prompt lines, replied_to)`` — the replied-to row is
+        returned alongside so the caller can pass it to :func:`build_trigger_line`
+        without recomputing it.
+    """
+    recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
+    if response_trigger in ("random", "youtube_short"):
+        recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
+    rendered = [] if has_thread_history else recent
+
+    parts: list[str] = []
+    if rendered:
+        parts.append("Недавние сообщения чата:")
+        parts.extend(render_row(row) for row in reversed(rendered))
+        parts.append("")
+
+    replied_to = (context or {}).get("replied_to")
+    if replied_to:
+        rendered_ids = {row["message_id"] for row in rendered}
+        if replied_to["message_id"] not in rendered_ids:
+            parts.append("Сообщение, на которое отвечают:")
+            parts.append(render_row(replied_to))
+            parts.append("")
+    return parts, replied_to
+
+
+def build_directive_lines(
+    is_bot_insult: bool, wind_down: bool, photo_directive: str | None
+) -> list[str]:
+    """Assemble the behavioural directive blocks appended before the trigger line.
+
+    Args:
+        is_bot_insult: ``True`` when the filter classified the message as an
+            insult aimed at the bot; adds a hint telling the model to clap back.
+        wind_down: ``True`` when the engagement gate wants the conversation
+            closed; adds a hint to answer in one short phrase and disengage.
+        photo_directive: Photo-request framing — ``"ack"`` (generation is
+            being launched, promise the photo), ``"busy"`` (a selfie is
+            already rendering, no second one), ``"refused"`` (wound-down user
+            asked for a photo, refuse it explicitly) or None.
+
+    Returns:
+        Directive prompt lines, possibly empty.
+    """
+    lines: list[str] = []
+    if is_bot_insult:
+        lines.append(
+            "[Это сообщение — наезд на тебя. Не отмалчивайся и не обижайся: "
+            "ответь дерзкой, хлёсткой подколкой. Правила: бей по самому наезду, "
+            "а не по больным местам человека; держи примерно тот же уровень грубости, "
+            "что и он — не жёстче; один удар — и всё: без встречных вопросов "
+            "и без приглашений продолжить перепалку.]\n"
+        )
+    if wind_down:
+        lines.append(
+            "[Тебе уже надоел этот разговор. Ответь очень коротко — одной фразой, "
+            "в своём характере: дай понять, что сворачиваешь болтовню (дела, "
+            "работа, некогда). Без встречных вопросов и без приглашений "
+            "продолжить.]\n"
+        )
+    if photo_directive == "ack":
+        lines.append(
+            "[Тебя просят прислать твоё фото. Ты уже пошёл фоткать — ответь одной "
+            "короткой фразой в своём духе, что сейчас сфоткаешь и скинешь. "
+            "Не описывай будущее фото и ничего про него не выдумывай.]\n"
+        )
+    elif photo_directive == "busy":
+        lines.append(
+            "[Ты уже фоткаешь по предыдущей просьбе. Скажи коротко, что уже этим "
+            "занят и фото скоро будет; второй раз фоткать не пойдёшь.]\n"
+        )
+    elif photo_directive == "refused":
+        lines.append(
+            "[Тебя просят прислать твоё фото, но фоткаться тебе лень и некогда. "
+            "Откажи прямо, в своём характере, без обещаний прислать позже.]\n"
+        )
+    return lines
 
 
 def build_response_input(
@@ -235,7 +410,9 @@ def build_response_input(
     has_thread_history: bool = False,
     media_type: str = "text",
     is_bot_insult: bool = False,
+    wind_down: bool = False,
     worker_tools_used: bool = False,
+    photo_directive: str | None = None,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
 
@@ -253,9 +430,13 @@ def build_response_input(
             :func:`build_trigger_line`).
         is_bot_insult: ``True`` when the filter classified the message as an
             insult aimed at the bot; adds a hint telling the model to clap back.
+        wind_down: ``True`` when the engagement gate wants the conversation
+            closed; adds a hint to answer in one short phrase and disengage.
         worker_tools_used: ``True`` when the worker actually ran a tool;
             selects the tool-verified data frame instead of the unverified
             context-derived frame.
+        photo_directive: Photo-request framing passed to
+            :func:`build_directive_lines`, or None.
 
     Returns:
         Prompt string ready to pass as the final human turn to the response LLM.
@@ -263,50 +444,48 @@ def build_response_input(
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"Текущая дата и время: {now}", ""]
     parts += build_user_facts_lines(context)
-    parts += build_asking_user_tag_lines(context, username)
-    parts += build_mentioned_tags_lines(context)
+    role_lines = build_asking_user_tag_lines(context, username) + build_mentioned_tags_lines(context)
+    if role_lines:
+        parts.append(WEEKLY_ROLES_RULE)
+        parts += role_lines
+    parts += build_bot_life_lines(context)
 
-    recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
     # Skip recent history when thread history is present (thread turns already
     # provide conversational context, group chat would just confuse the model).
     # Random and Shorts triggers keep a thin slice — enough to catch topic
     # mismatch without turning a spontaneous reaction into a reply to the
     # discussion.
-    if response_trigger in ("random", "youtube_short"):
-        recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
-    if recent and not has_thread_history:
-        parts.append("Недавние сообщения чата:")
-        for row in reversed(recent):
-            parts.append(render_row(row))
-        parts.append("")
-
-    replied_to = (context or {}).get("replied_to")
-    if replied_to:
-        recent_ids = {row["message_id"] for row in recent}
-        if replied_to["message_id"] not in recent_ids:
-            parts.append("Сообщение, на которое отвечают:")
-            parts.append(render_row(replied_to))
-            parts.append("")
+    history_lines, replied_to = build_recent_history_lines(
+        context, response_trigger, has_thread_history
+    )
+    parts += history_lines
 
     if worker_output:
-        if worker_tools_used:
-            parts.append(f"[Собранные данные (проверено через инструменты)]:\n{worker_output}\n")
-        else:
-            parts.append(
-                f"[Данные из контекста разговора (во внешних источниках НЕ проверялись)]:\n{worker_output}\n"
-            )
+        header = WORKER_DATA_VERIFIED_HEADER if worker_tools_used else WORKER_DATA_UNVERIFIED_HEADER
+        parts.append(f"{header}\n{worker_output}\n")
 
-    if is_bot_insult:
-        parts.append(
-            "[Это сообщение — наезд на тебя. Не отмалчивайся и не обижайся: "
-            "ответь дерзкой, хлёсткой подколкой. Правила: бей по самому наезду, "
-            "а не по больным местам человека; держи примерно тот же уровень грубости, "
-            "что и он — не жёстче; один удар — и всё: без встречных вопросов "
-            "и без приглашений продолжить перепалку.]\n"
-        )
+    parts += build_directive_lines(is_bot_insult, wind_down, photo_directive)
 
     parts.append(build_trigger_line(username, user_input, media_type, replied_to, response_trigger))
     return "\n".join(parts)
+
+
+def resolve_photo_directive(state: BotState) -> str | None:
+    """Derive the photo-request directive from the filter's state flags.
+
+    Args:
+        state: Current pipeline state.
+
+    Returns:
+        ``"ack"`` for an accepted photo request, ``"busy"`` when a selfie was
+        already rendering, ``"refused"`` for a wound-down photo request, or
+        None when the message is not photo-related.
+    """
+    if state.get("photo_request"):
+        return "busy" if state.get("photo_in_flight") else "ack"
+    if state.get("wind_down") and state.get("filter_verdict") == "PHOTO_REQUEST":
+        return "refused"
+    return None
 
 
 async def persist_thread_turn(state: BotState, response_text: str) -> None:
@@ -342,6 +521,31 @@ async def persist_thread_turn(state: BotState, response_text: str) -> None:
         human_content=human_content,
         ai_content=strip_markdown(response_text),
     )
+
+
+def log_response_input(past_messages: list, enriched: str) -> None:
+    """Dump the exact input the response LLM is about to see, at DEBUG level.
+
+    Absurd replies are usually caused by something in the assembled prompt
+    (a stale fact, a poisoned thread turn, a mis-framed trigger line), and
+    that assembly is ephemeral — without this dump there is no way to see
+    it after the fact. Thread history turns are logged as one-line excerpts
+    (their full text lives in the ``thread_history`` table); the enriched
+    final turn is logged verbatim because it exists nowhere else.
+
+    Args:
+        past_messages: Thread-history turns preceding the final human turn.
+        enriched: The assembled final human turn passed to the LLM.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    for position, message in enumerate(past_messages, start=1):
+        speaker = "human" if isinstance(message, HumanMessage) else "ai"
+        logger.debug(
+            "Response LLM history %d/%d (%s): %s",
+            position, len(past_messages), speaker, log.snippet(message.content),
+        )
+    logger.debug("Response LLM final turn:\n%s", enriched)
 
 
 class ResponseNode:
@@ -390,9 +594,12 @@ class ResponseNode:
             has_thread_history=bool(past_messages),
             media_type=media_type,
             is_bot_insult=bool(state.get("is_bot_insult")),
+            wind_down=bool(state.get("wind_down")),
             worker_tools_used=bool(state.get("worker_tools_used")),
+            photo_directive=resolve_photo_directive(state),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
+        log_response_input(past_messages, enriched)
         response_text = normalize_homoglyphs(await self.__generate(messages))
 
         # Foreign-script responses are persisted by LanguageCorrectionNode

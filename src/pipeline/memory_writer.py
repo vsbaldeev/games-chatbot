@@ -6,8 +6,11 @@ Runs in two modes:
     plus the recent conversation context from state["context"].
   - Passive (no reply): fed the user message alone — the bot "overheard" it.
 
-The module-level extract_and_save is also called directly from the router
-for plain text messages that don't trigger a bot response.
+The module-level extract_and_save is also called directly from the filter
+node (overheard "бот"-mention candidates the router routes past memory_writer)
+and from the voice message handler; the router itself no longer calls it —
+route_after_router sends passive text straight to the memory_writer node so
+extraction has exactly one call site per message.
 Cross-user facts are extracted automatically when @mentions are present.
 
 Source rules:
@@ -19,23 +22,41 @@ Source rules:
   - Cross-user claims pass a sincerity rule (banter and insults are not
     facts) and are stored with a «по словам @X, …» attribution prefix.
 
+The "Existing facts" shown to the extraction model is retrieval-gated, not
+the user's whole stored list: _relevant_existing_facts ranks stored facts by
+cosine similarity to the message being processed and keeps only the top
+EXISTING_FACTS_LIMIT above EXISTING_FACTS_SIMILARITY_THRESHOLD (mirrors
+context_builder's USER_FACTS_SIMILAR_LIMIT gating for reply prompts, see
+2475ea05). This only affects what the model sees for dedup framing — the
+actual duplicate-safety net is the insert-time embedding check below.
+
 Deduplication uses cosine similarity between fastembed vectors rather than
 LLM judgement. A duplicate refreshes the existing fact's updated_at instead
 of inserting a new row. Facts untouched for 90 days are deleted by the
 nightly cleanup job (user_memories.cleanup_stale), counters included.
 
-MEMORY_MODEL is a reasoning model, so every extraction call disables
-reasoning (reasoning_effort="none") — otherwise the whole token budget is
-burned inside a <think> block and no JSON answer is ever produced. As a
-backstop, _parse_facts strips any think blocks and logs unparsable output.
+The primary model in MEMORY_MODEL_FALLBACKS is a reasoning model, so every
+extraction call disables reasoning (reasoning_effort="none") — otherwise the
+whole token budget is burned inside a <think> block and no answer is ever
+produced. As a backstop, _parse_facts strips any think blocks first.
+make_extraction_llm() chains the fallback model behind it via
+with_fallbacks(), so a Groq daily-quota (or other rate-limit) 429 on the
+primary fails over instead of killing extraction for the rest of the day.
+
+Output is one fact per line rather than a JSON array: small models reliably
+emit bare, unquoted list items (e.g. "[fact one, fact two]"), which breaks
+JSON parsing and silently discards every fact in the batch. Line-splitting
+has no quoting failure mode.
 """
 
 import asyncio
-import json
+import logging
 import re
 from collections import defaultdict
 
+import groq
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
 
 from src import achievements, config, log
@@ -55,7 +76,7 @@ logger = log.get_logger(__name__)
 # check-then-insert window cannot be observed by a second concurrent task.
 user_dedup_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
 
-# Bounds how many extraction calls hit the shared MEMORY_MODEL token bucket at
+# Bounds how many extraction calls hit the shared MEMORY_MODEL_FALLBACKS[0] token bucket at
 # once. Fact extraction fires fire-and-forget per message plus once per @mention,
 # so without a cap a burst stampedes the model's tokens-per-minute limit. Excess
 # tasks queue on the semaphore instead of all racing for the same 429.
@@ -64,6 +85,18 @@ memory_call_semaphore = asyncio.Semaphore(MEMORY_CALL_CONCURRENCY)
 MAX_NEW_FACTS = 3
 MIN_PASSIVE_LENGTH = 20
 SIMILARITY_THRESHOLD = 0.85
+
+# "Existing facts" shown to the extraction model, gated the same way as
+# context_builder gates USER_FACTS_SIMILAR_LIMIT/reply prompts (see 2475ea05):
+# dumping every stored fact (up to MAX_FACTS_PER_USER=30) into every extraction
+# call regardless of what the message is about is pure noise once a user has
+# been around a while. Any fact the model could extract from the current
+# message is necessarily topically close to it, so gating retrieval by
+# similarity to the message loses nothing for dedup purposes — the insert-time
+# check (find_similar_fact, same threshold) is the actual duplicate-safety net
+# and does not depend on what the prompt shows.
+EXISTING_FACTS_LIMIT = 5
+EXISTING_FACTS_SIMILARITY_THRESHOLD = SIMILARITY_THRESHOLD
 
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
@@ -102,44 +135,104 @@ def _format_recent_context(recent: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def make_extraction_llm() -> ChatGroq:
-    """Return the fact-extraction LLM with reasoning disabled.
+def make_extraction_llm() -> Runnable:
+    """Return the fact-extraction LLM chain with reasoning disabled and a fallback.
 
-    MEMORY_MODEL is a reasoning model; without ``reasoning_effort="none"`` it
-    spends the whole max_tokens budget inside a ``<think>`` block and the JSON
-    answer never appears, so extraction silently yields zero facts.
+    MEMORY_MODEL_FALLBACKS[0] is a reasoning model; without
+    ``reasoning_effort="none"`` it spends the whole max_tokens budget inside a
+    ``<think>`` block and the answer never appears, so extraction silently
+    yields zero facts. Only the primary gets that parameter — later models in
+    the chain are not reasoning models.
+
+    The chain fails over to the next model on any ``groq.RateLimitError``,
+    including Groq's daily-quota (TPD) 429 that a same-model retry can never
+    recover from.
 
     Returns:
-        Configured ``ChatGroq`` instance for fact extraction.
+        A ``Runnable`` chaining ``config.MEMORY_MODEL_FALLBACKS`` in order.
     """
-    return ChatGroq(
-        model=config.MEMORY_MODEL, api_key=config.GROQ_API_KEY,
+    primary_llm = ChatGroq(
+        model=config.MEMORY_MODEL_FALLBACKS[0], api_key=config.GROQ_API_KEY,
         temperature=0.2, max_tokens=256, max_retries=0,
         reasoning_effort="none",
     )
+    fallback_llms = [
+        ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256, max_retries=0)
+        for model in config.MEMORY_MODEL_FALLBACKS[1:]
+    ]
+    return primary_llm.with_fallbacks(fallback_llms, exceptions_to_handle=(groq.RateLimitError,))
+
+
+FACT_LINE_STRIP_RE = re.compile(r"^[\s\-*•\d.)]+")
+NO_FACTS_SENTINEL = "NONE"
 
 
 def _parse_facts(raw: str) -> list[str]:
+    """Parse one-fact-per-line extraction output into a list of facts.
+
+    Args:
+        raw: Raw LLM output, one fact per line, or the ``NONE`` sentinel
+            when nothing distinctive was learned.
+
+    Returns:
+        Non-empty fact strings with leading bullets/numbering stripped.
+    """
     cleaned = strip_thinking(raw)
+    facts = []
+    for line in cleaned.splitlines():
+        fact = FACT_LINE_STRIP_RE.sub("", line).strip()
+        if fact and fact.upper() != NO_FACTS_SENTINEL:
+            facts.append(fact)
+    return facts
+
+
+def log_extraction_call(label: str, prompt: str, facts: list[str]) -> None:
+    """Dump an extraction call's exact prompt and resulting facts, at DEBUG level.
+
+    Wrong or missing facts are usually caused by something in the assembled
+    prompt (stale existing facts, a mis-framed exchange) or by the model
+    itself, and neither is visible after the fact without this dump.
+
+    Args:
+        label: Short tag identifying the call site (e.g. the username the
+            facts are about), prefixed to the log lines.
+        prompt: The exact prompt string sent to the extraction LLM.
+        facts: Facts parsed from the LLM's response, possibly empty.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    logger.debug("Extraction prompt (%s):\n%s", label, prompt)
+    logger.debug("Extracted facts (%s): %s", label, facts or "(none)")
+
+
+async def _relevant_existing_facts(*, chat_id: int, user_id: int, query_text: str) -> list[str]:
+    """Return the user's stored facts most relevant to query_text, closest first.
+
+    Embeds query_text and delegates ranking, thresholding and truncation to
+    Postgres via find_relevant_facts_for_users. An embedding failure degrades
+    to no existing facts shown, rather than falling back to the whole stored
+    list — the insert-time dedup check does not depend on this list.
+
+    Args:
+        chat_id: Chat the facts belong to.
+        user_id: User whose facts are being retrieved.
+        query_text: Text to rank stored facts against — normally the message
+            being processed for extraction.
+
+    Returns:
+        Up to EXISTING_FACTS_LIMIT facts above EXISTING_FACTS_SIMILARITY_THRESHOLD,
+        closest first; possibly empty.
+    """
     try:
-        data = json.loads(cleaned)
-        if not isinstance(data, list):
-            logger.warning("Fact extraction returned non-list JSON: %.200s", cleaned)
-            return []
-        facts = []
-        for item in data:
-            if isinstance(item, str):
-                fact = item.strip()
-            elif isinstance(item, dict):
-                fact = next((str(value).strip() for value in item.values() if value), "")
-            else:
-                fact = str(item).strip()
-            if fact:
-                facts.append(fact)
-        return facts
-    except json.JSONDecodeError:
-        logger.warning("Fact extraction returned unparsable output: %.200s", cleaned)
+        query_embedding = await embedder.embed(query_text)
+    except Exception as err:
+        logger.warning("Failed to embed message for existing-facts retrieval: %s", err)
         return []
+    facts_by_id = await user_memories.find_relevant_facts_for_users(
+        chat_id=chat_id, user_ids=[user_id], embedding=query_embedding,
+        top_k=EXISTING_FACTS_LIMIT, threshold=EXISTING_FACTS_SIMILARITY_THRESHOLD,
+    )
+    return facts_by_id.get(user_id, [])
 
 
 async def _extract_facts(
@@ -175,14 +268,16 @@ async def _extract_facts(
     media_rule = f"{MEDIA_DESCRIPTION_RULE}\n\n" if source_kind == "media_description" else ""
     prompt = (
         f"User: @{username}\nExisting facts:\n{existing_block}\n\n"
-        f"{media_rule}{context_section}{exchange}\n\nNew facts to add (JSON array):"
+        f"{media_rule}{context_section}{exchange}\n\nNew facts to add (one per line):"
     )
     llm = make_extraction_llm()
     async with memory_call_semaphore:
         result = await ainvoke_with_backoff(
             llm, [SystemMessage(content=EXTRACTION_SYSTEM), HumanMessage(content=prompt)],
         )
-    return _parse_facts(result.content.strip())
+    facts = _parse_facts(result.content.strip())
+    log_extraction_call(f"@{username}", prompt, facts)
+    return facts
 
 
 async def _dedup_and_save(
@@ -207,6 +302,7 @@ async def _check_and_insert(
         )
         if matched_id is not None:
             await user_memories.refresh_updated_at(matched_id)
+            logger.debug("Dedup: @%s fact already known (id=%s), refreshed: %s", username, matched_id, fact)
         else:
             to_insert_facts.append(fact)
             to_insert_embeddings.append(fact_embedding)
@@ -215,7 +311,10 @@ async def _check_and_insert(
             chat_id=chat_id, user_id=user_id, username=username,
             facts=to_insert_facts, embeddings=to_insert_embeddings,
         )
-        logger.debug("Saved %d facts for @%s in chat %s", len(to_insert_facts), username, chat_id)
+        logger.debug(
+            "Saved %d facts for @%s in chat %s: %s",
+            len(to_insert_facts), username, chat_id, to_insert_facts,
+        )
 
 
 async def extract_and_save(
@@ -235,7 +334,9 @@ async def extract_and_save(
             or ``"media_description"``.
     """
     try:
-        existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
+        existing = await _relevant_existing_facts(
+            chat_id=chat_id, user_id=user_id, query_text=user_message,
+        )
         new_facts = await _extract_facts(
             username=username, user_message=user_message,
             bot_reply=bot_reply, existing=existing,
@@ -275,13 +376,15 @@ async def _extract_facts_about(
         observer_username: Who made the claim.
     """
     try:
-        existing = await user_memories.get_facts(chat_id=chat_id, user_id=user_id)
+        existing = await _relevant_existing_facts(
+            chat_id=chat_id, user_id=user_id, query_text=observation,
+        )
         existing_block = "\n".join(f"- {fact}" for fact in existing) if existing else "(none)"
         prompt = (
             f"Пользователь: @{username}\nИзвестные факты:\n{existing_block}\n\n"
             f"{CROSS_USER_SINCERITY_RULE}\n\n"
             f"Наблюдение от @{observer_username}: {observation}\n\n"
-            f"Что это говорит нам о @{username}? Новые факты (JSON-массив):"
+            f"Что это говорит нам о @{username}? Новые факты (по одному на строку):"
         )
         llm = make_extraction_llm()
         async with memory_call_semaphore:
@@ -292,6 +395,7 @@ async def _extract_facts_about(
             f"по словам @{observer_username}, {fact}"
             for fact in _parse_facts(result.content.strip())
         ]
+        log_extraction_call(f"@{username} (cross-user, via @{observer_username})", prompt, new_facts)
         await _dedup_and_save(
             chat_id=chat_id, user_id=user_id, username=username, new_facts=new_facts,
         )

@@ -21,19 +21,42 @@ WHISPER_LANGUAGE = "ru"
 # max_tokens budget is burned inside a <think> block.
 VISION_MODEL = "qwen/qwen3.6-27b"
 
-# Meaningless-message filter (binary yes/no, max_tokens=5).
-# llama-3.1-8b-instant has 14.4K RPD vs 1K RPD for larger models.
-FILTER_MODEL = "llama-3.1-8b-instant"
+# Meaningless-message filter. Was llama-3.1-8b-instant for its 14.4K RPD, but
+# measured against 30 days of this chat's real addressed messages the 8B model
+# answered 3/8 of the drops it should not have made — it labelled plain
+# questions MEANINGLESS despite the prompt's rule 4 forbidding exactly that,
+# and each mislabel costs a member an emoji instead of an answer. The 70B model
+# scored 8/8 on the same set. Volume makes the RPD argument moot: this chat
+# sees ~11 addressed messages a day, nowhere near the smaller 1K RPD budget.
+FILTER_MODEL = "llama-3.3-70b-versatile"
+
+# Cross-provider fallback for the filter, used when Groq is out of quota or
+# unreachable (see filter_node.make_filter_llm). Same weights, different
+# vendor, so a Groq outage degrades to a paid call instead of to silence.
+# Requires OPENROUTER_API_KEY; without it the filter is Groq-only.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+FILTER_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 # Second opinion before acting on an overheard bot-word insult. The comeback
 # payload is aggressive, so the cheap filter's positives are confirmed by a
 # stronger model before the bot claps back.
+# NOTE: now identical to FILTER_MODEL, which makes the confirmation a
+# same-model re-ask at temperature 0 — it will nearly always agree, so the
+# overheard gate is effectively open. Needs a decision: point this at a
+# genuinely different model (openai/gpt-oss-120b) or drop the second call.
 INSULT_CONFIRM_MODEL = "llama-3.3-70b-versatile"
 
-# Memory fact extraction.
-# Reasoning model: callers must pass reasoning_effort="none" or the whole
-# max_tokens budget is burned inside a <think> block and no JSON is produced.
-MEMORY_MODEL = "qwen/qwen3.6-27b"
+# Memory fact extraction fallback chain (chat facts and posted-episode
+# canon-fact distillation both use this — see memory_writer.make_extraction_llm).
+# Primary is a reasoning model: callers must pass reasoning_effort="none" or
+# the whole max_tokens budget is burned inside a <think> block and no JSON is
+# produced. llama-3.1-8b-instant is the fallback for Groq daily-quota (TPD)
+# exhaustion on the primary — same model FILTER_MODEL uses for its far larger
+# free-tier RPD/TPD budget, so the two rarely run out on the same day.
+MEMORY_MODEL_FALLBACKS: list[str] = [
+    "qwen/qwen3.6-27b",       # primary
+    "llama-3.1-8b-instant",   # fallback: separate, larger daily quota
+]
 
 # Weekly member-role assignment
 TAG_MODEL = "llama-3.3-70b-versatile"
@@ -68,6 +91,52 @@ ROAST_MODEL_FALLBACKS: list[str] = [
     "llama-3.3-70b-versatile",
     "openai/gpt-oss-20b",
 ]
+
+# Life-post episode writer fallback chain. llama first: only Meta/llama holds
+# the casual Russian style (see RESPONSE_MODEL_FALLBACKS above).
+EPISODE_MODEL_FALLBACKS: list[str] = [
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
+]
+
+# Generous headroom over the ~1100-char JSON contract payload so a post is
+# never truncated mid-joke by the model's completion limit.
+EPISODE_MAX_TOKENS = 2000
+
+# Silent daily current-activity refresh. Single tiny call, no fallback chain
+# needed: on failure the previous activity simply ages into "recent" phrasing
+# instead of breaking anything. llama for the same reason as
+# RESPONSE_MODEL_FALLBACKS above — casual Russian style.
+ACTIVITY_MODEL = "llama-3.3-70b-versatile"
+
+# Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
+# Karras). Standard multi-step sampling, not an LCM speed hack: low-step/
+# low-guidance sampling reliably hallucinated compositions. One 512px image
+# is estimated at ~5-10 min on the 4 vCPU host (confirm at deploy), so the
+# client polls the async job API instead of holding a request open.
+IMAGEGEN_STEPS = 20
+IMAGEGEN_SIZE = 512
+IMAGEGEN_GUIDANCE = 6.0
+IMAGEGEN_POLL_SECONDS = 10
+IMAGEGEN_DEADLINE_SECONDS = 1200
+
+# Best-of-N photo selection: SD1.5 renders subject interactions
+# stochastically, so up to N candidates are generated per photo post and a
+# vision-LLM judge (VISION_MODEL) scores each against the episode's
+# image_prompt (0-10, interaction-weighted). The first candidate scoring
+# >= PHOTO_JUDGE_PASS_SCORE ships immediately; otherwise the best one does —
+# the judge is a ranker, not a gate.
+IMAGEGEN_CANDIDATES = 3
+PHOTO_JUDGE_PASS_SCORE = 7
+PHOTO_JUDGE_MAX_TOKENS = 150
+
+# Chat-requested selfie scene writer (src/life/selfie.py). One small call
+# turning a member's Russian photo request into an English scene line. No
+# fallback chain: a failure degrades to a canned in-character excuse. llama
+# for the same reliable bare-string output as ACTIVITY_MODEL above.
+SELFIE_SCENE_MODEL = "llama-3.3-70b-versatile"
+SELFIE_SCENE_MAX_TOKENS = 200
 
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly

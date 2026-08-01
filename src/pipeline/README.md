@@ -51,19 +51,18 @@ incoming message
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
     │     ├─ album item whose media_group_id already rolled (5-min TtlGate)
     │     │                           → should_respond=False (one roll per album)
-    │     └─ otherwise               → random.random() < MEDIA_RESPONSE_CHANCE (0.20)
+    │     └─ otherwise               → random.random() < MEDIA_RESPONSE_CHANCE (0.10)
     │
     └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
     │
     ├─ every text message → humor_gate.observe(chat_id)   [counts toward joke cadence]
     │
-    ├─ should_respond=False + non-forwarded text (≥ 20 chars)
-    │       → asyncio.create_task(extract_and_save)   [passive memory, background]
-    │         forwarded messages are skipped — channel content must not be
-    │         attributed as facts about the person who forwarded it
-    │
     ├─ should_respond=False + humor gate fires → humor   [autonomous joke]
-    ├─ should_respond=False → memory_writer (long text) or END
+    ├─ should_respond=False + non-forwarded text (≥ 20 chars) → memory_writer
+    │       (route_after_router in graph.py; passive memory, background —
+    │        this is the only call site, the router itself no longer fires
+    │        extract_and_save inline)
+    ├─ should_respond=False → END
     └─ should_respond=True  → ingester
 ```
 
@@ -83,7 +82,10 @@ participant material (`src/agent/roast_material.py`), and asks the `ComedianAgen
 (`src/agent/comedian.py`) for a strict-JSON decision that includes a `reply_to`
 citation — the id of the message the joke is actually about. On `act` the node
 validates the citation against the fetched messages (a hallucinated id or a
-citation of the bot's own message degrades to no anchor), sets
+citation of the bot's own message degrades to no anchor), drops the joke
+entirely when the cited target's author is wound down by the engagement gate
+(`engagement_gate.is_wound_down`, read-only score peek — bot-initiated humor
+must not restart a conversation the gate is ending), sets
 `state["response"]`, `response_trigger="humor"` and `humor_reply_to_msg_id`, and
 stamps the cooldown via `mark_joke_sent`. `run_pipeline` then anchors the joke as
 a Telegram reply to the cited message, or posts it un-anchored when there is no
@@ -122,8 +124,11 @@ ingester (current message, should_respond=True only)
     │     PO tokens for YouTube bot-detection come automatically from the
     │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
     ├─ voice      → Groq Whisper → transcript
-    ├─ video_note → Groq Whisper + frame extraction (see below)
-    ├─ video      → Groq Whisper + frame extraction (see below)
+    ├─ video_note → Groq Whisper + frame extraction (see below); frames' vision
+    │               calls also yield media_is_real_person (majority vote — see below)
+    ├─ video      → Groq Whisper + frame extraction (see below); same
+    │               media_is_real_person aggregation (unused for gating today —
+    │               only photo/video_note are gated, see filter below)
     ├─ photo      → vision LLM description; combined with caption when present
     │               "<description>\n(подпись: <caption>)" form
     │               all non-text results: update unified_messages content
@@ -134,10 +139,26 @@ ingester (current message, should_respond=True only)
     │               short visible text (meme captions, реплики, headlines) is
     │               quoted verbatim in its original language, so requests like
     │               «переведи» have the actual text to work with
+    │               the same vision call also yields media_is_real_person
+    │               (see below) — no extra LLM round trip
     └─ sticker    → vision LLM description, only when should_respond=True
                     (plain sticker traffic is enriched lazily instead — see
                     below; note the router currently never responds to
                     stickers, so in practice all sticker enrichment is lazy)
+
+real-person-vs-meme classification (ingester.parse_vision_response)
+    every vision call (photo, and each extracted video/video_note frame) is
+    instructed to prepend a [ЧЕЛОВЕК]/[МЕМ] tag before its description
+    (VISION_PROMPT); the tag is parsed off and never leaks into the stored
+    description. For photo it is used directly; for video/video_note the
+    per-frame tags are majority-voted (aggregate_real_person) into one
+    media_is_real_person verdict, None when no frame could be classified.
+    Surfaced in BotState as media_is_real_person (None for text/voice or on
+    any classification failure — fails open). Consumed only by the filter
+    node's random-trigger meme gate (see Safety below); explicit @mentions
+    and replies ignore it entirely, and lazy reply-chain photo enrichment
+    (enrich_photo_row) discards it — only the currently incoming message's
+    classification can gate a response.
 
 transcription (Groq Whisper, verbose_json, temperature=0)
     language pinned to Russian (WHISPER_LANGUAGE) — short notes no longer flip
@@ -196,7 +217,15 @@ filter  (runs after ingester)
     │       │     voice/video → «Не расслышал…» (TRANSCRIPTION_FAILED_REPLIES)
     │       │     photo       → «Не разглядел…» (VISION_FAILED_REPLIES)
     │       └─ random trigger → should_respond=False + random emoji reaction
-    ├─ media message, processed_text non-empty → pass through
+    ├─ media message, processed_text non-empty
+    │       ├─ random trigger, media_type in (photo, video_note), and
+    │       │     media_is_real_person is False (a meme, not a real person —
+    │       │     see ingester's real-person-vs-meme classification above)
+    │       │       → should_respond=False, fully silent — as if the random
+    │       │         roll had simply missed (is_meme_random_trigger)
+    │       └─ otherwise → pass through (explicit @mentions/replies are
+    │             never gated — a member directly asking the bot to react
+    │             to a meme still gets the roast)
     ├─ text, raw_text empty  → should_respond=False (silent)
     addressed messages (trigger="explicit", FILTER_SYSTEM prompt):
     │   if the message is a reply, the replied-to message is loaded from
@@ -211,15 +240,29 @@ filter  (runs after ingester)
     │   is another bare media placeholder ([voice], [animation]…), the
     │   placeholder is hidden and the reply classifies context-free instead
     │   of against a token the classifier cannot see
-    ├─ text, LLM → MEANINGLESS
-    │       ├─ text looks like a question or request («?», leading
+    ├─ text, LLM → MEANINGLESS or BANTER
+    │       ├─ text looks like a question or request («?», more than
+    │       │   SUBSTANTIVE_WORD_COUNT non-laughter words, leading
     │       │   interrogative, or imperative request verb like «переведи»/
-    │       │   «расскажи»; laughter tokens skipped) → overridden to
-    │       │   MEANINGFUL: a question or request is never meaningless
-    │       └─ otherwise → should_respond=False
-    │               + asyncio.create_task(react with random emoji)
-    ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → insult ladder
-    ├─ text, LLM → MEANINGFUL → should_respond=True
+    │       │   «расскажи»/«поищи»/«загугли»; laughter tokens skipped, and
+    │       │   @handles stripped first — the text arrives as typed, so
+    │       │   «@bot что это» would otherwise be judged on the bot's own
+    │       │   username and the handle would count toward the word total) →
+    │       │   overridden to MEANINGFUL: every MEANINGLESS/BANTER category
+    │       │   is a SHORT reaction, so a longer message is never meaningless
+    │       │   the override is a free deterministic floor, not the primary
+    │       │   defence: FILTER_MODEL was llama-3.1-8b-instant, which labelled
+    │       │   plain questions MEANINGLESS (3/8 on 30 days of this chat's real
+    │       │   drops) and cost members an emoji instead of an answer; it is
+    │       │   now llama-3.3-70b-versatile, which scored 8/8 on the same set,
+    │       │   with an OpenRouter fallback so a Groq outage cannot turn an
+    │       │   addressed question into silence (make_filter_llm)
+    │       └─ otherwise → engagement gate (see wind-down engine below)
+    ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
+    ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —
+    │       «сфоткай себя», «покажи свой огород»; pictures of anything else
+    │       stay MEANINGFUL) → engagement gate
+    ├─ text, LLM → MEANINGFUL → engagement gate
     └─ text, LLM error       → should_respond=True (fails open)
 
     overheard messages (trigger="insult_check", OVERHEARD_SYSTEM prompt —
@@ -230,26 +273,55 @@ filter  (runs after ingester)
     ├─ LLM → BOT_INSULT → confirmed by the stronger INSULT_CONFIRM_MODEL
     │    (llama-3.3-70b-versatile) on the same input; only agreement acts —
     │    disagreement or a confirmation error resolves to silence
-    │       → insult ladder
+    │       → engagement gate (as BOT_INSULT)
     └─ anything else / LLM error → should_respond=False, silent drop
             (no emoji — the bot was never addressed; long texts still get
-             passive memory extraction, mirroring the router's behaviour)
+             passive memory extraction here, since should_respond=True routed
+             this message past the router's own memory_writer branch)
 
-insult ladder (insult_gate.py — per (chat_id, user_id), 30-min rolling window,
-in-memory; the «Оскорблял бота N раз» counter fact in user_memories is
-incremented only for addressed or double-confirmed insults, via
-asyncio.create_task):
-    ├─ 1st insult   → should_respond=True, is_bot_insult=True
-    │       response node injects a comeback hint with two guardrails:
-    │       mirror the incoming crudeness (never escalate above it) and land
-    │       one punch without inviting the exchange to continue
-    │       the worker is skipped on insult paths (is_bot_insult) — a comeback
-    │       needs personality, not tools; no «🔍 Ищу…» before the burn
-    ├─ 2nd–3rd      → should_respond=False, response = canned dismissive
-    │       one-liner (DISMISSIVE_REPLIES pool, no LLM) — sent by run_pipeline
-    │       the same way guard refusals are
-    └─ 4th and on   → should_respond=False + bored emoji reaction
-            (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨)
+engagement gate — conversation wind-down engine (engagement_gate.py +
+store/engagement.py, table engagement_scores): one leaky-bucket attention
+score per (chat_id, user_id), persisted in Postgres so a redeploy never resets
+a wound-down user. Every addressed verdict (and every double-confirmed
+overheard insult, and explicitly addressed transcribed media as MEANINGFUL)
+charges a weight — PHOTO_REQUEST 4.5 (each accepted request occupies the
+single shared imagegen worker for minutes), BOT_INSULT 3.0, BANTER/MEANINGLESS
+2.0, MEANINGFUL 1.0 — decayed with a 30-min half-life in a single atomic
+UPSERT; the post-charge
+score maps onto a tier (brush-off >7, emoji >13, silence >19), so any
+sustained conversation fades out like a person losing interest. The
+«Оскорблял бота N раз» counter fact in user_memories is still incremented for
+every addressed or double-confirmed insult at any tier, via
+asyncio.create_task; it feeds weekly roles and roasts only — the context
+builder filters counter tallies out of reply prompts so the bot does not
+keep reciting the score. Store errors fail open to the full tier.
+    ├─ FULL tier      → should_respond=True — full reply; BOT_INSULT sets
+    │       is_bot_insult=True (comeback hint, worker skipped; two rapid
+    │       insults both land here by design — the classifier has false
+    │       positives). A BOT_INSULT that *replies to the bot's own message*
+    │       and any BANTER verdict additionally set wind_down=True: a
+    │       mirrored counter-insult mid-thread never earns a fresh full
+    │       comeback (that is what fuels roast-battle loops).
+    │       PHOTO_REQUEST at this tier sets photo_request=True plus a
+    │       photo_in_flight peek of both image flows (chat selfie and
+    │       scheduled life post — they share the imagegen worker, and a
+    │       photo post holds it for ~16 min): the worker is
+    │       skipped, the reply is an in-character «ща сфоткаю» ack («уже
+    │       фоткаю» when a selfie is already rendering), and after the ack is
+    │       delivered the events layer fire-and-forgets
+    │       src/life/selfie.deliver_selfie (weight 4.5 → a fresh user's first
+    │       request ships a photo, a rapid second one lands in the brush-off
+    │       refusal below)
+    ├─ BRUSH_OFF tier → should_respond=True + wind_down=True — the response
+    │       node injects a close-the-conversation hint (one short in-character
+    │       phrase, no questions, no invitations) and the worker is skipped;
+    │       BANTER at this tier degrades straight to the bored emoji reaction;
+    │       a PHOTO_REQUEST here gets an explicit in-character photo refusal
+    │       directive instead of the generic brush-off — no generation runs
+    ├─ EMOJI tier     → should_respond=False + bored emoji reaction
+    │       (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨; MEANINGLESS keeps the
+    │       friendly REACTION_POOL until this tier)
+    └─ SILENCE tier   → should_respond=False, nothing at all
     │
     ├─ should_respond=False → END
     └─ should_respond=True  → guard
@@ -285,11 +357,45 @@ context_builder
     │    a row-shaped copy of msg.reply_to_message for rows the store never had)
     ├─ get_chain(reply_to_msg_id) → reply_chain (max 10 hops, oldest-first);
     │    empty chain + fallback → one-element chain from the fallback
-    ├─ load user_memories facts for all user_ids visible in recent history
-    ├─ load initiating user's facts if not already in recent participants
+    ├─ embed processed_text once (__embed_message) — shared by the user-fact
+    │    and bot-canon lookups below; no text or embed failure → None, and both
+    │    similarity retrievals are skipped rather than failing the pipeline
+    ├─ user facts: similarity-gated, NOT the whole stored list —
+    │    find_relevant_facts_for_users ranks every recent participant's facts
+    │    (plus the initiating user's) against the message embedding in one
+    │    window-function query, keeping the top USER_FACTS_SIMILAR_LIMIT (5)
+    │    per user above USER_FACTS_SIMILARITY_THRESHOLD (0.85) → user_facts.
+    │    Injecting every fact and asking the prompt header to ignore the
+    │    irrelevant ones produced absurd replies (the bot dragging unrelated
+    │    memories in), so relevance is decided by retrieval, before the prompt
+    │    exists. Pure similarity by design: a fact learned minutes ago is not
+    │    recalled unless the current message is actually about it.
+    │    Counter tallies have NULL embeddings and can never match
     ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
-    └─ resolve @mentions (in the question + replied_to) to members and load their
-       weekly role + reason from user_tags → mentioned_tags
+    ├─ resolve @mentions (in the question + replied_to) to members and load their
+    │    weekly role + reason from user_tags → mentioned_tags
+    ├─ bot canon (reuses the same embedding): top-5
+    │    bot_memories.find_similar_facts + 3 newest get_facts (dedupe, cap 8)
+    │    → bot_self_facts; top-2 find_similar_episodes above a similarity
+    │    floor → bot_self_episodes (Жора's own life canon; see src/life/README.md)
+    │    degrades to [] on any failure (embed or DB error) — never fails the pipeline
+    ├─ activity gate: the daily refresh means a fresh activity always
+    │    exists, so injecting it unconditionally made the bot narrate his
+    │    routine in nearly every reply; both activity lookups now run only
+    │    when ACTIVITY_QUESTION_RE matches the incoming text («что делаешь /
+    │    чем занят / что делал / как дела…») or, for the current activity
+    │    alone, on an ACTIVITY_VOLUNTEER_PROBABILITY (10%) roll so he
+    │    occasionally volunteers it; gate closed → (None, []) and the model
+    │    improvises per the system prompt
+    ├─ bot current activity (gate open): newest current_activity across
+    │    episode rows (life posts) and activity rows (silent daily refresh,
+    │    see src/life/README.md), bucketed by age — < 14h "fresh", < 48h
+    │    "recent", older → None (the bot improvises instead of reading a
+    │    stale answer) → bot_current_activity
+    └─ bot recent activities (asked only, never volunteered):
+         bot_memories.get_recent_activities(7), the same newest-first
+         (phrase, posted_at) history spanning episode and activity rows,
+         degrades to [] on failure → bot_recent_activities
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
@@ -301,9 +407,10 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
     │          random triggers receive only the reply chain — no recent history bleed
     ├─ provenance: invoke_worker returns (output, tools_used) from a mechanical
     │          ToolMessage scan → worker_tools_used in state
-    ├─ skipped entirely on insult paths (is_bot_insult) and Shorts summaries
-    │          (trigger="youtube_short" — the source material is already in
-    │          processed_text; tools would only add junk) → empty output
+    ├─ skipped entirely on insult paths (is_bot_insult), wind-down brush-offs
+    │          (wind_down — one short closing phrase needs no tools) and Shorts
+    │          summaries (trigger="youtube_short" — the source material is
+    │          already in processed_text; tools would only add junk) → empty output
     ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search
     ├─ DailyLimitError → advance_model(), retry with next fallback
     ├─ ContextLengthError → worker_output="" (response node still runs)
@@ -323,6 +430,14 @@ response   personality LLM (ReAct executor, no tools)
     │            + recent history (last 10; random and youtube_short triggers get only
     │              the newest 3, RANDOM_TRIGGER_CONTEXT_LIMIT) + replied_to + worker
     │              findings + current message
+    │          recent history is dropped entirely when thread history is present —
+    │            the thread turns already carry the conversation. The replied_to
+    │            block («Сообщение, на которое отвечают») is then always rendered:
+    │            it is skipped only when that message was actually printed in the
+    │            recent-history block, never merely because it sits in the recent
+    │            window. Keying that check on the window let both blocks suppress
+    │            each other on reply chains, leaving the model an unanchored
+    │            «(↳ …)» arrow with no text to resolve a short follow-up against
     │          worker findings are framed by provenance: «[Собранные данные
     │            (проверено через инструменты)]» when a tool ran, «[Данные из
     │            контекста разговора (во внешних источниках НЕ проверялись)]»
@@ -341,6 +456,12 @@ response   personality LLM (ReAct executor, no tools)
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
     │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
+    │          genuinely ambiguous requests: when the missing detail would change
+    │            the answer (which game, which platform, about whom), the system
+    │            prompt tells the model to ask ONE short in-character clarifying
+    │            question instead of guessing; mild vagueness gets an answer with
+    │            the assumption stated («если ты про PS5-версию — …»); the
+    │            insult/wind-down hints override this — they forbid counter-questions
     │          joke requests: when literal execution is pointless in context (e.g.
     │            «переведи» under a meme whose text is already Russian), the system
     │            prompt tells the model to recognize the bit and play along (mock
@@ -349,9 +470,30 @@ response   personality LLM (ReAct executor, no tools)
     │            gets a real translation
     │          when someone asks why they (or an @mentioned member) have a role, the
     │          bot explains it from the stored reason
+    │          + Жора's own life canon (build_bot_life_lines): relevant canon facts
+    │            and past episodes from bot_self_facts/bot_self_episodes (only when
+    │            the current message actually touches that topic — background
+    │            colour, never filler), plus a current-activity line
+    │            («[Прямо сейчас ты]: …» / «[Недавно ты]: …») from
+    │            bot_current_activity so «что делаешь сейчас» answers consistently
+    │            with the latest life post or daily refresh instead of being
+    │            improvised fresh each time, plus a dated
+    │            «[Чем ты занимался в последние дни]» block (build_activity_history_lines)
+    │            from bot_recent_activities — skipping the newest entry already
+    │            shown above — so «что делал вчера/на выходных» answers consistently
+    │            too instead of inventing a different past per questioner;
+    │            both lines appear only when the ContextBuilder activity gate
+    │            opened (asked, or the rare volunteer roll for the current
+    │            activity) — most replies carry neither
     │          when the filter set is_bot_insult=True, a hint is injected before the
     │            trigger line telling the model the message is an attack on it and to
     │            answer with a sharp comeback instead of a neutral reply
+    │          when the engagement gate set wind_down=True, a hint is injected telling
+    │            the model it is bored of this conversation: answer in one short
+    │            in-character phrase, close the exchange, no questions or invitations
+    ├─ at DEBUG, dumps the exact LLM input before generation (log_response_input):
+    │    thread-history turns as one-line excerpts, the assembled final turn
+    │    verbatim — the one place to see why a reply went absurd
     ├─ normalizes homoglyphs first (normalize_homoglyphs): Greek/Latin look-alike
     │    letters spliced into a mostly-Cyrillic word (e.g. Greek μ/ά in "тμάксимс")
     │    are mapped back to Cyrillic deterministically, with no extra LLM call;
@@ -381,6 +523,11 @@ memory_writer
     ├─ is_forwarded=True → skip entirely
     ├─ passive (no response): skip if user_message < 20 chars
     └─ asyncio.create_task() — does NOT block the reply
+          → "Existing facts" shown to the extraction model is retrieval-gated:
+            embeds the message, keeps the top 5 stored facts above 0.85 cosine
+            similarity to it (find_relevant_facts_for_users) — not the user's
+            whole stored list; an embed failure shows no existing facts rather
+            than falling back to everything
           → qwen/qwen3.6-27b (reasoning disabled) extracts up to 3 new facts
           → source rules: only the user's own words are evidence — the bot's
             reply is context, never a fact source; voice transcripts are
@@ -413,12 +560,16 @@ IncomingMessage:
     replied_to_fallback: dict | None  # row-shaped copy of msg.reply_to_message; read-side only
 
 AssembledContext:
-    user_facts: dict[str, list[str]]     # username → extracted fact strings
+    user_facts: dict[str, list[str]]     # username → facts relevant to THIS message (top-5 per user above 0.85 cosine), closest first; not the user's whole stored list. Counter tallies like «Оскорблял бота N раз» never appear — NULL embedding, plus an explicit is_counter_fact filter
     recent_history: list[dict]           # flat window (last 20), newest-first
     replied_to: dict | None              # the specific message being replied to (for annotation)
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
     asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
+    bot_self_facts: list[str]            # Жора's own canon facts relevant to this message
+    bot_self_episodes: list[str]         # Жора's own past life-post episodes relevant to this message
+    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post or daily refresh
+    bot_recent_activities: list[tuple[str, float]]  # (phrase, posted_at) history, newest first, for dated "what did you do" answers
 
 BotState:
     incoming: IncomingMessage
@@ -427,6 +578,7 @@ BotState:
     blocked: bool
     youtube_short_url: str | None      # canonical Shorts URL, set by router
     youtube_short_content: str | None  # labelled transcript/frames/comments block, set by ingester
+    media_is_real_person: bool | None  # vision classification for photo/video_note/video, set by ingester; None = text/voice/unclassified
     context: AssembledContext | None
     thread_id: str | None              # {chat_id}_{root_message_id} for replies, chat_id for flat; scopes LLM history
     is_flat_thread: bool               # True when the message is not a reply; skips thread-history reads
