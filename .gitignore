@@ -9,3 +9,5 @@ __pycache__/
 *.egg-info/
 .idea/
 .claude/settings.local.json
+docs/superpowers/
+CLAUDE.md
