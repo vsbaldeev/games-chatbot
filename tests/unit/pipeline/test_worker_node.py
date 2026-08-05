@@ -205,3 +205,26 @@ class TestErrorPropagation:
         agent.invoke_worker = AsyncMock(side_effect=RateLimitError("rate_limit exceeded"))
         with pytest.raises(RateLimitError):
             await WorkerNode(agent)(make_worker_state())
+
+
+class TestSkipConditions:
+    """WorkerNode skips tool-calling entirely for triggers whose source
+    material is already in processed_text — Shorts today, social links now."""
+
+    async def test_youtube_short_trigger_skips_worker(self):
+        node = WorkerNode(agent=MagicMock())
+        incoming = make_incoming(raw_text="https://www.youtube.com/shorts/abc")
+        state = make_state(incoming, should_respond=True, response_trigger="youtube_short")
+        result = await node(state)
+        assert result == {
+            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+        }
+
+    async def test_social_link_trigger_skips_worker(self):
+        node = WorkerNode(agent=MagicMock())
+        incoming = make_incoming(raw_text="https://www.reddit.com/r/x/comments/abc/y/")
+        state = make_state(incoming, should_respond=True, response_trigger="social_link")
+        result = await node(state)
+        assert result == {
+            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+        }
