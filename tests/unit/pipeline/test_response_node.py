@@ -392,7 +392,7 @@ class TestShortsTriggerLine:
             "alice", "[YouTube Shorts]\ntranscript", "text", None,
             response_trigger="youtube_short", youtube_short_video_present=True,
         )
-        assert "уже отправлено в чат выше" in line
+        assert SHORTS_TRIGGER_REACT_INSTRUCTION in line
         assert "[YouTube Shorts]\ntranscript" in line
 
     def test_no_video_uses_retell_framing(self):
@@ -400,7 +400,7 @@ class TestShortsTriggerLine:
             "alice", "[YouTube Shorts]\ntranscript", "text", None,
             response_trigger="youtube_short", youtube_short_video_present=False,
         )
-        assert "перескажи" in line
+        assert SHORTS_TRIGGER_INSTRUCTION in line
         assert "[YouTube Shorts]\ntranscript" in line
 
     def test_default_youtube_short_video_present_is_false(self):
@@ -425,7 +425,7 @@ class TestResponseNodeShortsFraming:
         with patch(THREAD_APPEND_TURN, new=AsyncMock()):
             await node(state)
         sent_messages = agent.invoke_response.call_args[0][0]
-        assert "уже отправлено в чат выше" in sent_messages[-1].content
+        assert SHORTS_TRIGGER_REACT_INSTRUCTION in sent_messages[-1].content
 
 
 class TestResponseNodeSocialLinkFraming:

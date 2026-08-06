@@ -30,14 +30,17 @@ lets Жора answer "what did you do yesterday" consistently too.
 Tracks per-user stats, extracts long-term memories, and routes every message through
 a typed LangGraph pipeline. YouTube Shorts links posted in the chat are watched for
 everyone: the bot downloads the short, transcribes and looks at it, reads the top
-comments, and replies with a 1–2 sentence retell of the video plus a short summary
-of the audience reaction in the comments — no verdict, and no fact-checking the
-video against the model's own (possibly stale) knowledge. Instagram Reel, Reddit
-post and long-form YouTube video links get the same lightweight treatment (title/
-caption/selftext + top comments, no transcript or vision): Instagram Reels also
-have their video downloaded and reposted to chat ahead of the reply, so the bot
-reacts to the clip instead of retelling it; Reddit and YouTube links always get
-the retell framing, like Shorts. Voice messages and
+comments, then reposts the downloaded video to chat and reacts to it — translating
+and summarizing the comment reaction — instead of retelling it, since the whole
+group can now see the clip; only a failed download or transcription falls back to
+a 1–2 sentence text retell plus the comment summary, with no verdict and no
+fact-checking the video against the model's own (possibly stale) knowledge.
+Instagram Reel, Reddit post and long-form YouTube video links get the same
+lightweight treatment (title/caption/selftext + top comments, no transcript or
+vision): Instagram Reels also have their video downloaded and reposted to chat
+ahead of the reply, so the bot reacts to the clip the same way Shorts does; Reddit
+links, long-form YouTube links, and any Instagram Reel or Short whose download
+fails always get the text retell framing instead. Voice messages and
 video notes are answered in kind: the reply comes back as a voice note spoken
 by a local Silero v5 Russian TTS voice, degrading to plain text whenever the
 reply is unspeakable (too long, no Cyrillic) or synthesis fails.

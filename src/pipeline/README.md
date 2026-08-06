@@ -622,6 +622,7 @@ BotState:
     blocked: bool
     youtube_short_url: str | None      # canonical Shorts URL, set by router
     youtube_short_content: str | None  # labelled transcript/frames/comments block, set by ingester
+    youtube_short_video: bytes | None  # downloaded video bytes, set by ingester
     social_link_handler: str | None    # matched handler name, set by router
     social_link_url: str | None        # canonical URL, set by router
     social_link_content: str | None    # labelled content block, set by ingester
