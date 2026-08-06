@@ -380,12 +380,16 @@ ACTIVITY_HISTORY_HEADER = (
     "целиком без повода не зачитывай):"
 )
 
-# Framing for a YouTube Shorts trigger — the inverse of the media framing:
-# nobody has watched the video yet, so the model must retell it (1–2 sentences)
-# and summarize the audience reaction from the top comments. No verdict: for
-# Shorts the worker is skipped, so nothing here is tool-verified, and judging
-# the video invites the model to lean on its own stale world knowledge (e.g.
-# declaring a device shown in the video "not released yet").
+# Framing for a YouTube Shorts trigger when nothing could be extracted (the
+# dedup/cap gate passed but the download or transcription failed) — no video
+# was posted, so retell in 1-2 sentences and summarize the audience reaction
+# from the top comments. No verdict: for Shorts the worker is skipped, so
+# nothing here is tool-verified, and judging the video invites the model to
+# lean on its own stale world knowledge (e.g. declaring a device shown in the
+# video "not released yet"). This is the fallback role — mirrors
+# SOCIAL_LINK_RETELL_INSTRUCTION's fallback role for a failed Instagram
+# download. SHORTS_TRIGGER_REACT_INSTRUCTION below is used instead once the
+# video actually downloads and posts to chat.
 SHORTS_TRIGGER_INSTRUCTION = (
     "скинул ссылку на YouTube Shorts. Ниже — его текст и то, что удалось "
     "вытащить из ролика (расшифровка звука и описание кадров могут быть "
@@ -396,6 +400,24 @@ SHORTS_TRIGGER_INSTRUCTION = (
     "детали, которых там нет, и не проверяй факты из ролика по своим знаниям — "
     "они могут устареть; никогда не утверждай, что показанное в ролике не "
     "существует или ещё не вышло. Если материала мало — так и скажи"
+)
+
+# Framing for a YouTube Shorts trigger when the download+analysis succeeded
+# and the video is already posted to chat above this reply — react to it,
+# don't retell it, mirroring SOCIAL_LINK_REACT_INSTRUCTION but pointed at the
+# Whisper transcript/vision frame material instead of a caption. Same
+# no-verdict, no-fact-checking guardrails as the retell variant above.
+SHORTS_TRIGGER_REACT_INSTRUCTION = (
+    "скинул ссылку на YouTube Shorts, видео из которого уже отправлено в чат "
+    "выше. Ниже — то, что удалось вытащить из ролика (расшифровка звука и "
+    "описание кадров могут быть неполными или ошибаться в деталях). "
+    "Отреагируй на видео, не пересказывай — его уже все видели. Если есть "
+    "блок топ-комментариев — добавь 1 предложение о реакции зрителей: общее "
+    "настроение и за что зацепились. Не давай вердикт «смотреть или нет». "
+    "Опирайся только на материалы ниже: не выдумывай детали, которых там "
+    "нет, и не проверяй факты из ролика по своим знаниям — они могут "
+    "устареть; никогда не утверждай, что показанное в ролике не существует "
+    "или ещё не вышло. Если материала мало — так и скажи"
 )
 
 # Framing for a social-link trigger (Instagram Reel / Reddit post / long-form
