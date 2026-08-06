@@ -36,7 +36,9 @@ incoming message
     │     │        same video id in the same chat once per 24h (dedup_gate),
     │     │        SHORTS_DAILY_CAP=15 summaries per chat per sliding 24h
     │     │        window — a gated link falls through to the rules below,
-    │     │        costing zero downloads and zero LLM tokens)
+    │     │        costing zero downloads and zero LLM tokens; on success the
+    │     │        downloaded video is posted to chat before the reply, see
+    │     │        src/events/README.md)
     │     ├─ Instagram/Reddit/YouTube link → should_respond=True, trigger="social_link"
     │     │       (checked after Shorts — Shorts keeps top priority; tries
     │     │        social_links.HANDLERS in priority order [instagram_reel,
@@ -127,7 +129,10 @@ ingester (current message, should_respond=True only)
     │     and unified_messages is updated so reply chains show the content;
     │     youtube_short_content is set as the success flag (None on failure —
     │     no transcript AND no frames counts as failure; title/comments alone
-    │     are not enough to react honestly)
+    │     are not enough to react honestly); on success the downloaded video
+    │     bytes are also kept in youtube_short_video and posted to chat
+    │     before the reply (see src/events/README.md) — same as Instagram's
+    │     social_link_video
     │     PO tokens for YouTube bot-detection come automatically from the
     │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
     │     trigger="social_link": summarize_social_link dispatches to the
@@ -474,19 +479,24 @@ response   personality LLM (ReAct executor, no tools)
     │            framed as "@user прислал фото. Ниже — его описание… Отреагируй, не пересказывай"
     │            (build_trigger_line) so the model reacts to the vision/transcript description
     │            instead of retelling it as if it were the user's own words
-    │          trigger="youtube_short" inverts that framing: nobody has watched the
-    │            video yet, so the model is told to retell it in 1–2 sentences and
-    │            summarize the audience reaction from the top comments (1–2 sentences);
-    │            no worth-watching verdict, no inventing missing details, and no
-    │            checking the video's facts against the model's own stale knowledge
-    │            (nothing here is tool-verified — the worker is skipped for Shorts)
-    │          trigger="social_link" picks react vs. retell per request
-    │            (select_social_link_instruction): when an Instagram Reel's video
-    │            was actually downloaded and will be posted to chat before this
-    │            reply, the model reacts to it like any other media (video already
-    │            visible, do not retell it) — otherwise (Reddit always, or an
-    │            Instagram link whose download failed) it gets the same
-    │            retell-and-comments-summary framing as Shorts
+    │          trigger="youtube_short" picks react vs. retell per request
+    │            (select_shorts_instruction): when the Short's video actually
+    │            downloaded and will be posted to chat before this reply, the
+    │            model reacts to it like any other media (video already
+    │            visible, do not retell it) — otherwise (gate passed but the
+    │            download or transcription failed) it retells in 1–2
+    │            sentences and summarizes the audience reaction from the top
+    │            comments; no worth-watching verdict, no inventing missing
+    │            details, and no checking the video's facts against the
+    │            model's own stale knowledge (nothing here is tool-verified —
+    │            the worker is skipped for Shorts)
+    │          trigger="social_link" picks react vs. retell the same way
+    │            (select_social_link_instruction): when an Instagram Reel's
+    │            video was actually downloaded and will be posted to chat
+    │            before this reply, the model reacts to it like any other
+    │            media — otherwise (Reddit always, or an Instagram link whose
+    │            download failed) it gets the same retell-and-comments-summary
+    │            framing as Shorts
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
     │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor

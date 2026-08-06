@@ -60,3 +60,41 @@ class TestSocialLinkVideoDelivery:
             await deliver_response(state, msg, "reply text")
         msg.reply_video.assert_awaited_once()
         msg.reply_text.assert_awaited_once_with("reply text")
+
+
+class TestShortsVideoDelivery:
+    async def test_video_present_is_sent_before_text_reply(self):
+        msg = make_msg()
+        manager = Mock()
+        manager.attach_mock(msg.reply_video, "reply_video")
+        manager.attach_mock(msg.reply_text, "reply_text")
+        incoming = make_incoming(media_type="text")
+        state = make_state(
+            incoming, response_trigger="youtube_short", youtube_short_video=b"video bytes",
+        )
+        with patch(REPLY_VOICE_PATCH_TARGET, new=AsyncMock(return_value=None)):
+            await deliver_response(state, msg, "reply text")
+        msg.reply_video.assert_awaited_once()
+        msg.reply_text.assert_awaited_once_with("reply text")
+        call_names = [call[0] for call in manager.mock_calls]
+        assert call_names.index("reply_video") < call_names.index("reply_text")
+
+    async def test_no_video_skips_reply_video(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text")
+        state = make_state(incoming, response_trigger="youtube_short", youtube_short_video=None)
+        with patch(REPLY_VOICE_PATCH_TARGET, new=AsyncMock(return_value=None)):
+            await deliver_response(state, msg, "reply text")
+        msg.reply_video.assert_not_awaited()
+
+    async def test_video_send_failure_still_sends_text_reply(self):
+        msg = make_msg()
+        msg.reply_video = AsyncMock(side_effect=RuntimeError("upload failed"))
+        incoming = make_incoming(media_type="text")
+        state = make_state(
+            incoming, response_trigger="youtube_short", youtube_short_video=b"video bytes",
+        )
+        with patch(REPLY_VOICE_PATCH_TARGET, new=AsyncMock(return_value=None)):
+            await deliver_response(state, msg, "reply text")
+        msg.reply_video.assert_awaited_once()
+        msg.reply_text.assert_awaited_once_with("reply text")
