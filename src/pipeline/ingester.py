@@ -600,24 +600,26 @@ def compose_short_header(info: dict) -> str:
     return f"[YouTube Shorts{suffix}]"
 
 
-async def summarize_youtube_short(url: str) -> str:
-    """Download a YouTube Short and return its labelled content block.
+async def summarize_youtube_short(url: str) -> tuple[str, bytes | None]:
+    """Download a YouTube Short and return its labelled content block and video bytes.
 
     Reuses the Telegram-video machinery: Whisper on the audio track and
     vision descriptions of extracted keyframes, plus the top comments as
-    audience reaction.
+    audience reaction. The downloaded bytes are returned alongside the text
+    so the caller can also repost the video to chat, without a second
+    download.
 
     Args:
         url: Canonical Shorts URL detected by the router.
 
     Returns:
-        Labelled block (header, audio/frames, comments), or ``""`` when the
+        ``(content_block, video_bytes)`` on success. ``("", None)`` when the
         download failed or produced neither transcript nor frames — a title
         and comments alone are not enough to react to the video honestly.
     """
     downloaded = await shorts.download_short(url)
     if downloaded is None:
-        return ""
+        return "", None
     video_bytes, info = downloaded
     transcript, frame_results = await asyncio.gather(
         transcribe_bytes(video_bytes, "video", "short.mp4"),
@@ -626,7 +628,7 @@ async def summarize_youtube_short(url: str) -> str:
     frame_descriptions = [description for _, description in frame_results]
     if not transcript and not frame_descriptions:
         logger.warning("Shorts content extraction produced nothing for %s", url)
-        return ""
+        return "", None
     if len(transcript) > shorts.TRANSCRIPT_CHAR_LIMIT:
         transcript = transcript[:shorts.TRANSCRIPT_CHAR_LIMIT] + "…"
     parts = [
@@ -636,7 +638,7 @@ async def summarize_youtube_short(url: str) -> str:
     comments_block = compose_comments_block((info or {}).get("comments") or [])
     if comments_block:
         parts.append(comments_block)
-    return "\n".join(parts)
+    return "\n".join(parts), video_bytes
 
 
 async def summarize_social_link(handler_name: str, url: str) -> tuple[str, bytes | None]:
@@ -785,11 +787,11 @@ class MessageIngester:
             Tuple of (processed text, extra fields) — extra fields empty on
             a failed summary.
         """
-        short_content = await summarize_youtube_short(short_url)
+        short_content, short_video = await summarize_youtube_short(short_url)
         if not short_content:
             return raw_text, {}
         combined = f"{raw_text}\n\n{short_content}".strip()
-        return combined, {"youtube_short_content": short_content}
+        return combined, {"youtube_short_content": short_content, "youtube_short_video": short_video}
 
     async def __ingest_social_link(self, raw_text: str, handler_name: str, url: str) -> tuple[str, dict]:
         """Summarize an Instagram/Reddit/YouTube link and append it to the raw text.

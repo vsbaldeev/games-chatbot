@@ -64,6 +64,7 @@ class BotState(TypedDict):
     wind_down: NotRequired[bool]   # True when the engagement gate wants a short conversation-closing reply instead of a full one
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
+    youtube_short_video: NotRequired[bytes | None]  # downloaded video bytes, set by Ingester
     social_link_handler: NotRequired[str | None]    # matched handler name ("instagram_reel"/"reddit_post"/"youtube_video"), set by Router
     social_link_url: NotRequired[str | None]        # canonical URL, set by Router
     social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester

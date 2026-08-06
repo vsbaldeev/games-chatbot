@@ -32,12 +32,16 @@ class TestShortsIngestionCharacterization:
             youtube_short_url="https://www.youtube.com/shorts/abc123",
         )
         with (
-            patch(SUMMARIZE_SHORT_TARGET, new=AsyncMock(return_value="[YouTube Shorts]\nsome content")),
+            patch(
+                SUMMARIZE_SHORT_TARGET,
+                new=AsyncMock(return_value=("[YouTube Shorts]\nsome content", b"video bytes")),
+            ),
             patch(UPDATE_CONTENT_TARGET, new=AsyncMock()),
         ):
             result = await ingester(state)
         assert "[YouTube Shorts]\nsome content" in result["incoming"]["processed_text"]
         assert result["youtube_short_content"] == "[YouTube Shorts]\nsome content"
+        assert result["youtube_short_video"] == b"video bytes"
 
     async def test_failed_short_leaves_raw_text_unchanged(self, ingester):
         incoming = make_incoming(raw_text="check this out https://www.youtube.com/shorts/abc123")
@@ -45,17 +49,11 @@ class TestShortsIngestionCharacterization:
             incoming, should_respond=True, response_trigger="youtube_short",
             youtube_short_url="https://www.youtube.com/shorts/abc123",
         )
-        with patch(SUMMARIZE_SHORT_TARGET, new=AsyncMock(return_value="")):
+        with patch(SUMMARIZE_SHORT_TARGET, new=AsyncMock(return_value=("", None))):
             result = await ingester(state)
         assert result["incoming"]["processed_text"] == incoming["raw_text"]
-        # Post-refactor contract: extra fields are merged only on success, so
-        # a failed fetch omits the key entirely (state.py's NotRequired and
-        # filter_node.py's state.get(...) both already treat absent and
-        # None-valued identically) — the pre-refactor code always set the
-        # key to None on this trigger, which this pinning test originally
-        # asserted; that assertion is updated here to the refactor's actual
-        # (and intentional) shape.
         assert result.get("youtube_short_content") is None
+        assert result.get("youtube_short_video") is None
 
 
 class TestSocialLinkIngestion:
