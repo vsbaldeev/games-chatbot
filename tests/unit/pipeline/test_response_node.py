@@ -14,13 +14,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
-from src.config.prompts import SOCIAL_LINK_REACT_INSTRUCTION, SOCIAL_LINK_RETELL_INSTRUCTION
+from src.config.prompts import (
+    SHORTS_TRIGGER_INSTRUCTION,
+    SHORTS_TRIGGER_REACT_INSTRUCTION,
+    SOCIAL_LINK_REACT_INSTRUCTION,
+    SOCIAL_LINK_RETELL_INSTRUCTION,
+)
 from src.pipeline.response_node import (
     ResponseNode,
     build_asking_user_tag_lines,
     build_recent_history_lines,
     build_response_input,
     build_trigger_line,
+    select_shorts_instruction,
     select_social_link_instruction,
 )
 from tests.builders import make_incoming, make_state
@@ -370,6 +376,56 @@ class TestSocialLinkRecentHistoryTrim:
         lines, _ = build_recent_history_lines(context, "social_link", has_thread_history=False)
         rendered_messages = [line for line in lines if line.startswith("@u:")]
         assert len(rendered_messages) <= 3
+
+
+class TestSelectShortsInstruction:
+    def test_select_shorts_instruction_react_when_video_present(self):
+        assert select_shorts_instruction(True) == SHORTS_TRIGGER_REACT_INSTRUCTION
+
+    def test_select_shorts_instruction_retell_when_video_absent(self):
+        assert select_shorts_instruction(False) == SHORTS_TRIGGER_INSTRUCTION
+
+
+class TestShortsTriggerLine:
+    def test_video_present_uses_react_framing(self):
+        line = build_trigger_line(
+            "alice", "[YouTube Shorts]\ntranscript", "text", None,
+            response_trigger="youtube_short", youtube_short_video_present=True,
+        )
+        assert "уже отправлено в чат выше" in line
+        assert "[YouTube Shorts]\ntranscript" in line
+
+    def test_no_video_uses_retell_framing(self):
+        line = build_trigger_line(
+            "alice", "[YouTube Shorts]\ntranscript", "text", None,
+            response_trigger="youtube_short", youtube_short_video_present=False,
+        )
+        assert "перескажи" in line
+        assert "[YouTube Shorts]\ntranscript" in line
+
+    def test_default_youtube_short_video_present_is_false(self):
+        line = build_trigger_line(
+            "alice", "[YouTube Shorts]\ntranscript", "text", None, response_trigger="youtube_short",
+        )
+        assert "перескажи" in line
+
+
+class TestResponseNodeShortsFraming:
+    async def test_video_present_selects_react_framing_in_generated_prompt(self):
+        agent = make_mock_agent()
+        node = ResponseNode(agent)
+        incoming = make_incoming(
+            raw_text="check this out",
+            processed_text="[YouTube Shorts]\ntranscript here",
+        )
+        state = make_state(
+            incoming, should_respond=True, response_trigger="youtube_short",
+            youtube_short_video=b"video bytes", is_flat_thread=True,
+        )
+        with patch(THREAD_APPEND_TURN, new=AsyncMock()):
+            await node(state)
+        sent_messages = agent.invoke_response.call_args[0][0]
+        assert "уже отправлено в чат выше" in sent_messages[-1].content
 
 
 class TestResponseNodeSocialLinkFraming:

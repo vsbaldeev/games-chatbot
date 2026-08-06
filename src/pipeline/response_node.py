@@ -14,6 +14,7 @@ from src.config.prompts import (
     ACTIVITY_STALE_SUFFIX,
     BOT_CANON_HEADER,
     SHORTS_TRIGGER_INSTRUCTION,
+    SHORTS_TRIGGER_REACT_INSTRUCTION,
     SOCIAL_LINK_REACT_INSTRUCTION,
     SOCIAL_LINK_RETELL_INSTRUCTION,
     USER_FACTS_HEADER,
@@ -260,6 +261,21 @@ def build_bot_life_lines(context) -> list[str]:
     return parts
 
 
+def select_shorts_instruction(video_present: bool) -> str:
+    """Pick the Shorts trigger's framing: react (video posted) or retell.
+
+    Args:
+        video_present: True when the Short downloaded successfully and will
+            be posted to chat before this reply.
+
+    Returns:
+        SHORTS_TRIGGER_REACT_INSTRUCTION or SHORTS_TRIGGER_INSTRUCTION.
+    """
+    if video_present:
+        return SHORTS_TRIGGER_REACT_INSTRUCTION
+    return SHORTS_TRIGGER_INSTRUCTION
+
+
 def select_social_link_instruction(social_link_video_present: bool) -> str:
     """Pick the social-link trigger's framing: react (video posted) or retell.
 
@@ -278,17 +294,17 @@ def select_social_link_instruction(social_link_video_present: bool) -> str:
 def build_trigger_line(
     username: str, user_input: str, media_type: str, replied_to: dict | None,
     response_trigger: str = "explicit", social_link_video_present: bool = False,
+    youtube_short_video_present: bool = False,
 ) -> str:
     """Build the final user-turn line, marking media so the model reacts to it.
 
     Plain text renders as ``@username: text``. Photo/voice/video frame
     ``user_input`` as a description to *react* to, not retell — the chat
-    already sees the original. A YouTube Shorts trigger inverts that: nobody
-    has watched the video, so the model must retell it and summarize the
-    audience reaction from the top comments. A social-link trigger picks
-    between the two framings depending on whether a video was actually
-    posted to chat (Instagram success — react) or not (Reddit always,
-    Instagram on a failed download — retell, like Shorts).
+    already sees the original. A YouTube Shorts trigger picks between react
+    and retell framing depending on whether the downloaded video is actually
+    posted to chat, the same choice a social-link trigger makes for
+    Instagram (see :func:`select_shorts_instruction` /
+    :func:`select_social_link_instruction`).
 
     Args:
         username: Sender's username (without ``@``).
@@ -297,10 +313,14 @@ def build_trigger_line(
         media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"``
             or ``"video"``.
         replied_to: The message being replied to, or ``None``.
-        response_trigger: Routing trigger; ``"youtube_short"`` selects the
-            retell-and-comments-summary framing; ``"social_link"`` selects
-            react or retell depending on ``social_link_video_present``.
+        response_trigger: Routing trigger; ``"youtube_short"`` selects react
+            or retell framing depending on ``youtube_short_video_present``;
+            ``"social_link"`` selects react or retell depending on
+            ``social_link_video_present``.
         social_link_video_present: True when an Instagram Reel video was
+            downloaded and will be posted to chat before this reply —
+            selects the react framing instead of retell.
+        youtube_short_video_present: True when a YouTube Short's video was
             downloaded and will be posted to chat before this reply —
             selects the react framing instead of retell.
 
@@ -311,7 +331,8 @@ def build_trigger_line(
     if replied_to:
         speaker = f"{speaker} (↳ {row_speaker(replied_to)})"
     if response_trigger == "youtube_short":
-        return f"{speaker} {SHORTS_TRIGGER_INSTRUCTION}:\n{user_input}"
+        instruction = select_shorts_instruction(youtube_short_video_present)
+        return f"{speaker} {instruction}:\n{user_input}"
     if response_trigger == "social_link":
         instruction = select_social_link_instruction(social_link_video_present)
         return f"{speaker} {instruction}:\n{user_input}"
@@ -442,6 +463,7 @@ def build_response_input(
     worker_tools_used: bool = False,
     photo_directive: str | None = None,
     social_link_video_present: bool = False,
+    youtube_short_video_present: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
 
@@ -467,6 +489,9 @@ def build_response_input(
         photo_directive: Photo-request framing passed to
             :func:`build_directive_lines`, or None.
         social_link_video_present: True when an Instagram Reel video was
+            downloaded and will be posted to chat before this reply; passed
+            straight through to :func:`build_trigger_line`.
+        youtube_short_video_present: True when a YouTube Short's video was
             downloaded and will be posted to chat before this reply; passed
             straight through to :func:`build_trigger_line`.
 
@@ -502,6 +527,7 @@ def build_response_input(
         build_trigger_line(
             username, user_input, media_type, replied_to, response_trigger,
             social_link_video_present=social_link_video_present,
+            youtube_short_video_present=youtube_short_video_present,
         )
     )
     return "\n".join(parts)
@@ -635,6 +661,7 @@ class ResponseNode:
             worker_tools_used=bool(state.get("worker_tools_used")),
             photo_directive=resolve_photo_directive(state),
             social_link_video_present=bool(state.get("social_link_video")),
+            youtube_short_video_present=bool(state.get("youtube_short_video")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
         log_response_input(past_messages, enriched)
