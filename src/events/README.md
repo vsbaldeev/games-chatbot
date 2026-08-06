@@ -34,8 +34,8 @@ voice_reply.py
 messages.py (deliver_response)
     try_send_downloaded_video(msg, video_bytes) — best-effort post of a
                                       downloaded video (Instagram Reel or
-                                      YouTube Shorts — Reddit and long-form
-                                      YouTube never attach video) before the
+                                      YouTube Shorts — long-form YouTube
+                                      never attaches video) before the
                                       text reply; a failed upload is logged
                                       and swallowed, never blocking the reply
 ```

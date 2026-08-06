@@ -49,7 +49,7 @@ how it entered the pipeline:
     reply when the sender explicitly addressed the bot, and full silence
     otherwise (no emoji reaction — the bot was never addressed).
   - Social-link triggers (response_trigger="social_link" — Instagram Reel,
-    Reddit post, long-form YouTube video) bypass the LLM classification the
+    long-form YouTube video) bypass the LLM classification the
     same way as Shorts: a successful fetch passes through, a failed one
     gets the same canned-reply-if-addressed/full-silence-otherwise
     treatment.
@@ -128,8 +128,8 @@ SHORTS_FAILED_REPLIES = [
     "Не дотянулся до ролика. Перекиньте другую ссылку или смотрите так.",
 ]
 
-# Honest canned acknowledgements for an explicitly addressed Instagram/Reddit/
-# YouTube link the bot failed to fetch — same principle as SHORTS_FAILED_REPLIES.
+# Honest canned acknowledgements for an explicitly addressed Instagram/YouTube
+# link the bot failed to fetch — same principle as SHORTS_FAILED_REPLIES.
 SOCIAL_LINK_FAILED_REPLIES = [
     "Не смог посмотреть — сайт не отдал. Сами гляньте по ссылке.",
     "Ссылка не открылась. Придётся смотреть вслепую.",
@@ -537,7 +537,7 @@ class MeaninglessFilterNode:
         return {"should_respond": False, "drop_reason": "shorts_failed"}
 
     def __handle_social_link(self, state: BotState) -> dict:
-        """Pass a fetched Instagram/Reddit/YouTube summary through; degrade honestly on failure.
+        """Pass a fetched Instagram/YouTube summary through; degrade honestly on failure.
 
         Mirrors __handle_youtube_short: the trigger is deterministic (a link
         was posted), so no LLM classification runs. Kept as its own method

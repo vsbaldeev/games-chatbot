@@ -24,8 +24,8 @@ Respond when:
     dominant way links arrive, and «tell me what this video is» does not
     put words in the sender's mouth), but is gated by a per-chat repost
     dedup window and a daily summary cap (see ``src.pipeline.shorts``).
-  - A text message contains an Instagram Reel, Reddit post or long-form
-    YouTube video link (checked after Shorts, which keeps top priority) —
+  - A text message contains an Instagram Reel or long-form YouTube video
+    link (checked after Shorts, which keeps top priority) —
     routed with response_trigger="social_link" so the pipeline fetches a
     lightweight metadata-only summary (title/caption/selftext + top
     comments, no transcript or vision). The first handler in priority
@@ -191,7 +191,7 @@ class MessageRouter:
         }
 
     def __detect_social_link(self, msg: IncomingMessage) -> dict | None:
-        """Route the first matching Instagram/Reddit/YouTube link, if gates allow.
+        """Route the first matching Instagram/YouTube link, if gates allow.
 
         Mirrors __detect_shorts: runs only when Shorts found nothing (Shorts
         keeps top priority) and tries social_links.HANDLERS in registry

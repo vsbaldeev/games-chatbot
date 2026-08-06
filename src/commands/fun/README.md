@@ -106,10 +106,9 @@ Telegram  — public t.me/s web previews of a fixed list of meme channels
 ```
 
 Each source is fetched independently and swallows its own errors, so a failing
-source is logged as a warning and skipped while the rest still proceed. Reddit's
-public JSON API is used elsewhere — by the chat-link-summary feature
-(`src/pipeline/social_links/reddit_post.py`) — but not by `/meme`; `/meme`'s own
-sources are `ninegag.py` and `telegram.py` only (see `src/memes/sources/`).
+source is logged as a warning and skipped while the rest still proceed.
+`/meme`'s sources are `ninegag.py` and `telegram.py` only (see
+`src/memes/sources/`).
 
 ## Post filtering
 

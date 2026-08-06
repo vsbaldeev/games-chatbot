@@ -210,7 +210,7 @@ async def try_send_downloaded_video(msg, video_bytes: bytes) -> None:
     Args:
         msg: The triggering ``telegram.Message`` to reply to.
         video_bytes: The downloaded video payload — an Instagram Reel or a
-            YouTube Short (Reddit and long-form YouTube never attach video).
+            YouTube Short (long-form YouTube never attaches video).
 
     Never raises: a failed upload (size, format, network) is logged and
     swallowed so the text reply that follows is never blocked on it.

@@ -39,10 +39,10 @@ incoming message
     │     │        costing zero downloads and zero LLM tokens; on success the
     │     │        downloaded video is posted to chat before the reply, see
     │     │        src/events/README.md)
-    │     ├─ Instagram/Reddit/YouTube link → should_respond=True, trigger="social_link"
+    │     ├─ Instagram/YouTube link → should_respond=True, trigger="social_link"
     │     │       (checked after Shorts — Shorts keeps top priority; tries
     │     │        social_links.HANDLERS in priority order [instagram_reel,
-    │     │        reddit_post, youtube_video], first regex match wins the
+    │     │        youtube_video], first regex match wins the
     │     │        whole message, every other link is ignored; same per-item
     │     │        24h dedup_gate + daily cap=15 pattern as Shorts, gated
     │     │        entirely by src.pipeline.social_links)
@@ -136,20 +136,19 @@ ingester (current message, should_respond=True only)
     │     PO tokens for YouTube bot-detection come automatically from the
     │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
     │     trigger="social_link": summarize_social_link dispatches to the
-    │     matched handler (src.pipeline.social_links — instagram_reel,
-    │     reddit_post or youtube_video) for a metadata-only fetch: no
-    │     transcript, no vision, just title/caption/selftext + top comments
-    │     (≤10, ≤200 chars each) via yt-dlp info-extraction (YouTube) or
-    │     Reddit's public JSON API; description/selftext capped at 2000 chars
+    │     matched handler (src.pipeline.social_links — instagram_reel or
+    │     youtube_video) for a metadata-only fetch: no transcript, no
+    │     vision, just title/caption + top comments (≤10, ≤200 chars each)
+    │     via yt-dlp info-extraction; description capped at 2000 chars
     │     processed_text = user text + the handler's labelled block
-    │     ("[Instagram Reel]…" / "[Reddit r/x] «title»…" / "[YouTube «title»]…")
+    │     ("[Instagram Reel]…" / "[YouTube «title»]…")
     │     and unified_messages is updated so reply chains show the content;
     │     social_link_content is set as the success flag (None on failure —
     │     an unrecognized handler, an empty payload, or the handler's fetch
     │     raising all degrade to silence, never an unhandled exception);
     │     Instagram alone additionally downloads the Reel's video bytes into
     │     social_link_video, posted to chat before the reply (see
-    │     src/events/README.md) — Reddit and YouTube never carry video
+    │     src/events/README.md) — YouTube never carries video
     ├─ voice      → Groq Whisper → transcript
     ├─ video_note → Groq Whisper + frame extraction (see below); frames' vision
     │               calls also yield media_is_real_person (majority vote — see below)
@@ -494,7 +493,7 @@ response   personality LLM (ReAct executor, no tools)
     │            (select_social_link_instruction): when an Instagram Reel's
     │            video was actually downloaded and will be posted to chat
     │            before this reply, the model reacts to it like any other
-    │            media — otherwise (Reddit always, or an Instagram link whose
+    │            media — otherwise (YouTube always, or an Instagram link whose
     │            download failed) it gets the same retell-and-comments-summary
     │            framing as Shorts
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,

@@ -48,7 +48,7 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (10% chance), "youtube_short" (Shorts link), "social_link" (Instagram/Reddit/YouTube link) or "humor" (autonomous joke)
+    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (10% chance), "youtube_short" (Shorts link), "social_link" (Instagram/YouTube link) or "humor" (autonomous joke)
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
@@ -65,7 +65,7 @@ class BotState(TypedDict):
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
     youtube_short_video: NotRequired[bytes | None]  # downloaded video bytes, set by Ingester
-    social_link_handler: NotRequired[str | None]    # matched handler name ("instagram_reel"/"reddit_post"/"youtube_video"), set by Router
+    social_link_handler: NotRequired[str | None]    # matched handler name ("instagram_reel"/"youtube_video"), set by Router
     social_link_url: NotRequired[str | None]        # canonical URL, set by Router
     social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester
     social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester

@@ -646,7 +646,7 @@ async def summarize_social_link(handler_name: str, url: str) -> tuple[str, bytes
 
     Args:
         handler_name: Name of the handler the router matched
-            (``"instagram_reel"``, ``"reddit_post"`` or ``"youtube_video"``).
+            (``"instagram_reel"`` or ``"youtube_video"``).
         url: Canonical URL to fetch, set by the router.
 
     Returns:
@@ -794,7 +794,7 @@ class MessageIngester:
         return combined, {"youtube_short_content": short_content, "youtube_short_video": short_video}
 
     async def __ingest_social_link(self, raw_text: str, handler_name: str, url: str) -> tuple[str, dict]:
-        """Summarize an Instagram/Reddit/YouTube link and append it to the raw text.
+        """Summarize an Instagram/YouTube link and append it to the raw text.
 
         Args:
             raw_text: The sender's original text (containing the link).

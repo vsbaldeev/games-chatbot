@@ -76,30 +76,30 @@ class TestSocialLinkIngestion:
         assert result["social_link_content"] == "[Instagram Reel]\ncaption here"
         assert result["social_link_video"] == b"video bytes"
 
-    async def test_reddit_fetch_has_no_video(self, ingester):
-        incoming = make_incoming(raw_text="look https://www.reddit.com/r/x/comments/abc/y/")
+    async def test_youtube_fetch_has_no_video(self, ingester):
+        incoming = make_incoming(raw_text="look https://www.youtube.com/watch?v=abc123")
         state = make_state(
             incoming, should_respond=True, response_trigger="social_link",
-            social_link_handler="reddit_post",
-            social_link_url="https://www.reddit.com/r/x/comments/abc/y/",
+            social_link_handler="youtube_video",
+            social_link_url="https://www.youtube.com/watch?v=abc123",
         )
         with (
             patch(
                 SUMMARIZE_SOCIAL_LINK_TARGET,
-                new=AsyncMock(return_value=("[Reddit r/x] «title»", None)),
+                new=AsyncMock(return_value=("[YouTube] «title»", None)),
             ),
             patch(UPDATE_CONTENT_TARGET, new=AsyncMock()),
         ):
             result = await ingester(state)
-        assert result["social_link_content"] == "[Reddit r/x] «title»"
+        assert result["social_link_content"] == "[YouTube] «title»"
         assert result["social_link_video"] is None
 
     async def test_failed_fetch_leaves_raw_text_unchanged_and_omits_keys(self, ingester):
-        incoming = make_incoming(raw_text="look https://www.reddit.com/r/x/comments/abc/y/")
+        incoming = make_incoming(raw_text="look https://www.youtube.com/watch?v=abc123")
         state = make_state(
             incoming, should_respond=True, response_trigger="social_link",
-            social_link_handler="reddit_post",
-            social_link_url="https://www.reddit.com/r/x/comments/abc/y/",
+            social_link_handler="youtube_video",
+            social_link_url="https://www.youtube.com/watch?v=abc123",
         )
         with patch(SUMMARIZE_SOCIAL_LINK_TARGET, new=AsyncMock(return_value=("", None))):
             result = await ingester(state)
@@ -117,11 +117,11 @@ class TestSummarizeSocialLink:
 
     async def test_handler_fetch_raising_degrades_to_empty(self):
         broken_handler = MagicMock()
-        broken_handler.name = "reddit_post"
+        broken_handler.name = "youtube_video"
         broken_handler.fetch = AsyncMock(side_effect=ValueError("malformed payload shape"))
         with patch(HANDLERS_TARGET, [broken_handler]):
             content_block, video_bytes = await summarize_social_link(
-                "reddit_post", "https://www.reddit.com/comments/abc"
+                "youtube_video", "https://www.youtube.com/watch?v=abc"
             )
         assert (content_block, video_bytes) == ("", None)
 

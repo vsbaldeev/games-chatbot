@@ -420,8 +420,8 @@ SHORTS_TRIGGER_REACT_INSTRUCTION = (
     "существует или ещё не вышло. Если материала мало — так и скажи"
 )
 
-# Framing for a social-link trigger (Instagram Reel / Reddit post / long-form
-# YouTube video) when a downloaded video is already posted to chat above this
+# Framing for a social-link trigger (Instagram Reel / long-form YouTube
+# video) when a downloaded video is already posted to chat above this
 # reply — react to it, do not retell it, mirroring the ordinary media framing
 # in MEDIA_TRIGGER_LABELS above but pointed at fetched caption/comments text
 # instead of a vision description.
@@ -435,9 +435,9 @@ SOCIAL_LINK_REACT_INSTRUCTION = (
     "своим знаниям — они могут устареть. Если материала мало — так и скажи"
 )
 
-# Framing for a social-link trigger when there is no video to show (Reddit
-# posts always; Instagram/YouTube when nothing downloadable was available) —
-# nobody has seen this, so retell it, same principle as SHORTS_TRIGGER_INSTRUCTION.
+# Framing for a social-link trigger when there is no video to show
+# (Instagram/YouTube when nothing downloadable was available) — nobody has
+# seen this, so retell it, same principle as SHORTS_TRIGGER_INSTRUCTION.
 SOCIAL_LINK_RETELL_INSTRUCTION = (
     "скинул ссылку. Ниже — то, что удалось вытащить (может быть неполным или "
     "ошибаться в деталях). В 1–2 предложениях перескажи, о чём это. Если есть "

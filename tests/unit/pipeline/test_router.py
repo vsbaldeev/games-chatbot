@@ -125,7 +125,7 @@ class TestMediaMessages:
 
 
 class TestSocialLinkDetection:
-    """Instagram/Reddit/YouTube link auto-detection (mirrors Shorts detection).
+    """Instagram/YouTube link auto-detection (mirrors Shorts detection).
 
     Each test uses a distinct link id so the handlers' module-level TtlGate
     singletons (shared across the whole test session, same as shorts.dedup_gate)
@@ -146,14 +146,6 @@ class TestSocialLinkDetection:
             "social_link_url": "https://www.instagram.com/reel/RouterTest01/",
         }
 
-    def test_reddit_link_triggers_social_link(self, router):
-        msg = make_incoming(
-            raw_text="https://www.reddit.com/r/funny/comments/routertest02/some_title/"
-        )
-        result = router._MessageRouter__detect_social_link(msg)
-        assert result["social_link_handler"] == "reddit_post"
-        assert result["response_trigger"] == "social_link"
-
     def test_youtube_watch_link_triggers_social_link(self, router):
         msg = make_incoming(raw_text="https://www.youtube.com/watch?v=RouterTest03")
         result = router._MessageRouter__detect_social_link(msg)
@@ -165,22 +157,22 @@ class TestSocialLinkDetection:
         assert router._MessageRouter__detect_social_link(msg) is not None
         assert router._MessageRouter__detect_social_link(msg) is None
 
-    def test_instagram_priority_over_reddit_in_same_message(self, router):
+    def test_instagram_priority_over_youtube_in_same_message(self, router):
         msg = make_incoming(
             raw_text=(
                 "https://www.instagram.com/reel/RouterTest05/ and also "
-                "https://www.reddit.com/r/funny/comments/routertest05b/title/"
+                "https://www.youtube.com/watch?v=RouterTest05b"
             )
         )
         result = router._MessageRouter__detect_social_link(msg)
         assert result["social_link_handler"] == "instagram_reel"
 
-    def test_gate_rejected_leader_does_not_fall_through_to_reddit(self, router):
+    def test_gate_rejected_leader_does_not_fall_through_to_youtube(self, router):
         """First-match commitment holds even when the leader's own gate rejects it.
 
         Instagram's regex matches first in the combined message. Once its
         dedup gate has already fired for this exact Reel, the whole message
-        must be dropped — the Reddit link later in the same text is never
+        must be dropped — the YouTube link later in the same text is never
         considered, even though it would pass its own gate cleanly.
         """
         reel_url = "https://www.instagram.com/reel/RouterTest06/"
@@ -189,7 +181,7 @@ class TestSocialLinkDetection:
         combined_msg = make_incoming(
             raw_text=(
                 f"{reel_url} and also "
-                "https://www.reddit.com/r/funny/comments/routertest06b/title/"
+                "https://www.youtube.com/watch?v=RouterTest06b"
             )
         )
         assert router._MessageRouter__detect_social_link(combined_msg) is None

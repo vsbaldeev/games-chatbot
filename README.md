@@ -35,11 +35,11 @@ and summarizing the comment reaction — instead of retelling it, since the whol
 group can now see the clip; only a failed download or transcription falls back to
 a 1–2 sentence text retell plus the comment summary, with no verdict and no
 fact-checking the video against the model's own (possibly stale) knowledge.
-Instagram Reel, Reddit post and long-form YouTube video links get the same
-lightweight treatment (title/caption/selftext + top comments, no transcript or
+Instagram Reel and long-form YouTube video links get the same
+lightweight treatment (title/caption + top comments, no transcript or
 vision): Instagram Reels also have their video downloaded and reposted to chat
-ahead of the reply, so the bot reacts to the clip the same way Shorts does; Reddit
-links, long-form YouTube links, and any Instagram Reel or Short whose download
+ahead of the reply, so the bot reacts to the clip the same way Shorts does; long-form
+YouTube links, and any Instagram Reel or Short whose download
 fails always get the text retell framing instead. Voice messages and
 video notes are answered in kind: the reply comes back as a voice note spoken
 by a local Silero v5 Russian TTS voice, degrading to plain text whenever the
