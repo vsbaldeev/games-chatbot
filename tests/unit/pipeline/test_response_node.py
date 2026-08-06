@@ -14,10 +14,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.config.prompts import SOCIAL_LINK_REACT_INSTRUCTION, SOCIAL_LINK_RETELL_INSTRUCTION
 from src.pipeline.response_node import (
     ResponseNode,
     build_asking_user_tag_lines,
+    build_recent_history_lines,
     build_response_input,
+    build_trigger_line,
+    select_social_link_instruction,
 )
 from tests.builders import make_incoming, make_state
 
@@ -322,3 +326,65 @@ class TestErrorPropagation:
         ):
             with pytest.raises(RuntimeError, match="unexpected failure"):
                 await ResponseNode(agent)(self.make_state_for_error())
+
+
+class TestSelectSocialLinkInstruction:
+    def test_select_social_link_instruction_react_when_video_present(self):
+        assert select_social_link_instruction(True) == SOCIAL_LINK_REACT_INSTRUCTION
+
+    def test_select_social_link_instruction_retell_when_video_absent(self):
+        assert select_social_link_instruction(False) == SOCIAL_LINK_RETELL_INSTRUCTION
+
+
+class TestSocialLinkTriggerLine:
+    def test_video_present_uses_react_framing(self):
+        line = build_trigger_line(
+            "alice", "[Instagram Reel]\ncaption", "text", None,
+            response_trigger="social_link", social_link_video_present=True,
+        )
+        assert "уже отправлено в чат выше" in line
+        assert "[Instagram Reel]\ncaption" in line
+
+    def test_no_video_uses_retell_framing(self):
+        line = build_trigger_line(
+            "alice", "[Reddit r/x] «title»", "text", None,
+            response_trigger="social_link", social_link_video_present=False,
+        )
+        assert "перескажи" in line
+        assert "[Reddit r/x] «title»" in line
+
+    def test_default_social_link_video_present_is_false(self):
+        line = build_trigger_line(
+            "alice", "[Reddit r/x] «title»", "text", None, response_trigger="social_link",
+        )
+        assert "перескажи" in line
+
+
+class TestSocialLinkRecentHistoryTrim:
+    def test_social_link_trims_to_thin_slice_like_random_and_shorts(self):
+        recent = [
+            {"message_id": index, "username": "u", "content": f"msg{index}", "media_type": "text"}
+            for index in range(10)
+        ]
+        context = {"recent_history": recent}
+        lines, _ = build_recent_history_lines(context, "social_link", has_thread_history=False)
+        rendered_messages = [line for line in lines if line.startswith("@u:")]
+        assert len(rendered_messages) <= 3
+
+
+class TestResponseNodeSocialLinkFraming:
+    async def test_video_present_selects_react_framing_in_generated_prompt(self):
+        agent = make_mock_agent()
+        node = ResponseNode(agent)
+        incoming = make_incoming(
+            raw_text="look at this",
+            processed_text="[Instagram Reel]\ncaption here",
+        )
+        state = make_state(
+            incoming, should_respond=True, response_trigger="social_link",
+            social_link_video=b"video bytes", is_flat_thread=True,
+        )
+        with patch(THREAD_APPEND_TURN, new=AsyncMock()):
+            await node(state)
+        sent_messages = agent.invoke_response.call_args[0][0]
+        assert "уже отправлено в чат выше" in sent_messages[-1].content

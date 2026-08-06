@@ -48,7 +48,7 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (10% chance), "youtube_short" (Shorts link) or "humor" (autonomous joke)
+    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (10% chance), "youtube_short" (Shorts link), "social_link" (Instagram/Reddit/YouTube link) or "humor" (autonomous joke)
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
@@ -64,7 +64,11 @@ class BotState(TypedDict):
     wind_down: NotRequired[bool]   # True when the engagement gate wants a short conversation-closing reply instead of a full one
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
-    filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "PHOTO_REQUEST" | "SHORTS", set by the filter node
+    social_link_handler: NotRequired[str | None]    # matched handler name ("instagram_reel"/"reddit_post"/"youtube_video"), set by Router
+    social_link_url: NotRequired[str | None]        # canonical URL, set by Router
+    social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester
+    social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester
+    filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "PHOTO_REQUEST" | "SHORTS" | "SOCIAL_LINK", set by the filter node
     photo_request: NotRequired[bool]   # True when the filter accepted a photo request at the full tier; the events layer launches selfie generation after the ack is delivered
     photo_in_flight: NotRequired[bool] # True when any image generation (chat selfie or scheduled life post) was already running at classification time; the response acks «уже фоткаю» and no second job is launched
     engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node

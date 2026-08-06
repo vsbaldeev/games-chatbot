@@ -30,7 +30,19 @@ voice_reply.py
                                       and send it with reply_voice; returns None on
                                       any failure so deliver_response falls back to
                                       the plain text reply
+
+messages.py (deliver_response)
+    try_send_social_link_video(msg, video_bytes) — best-effort post of a
+                                      downloaded social-link video (Instagram
+                                      Reel only — Reddit and long-form YouTube
+                                      never attach video) before the text
+                                      reply; a failed upload is logged and
+                                      swallowed, never blocking the reply
 ```
+
+deliver_response posts the video first when the pipeline downloaded one
+(``final_state["social_link_video"]``), then the text reply, so an Instagram
+Reel appears in chat before the bot's reaction to it.
 
 ## Chat-requested selfies
 

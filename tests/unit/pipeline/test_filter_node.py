@@ -317,3 +317,81 @@ class TestSendReaction:
         state["context_types"].bot = mock_bot
 
         await node._MeaninglessFilterNode__send_reaction(state)
+
+
+def make_filter_node() -> MeaninglessFilterNode:
+    with patch("src.pipeline.filter_node.make_filter_llm"):
+        return MeaninglessFilterNode()
+
+
+class TestYoutubeShortDispatchCharacterization:
+    """Pins today's untested Shorts-trigger dispatch before this file's own
+    social-link branch is added right beside it."""
+
+    async def test_content_present_sets_shorts_verdict(self):
+        node = make_filter_node()
+        incoming = make_incoming(raw_text="https://www.youtube.com/shorts/abc")
+        state = make_state(
+            incoming, should_respond=True, response_trigger="youtube_short",
+            youtube_short_content="[YouTube Shorts]\nsome content",
+        )
+        result = await node(state)
+        assert result == {"filter_verdict": "SHORTS"}
+
+    async def test_no_content_and_unaddressed_drops_silently(self):
+        node = make_filter_node()
+        telegram_message = MagicMock(text="https://www.youtube.com/shorts/abc", caption=None)
+        telegram_message.reply_to_message = None
+        incoming = make_incoming(
+            raw_text="https://www.youtube.com/shorts/abc", telegram_message=telegram_message,
+        )
+        state = make_state(
+            incoming, should_respond=True, response_trigger="youtube_short",
+            youtube_short_content=None,
+        )
+        result = await node(state)
+        assert result == {"should_respond": False, "drop_reason": "shorts_failed"}
+
+
+class TestSocialLinkDispatch:
+    async def test_content_present_sets_social_link_verdict(self):
+        node = make_filter_node()
+        incoming = make_incoming(raw_text="https://www.reddit.com/r/x/comments/abc/y/")
+        state = make_state(
+            incoming, should_respond=True, response_trigger="social_link",
+            social_link_content="[Reddit r/x] «title»",
+        )
+        result = await node(state)
+        assert result == {"filter_verdict": "SOCIAL_LINK"}
+
+    async def test_no_content_and_unaddressed_drops_silently(self):
+        node = make_filter_node()
+        telegram_message = MagicMock(text="https://www.reddit.com/r/x/comments/abc/y/", caption=None)
+        telegram_message.reply_to_message = None
+        incoming = make_incoming(
+            raw_text="https://www.reddit.com/r/x/comments/abc/y/", telegram_message=telegram_message,
+        )
+        state = make_state(
+            incoming, should_respond=True, response_trigger="social_link",
+            social_link_content=None,
+        )
+        result = await node(state)
+        assert result == {"should_respond": False, "drop_reason": "social_link_failed"}
+
+    async def test_no_content_and_addressed_gets_canned_reply(self):
+        node = make_filter_node()
+        telegram_message = MagicMock(
+            text="@testbot https://www.reddit.com/r/x/comments/abc/y/", caption=None,
+        )
+        telegram_message.reply_to_message = None
+        incoming = make_incoming(
+            raw_text="@testbot https://www.reddit.com/r/x/comments/abc/y/",
+            telegram_message=telegram_message,
+        )
+        state = make_state(
+            incoming, should_respond=True, response_trigger="social_link",
+            social_link_content=None,
+        )
+        result = await node(state)
+        assert result["should_respond"] is False
+        assert result["response"]  # one of SOCIAL_LINK_FAILED_REPLIES

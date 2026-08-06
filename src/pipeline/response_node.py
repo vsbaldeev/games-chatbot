@@ -14,6 +14,8 @@ from src.config.prompts import (
     ACTIVITY_STALE_SUFFIX,
     BOT_CANON_HEADER,
     SHORTS_TRIGGER_INSTRUCTION,
+    SOCIAL_LINK_REACT_INSTRUCTION,
+    SOCIAL_LINK_RETELL_INSTRUCTION,
     USER_FACTS_HEADER,
     WEEKLY_ROLES_RULE,
     WORKER_DATA_UNVERIFIED_HEADER,
@@ -258,9 +260,24 @@ def build_bot_life_lines(context) -> list[str]:
     return parts
 
 
+def select_social_link_instruction(social_link_video_present: bool) -> str:
+    """Pick the social-link trigger's framing: react (video posted) or retell.
+
+    Args:
+        social_link_video_present: True when an Instagram Reel video was
+            downloaded and will be posted to chat before this reply.
+
+    Returns:
+        SOCIAL_LINK_REACT_INSTRUCTION or SOCIAL_LINK_RETELL_INSTRUCTION.
+    """
+    if social_link_video_present:
+        return SOCIAL_LINK_REACT_INSTRUCTION
+    return SOCIAL_LINK_RETELL_INSTRUCTION
+
+
 def build_trigger_line(
     username: str, user_input: str, media_type: str, replied_to: dict | None,
-    response_trigger: str = "explicit",
+    response_trigger: str = "explicit", social_link_video_present: bool = False,
 ) -> str:
     """Build the final user-turn line, marking media so the model reacts to it.
 
@@ -268,17 +285,24 @@ def build_trigger_line(
     ``user_input`` as a description to *react* to, not retell — the chat
     already sees the original. A YouTube Shorts trigger inverts that: nobody
     has watched the video, so the model must retell it and summarize the
-    audience reaction from the top comments.
+    audience reaction from the top comments. A social-link trigger picks
+    between the two framings depending on whether a video was actually
+    posted to chat (Instagram success — react) or not (Reddit always,
+    Instagram on a failed download — retell, like Shorts).
 
     Args:
         username: Sender's username (without ``@``).
-        user_input: The user's words for ``text``, or a vision/transcript
-            description for media.
+        user_input: The user's words for ``text``, or a vision/transcript/
+            fetched-content description for media/link triggers.
         media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"``
             or ``"video"``.
         replied_to: The message being replied to, or ``None``.
         response_trigger: Routing trigger; ``"youtube_short"`` selects the
-            retell-and-comments-summary framing.
+            retell-and-comments-summary framing; ``"social_link"`` selects
+            react or retell depending on ``social_link_video_present``.
+        social_link_video_present: True when an Instagram Reel video was
+            downloaded and will be posted to chat before this reply —
+            selects the react framing instead of retell.
 
     Returns:
         The trigger line to append as the final human turn.
@@ -288,6 +312,9 @@ def build_trigger_line(
         speaker = f"{speaker} (↳ {row_speaker(replied_to)})"
     if response_trigger == "youtube_short":
         return f"{speaker} {SHORTS_TRIGGER_INSTRUCTION}:\n{user_input}"
+    if response_trigger == "social_link":
+        instruction = select_social_link_instruction(social_link_video_present)
+        return f"{speaker} {instruction}:\n{user_input}"
     label = MEDIA_TRIGGER_LABELS.get(media_type)
     if label:
         return (
@@ -317,8 +344,9 @@ def build_recent_history_lines(
 
     Args:
         context: AssembledContext dict or None.
-        response_trigger: Routing trigger; ``"random"``/``"youtube_short"``
-            trim the recent-history slice further (see :func:`build_response_input`).
+        response_trigger: Routing trigger; ``"random"``/``"youtube_short"``/
+            ``"social_link"`` trim the recent-history slice further (see
+            :func:`build_response_input`).
         has_thread_history: ``True`` when per-thread turn history is available;
             suppresses recent chat history to avoid double-context.
 
@@ -328,7 +356,7 @@ def build_recent_history_lines(
         without recomputing it.
     """
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
-    if response_trigger in ("random", "youtube_short"):
+    if response_trigger in ("random", "youtube_short", "social_link"):
         recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
     rendered = [] if has_thread_history else recent
 
@@ -413,6 +441,7 @@ def build_response_input(
     wind_down: bool = False,
     worker_tools_used: bool = False,
     photo_directive: str | None = None,
+    social_link_video_present: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
 
@@ -437,6 +466,9 @@ def build_response_input(
             context-derived frame.
         photo_directive: Photo-request framing passed to
             :func:`build_directive_lines`, or None.
+        social_link_video_present: True when an Instagram Reel video was
+            downloaded and will be posted to chat before this reply; passed
+            straight through to :func:`build_trigger_line`.
 
     Returns:
         Prompt string ready to pass as the final human turn to the response LLM.
@@ -466,7 +498,12 @@ def build_response_input(
 
     parts += build_directive_lines(is_bot_insult, wind_down, photo_directive)
 
-    parts.append(build_trigger_line(username, user_input, media_type, replied_to, response_trigger))
+    parts.append(
+        build_trigger_line(
+            username, user_input, media_type, replied_to, response_trigger,
+            social_link_video_present=social_link_video_present,
+        )
+    )
     return "\n".join(parts)
 
 
@@ -597,6 +634,7 @@ class ResponseNode:
             wind_down=bool(state.get("wind_down")),
             worker_tools_used=bool(state.get("worker_tools_used")),
             photo_directive=resolve_photo_directive(state),
+            social_link_video_present=bool(state.get("social_link_video")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
         log_response_input(past_messages, enriched)

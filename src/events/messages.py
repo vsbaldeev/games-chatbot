@@ -1,6 +1,7 @@
 """Message handlers — text, voice, photo, sticker, video."""
 
 import datetime
+import io
 import re
 import time
 
@@ -203,13 +204,33 @@ def build_pipeline_state(
     }
 
 
+async def try_send_social_link_video(msg, video_bytes: bytes) -> None:
+    """Best-effort post of a downloaded social-link video before the text reply.
+
+    Args:
+        msg: The triggering ``telegram.Message`` to reply to.
+        video_bytes: The downloaded video payload (Instagram Reel only —
+            Reddit and long-form YouTube never attach video).
+
+    Never raises: a failed upload (size, format, network) is logged and
+    swallowed so the text reply that follows is never blocked on it.
+    """
+    try:
+        await msg.reply_video(video=io.BytesIO(video_bytes))
+    except Exception as err:
+        logger.warning("Social-link video send failed, continuing with text only: %s", err)
+
+
 async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int, int | None, str]:
     """Send the pipeline response to Telegram.
 
     Normal responses reply to the triggering message; when the trigger was a
     voice message or video note the reply goes out in kind as a voice note,
-    degrading to text on any synthesis failure. Autonomous jokes
-    (``response_trigger == "humor"``) go out via :func:`deliver_joke`.
+    degrading to text on any synthesis failure. A social-link trigger with a
+    downloaded video (``final_state["social_link_video"]``, Instagram Reel
+    only) posts that video first — best-effort, never blocking the text
+    reply that follows. Autonomous jokes (``response_trigger == "humor"``)
+    go out via :func:`deliver_joke`.
 
     Args:
         final_state: Pipeline state after the graph run.
@@ -230,6 +251,9 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
     await msg.chat.send_action("typing")
     if is_joke:
         return await deliver_joke(final_state, msg, clean)
+    social_link_video = final_state.get("social_link_video")
+    if social_link_video:
+        await try_send_social_link_video(msg, social_link_video)
     if final_state["incoming"]["media_type"] in VOICE_REPLY_TRIGGER_MEDIA_TYPES:
         voice_message = await try_send_voice_reply(msg, clean)
         if voice_message is not None:

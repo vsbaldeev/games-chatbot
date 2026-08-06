@@ -62,7 +62,7 @@ from langchain_core.messages import HumanMessage
 from src import config
 from src.agent import ainvoke_with_backoff
 from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
-from src.pipeline import shorts
+from src.pipeline import shorts, social_links
 from src.pipeline.state import BotState
 from src.store import sticker_descriptions, unified_messages
 
@@ -639,11 +639,42 @@ async def summarize_youtube_short(url: str) -> str:
     return "\n".join(parts)
 
 
+async def summarize_social_link(handler_name: str, url: str) -> tuple[str, bytes | None]:
+    """Fetch and compose a social-link content block via its matched handler.
+
+    Args:
+        handler_name: Name of the handler the router matched
+            (``"instagram_reel"``, ``"reddit_post"`` or ``"youtube_video"``).
+        url: Canonical URL to fetch, set by the router.
+
+    Returns:
+        Tuple of ``(content_block, video_bytes)`` — ``("", None)`` when the
+        handler name is unrecognized, the fetch produced nothing usable, or
+        the fetch raised (never propagates — same degrade-to-silence
+        contract as Shorts).
+    """
+    handler = next(
+        (candidate for candidate in social_links.HANDLERS if candidate.name == handler_name),
+        None,
+    )
+    if handler is None:
+        logger.warning("Unknown social link handler %r for %s", handler_name, url)
+        return "", None
+    try:
+        content = await handler.fetch(url)
+    except Exception as err:
+        logger.warning("Social link handler %r raised for %s: %s", handler_name, url, err)
+        return "", None
+    if content is None:
+        return "", None
+    return content["content_block"], content["video_bytes"]
+
+
 class MessageIngester:
     """Converts media messages to text and updates the unified_messages store."""
 
     async def __call__(self, state: BotState) -> dict:
-        """Convert the incoming message's media (or Shorts link) to text.
+        """Convert the incoming message's media (or Shorts/social link) to text.
 
         Args:
             state: Current pipeline state.
@@ -651,17 +682,17 @@ class MessageIngester:
         Returns:
             State update dict with the enriched ``incoming`` message, the
             ``media_is_real_person`` classification (photo/video_note/video
-            only; None otherwise) and, for Shorts triggers, the
-            ``youtube_short_content`` success flag.
+            only; None otherwise) and, for Shorts/social-link triggers, the
+            fetched content fields.
         """
         msg = state["incoming"]
         media_type = msg["media_type"]
         bot = state["context_types"].bot
-        short_content: str | None = None
         is_real_person: bool | None = None
+        extra_fields: dict = {}
 
         if media_type == "text":
-            processed, short_content = await self.__ingest_text(state)
+            processed, extra_fields = await self.__ingest_text(state)
         elif media_type == "voice":
             processed = await transcribe_voice(msg["file_id"], "voice", bot)
         elif media_type in ("video_note", "video"):
@@ -676,15 +707,16 @@ class MessageIngester:
         else:
             processed = msg["raw_text"] or ""
 
-        if (media_type != "text" or short_content) and processed:
+        if (media_type != "text" or extra_fields) and processed:
             await self.__update_stored_content(msg, processed)
 
         incoming_update = dict(state["incoming"])
         incoming_update["processed_text"] = processed
-        result: dict = {"incoming": incoming_update, "media_is_real_person": is_real_person}
-        if state.get("response_trigger") == "youtube_short":
-            result["youtube_short_content"] = short_content or None
-        return result
+        return {
+            "incoming": incoming_update,
+            "media_is_real_person": is_real_person,
+            **extra_fields,
+        }
 
     async def __ingest_photo(self, msg: dict, bot) -> tuple[bool | None, str]:
         """Describe an incoming photo and combine it with its caption.
@@ -720,25 +752,62 @@ class MessageIngester:
         except Exception as err:
             logger.warning("Failed to update message content for %s: %s", msg["message_id"], err)
 
-    async def __ingest_text(self, state: BotState) -> tuple[str, str | None]:
-        """Process a text message, summarizing a Shorts link when routed so.
+    async def __ingest_text(self, state: BotState) -> tuple[str, dict]:
+        """Process a text message, summarizing a Shorts or social link when routed so.
 
         Args:
             state: Current pipeline state.
 
         Returns:
-            Tuple of the processed text (user text, with the labelled video
-            block appended on a successful Shorts summary) and the summary
-            block itself (``None`` when absent or failed).
+            Tuple of the processed text (user text, with the labelled
+            summary block appended on success) and a dict of extra result
+            fields to merge into the node's return value — empty when there
+            was no link or the fetch produced nothing usable.
         """
         raw_text = state["incoming"]["raw_text"] or ""
         short_url = state.get("youtube_short_url")
-        if not short_url:
-            return raw_text, None
+        if short_url:
+            return await self.__ingest_shorts(raw_text, short_url)
+        social_handler = state.get("social_link_handler")
+        social_url = state.get("social_link_url")
+        if social_handler and social_url:
+            return await self.__ingest_social_link(raw_text, social_handler, social_url)
+        return raw_text, {}
+
+    async def __ingest_shorts(self, raw_text: str, short_url: str) -> tuple[str, dict]:
+        """Summarize a Shorts link and append it to the raw text.
+
+        Args:
+            raw_text: The sender's original text (containing the link).
+            short_url: Canonical Shorts URL set by the router.
+
+        Returns:
+            Tuple of (processed text, extra fields) — extra fields empty on
+            a failed summary.
+        """
         short_content = await summarize_youtube_short(short_url)
         if not short_content:
-            return raw_text, None
-        return f"{raw_text}\n\n{short_content}".strip(), short_content
+            return raw_text, {}
+        combined = f"{raw_text}\n\n{short_content}".strip()
+        return combined, {"youtube_short_content": short_content}
+
+    async def __ingest_social_link(self, raw_text: str, handler_name: str, url: str) -> tuple[str, dict]:
+        """Summarize an Instagram/Reddit/YouTube link and append it to the raw text.
+
+        Args:
+            raw_text: The sender's original text (containing the link).
+            handler_name: Matched handler name set by the router.
+            url: Canonical URL set by the router.
+
+        Returns:
+            Tuple of (processed text, extra fields) — extra fields empty on
+            a failed fetch.
+        """
+        social_content, social_video = await summarize_social_link(handler_name, url)
+        if not social_content:
+            return raw_text, {}
+        combined = f"{raw_text}\n\n{social_content}".strip()
+        return combined, {"social_link_content": social_content, "social_link_video": social_video}
 
 
 def extract_frames_sync(video_bytes: bytes) -> list[bytes]:

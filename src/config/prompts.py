@@ -398,6 +398,34 @@ SHORTS_TRIGGER_INSTRUCTION = (
     "существует или ещё не вышло. Если материала мало — так и скажи"
 )
 
+# Framing for a social-link trigger (Instagram Reel / Reddit post / long-form
+# YouTube video) when a downloaded video is already posted to chat above this
+# reply — react to it, do not retell it, mirroring the ordinary media framing
+# in MEDIA_TRIGGER_LABELS above but pointed at fetched caption/comments text
+# instead of a vision description.
+SOCIAL_LINK_REACT_INSTRUCTION = (
+    "скинул ссылку, видео из которой уже отправлено в чат выше. Ниже — подпись "
+    "и то, что удалось вытащить (может быть неполным или ошибаться в деталях). "
+    "Отреагируй на видео и подпись, не пересказывай — оно уже все видели. Если "
+    "есть блок топ-комментариев — переведи их на русский и в 1 предложении "
+    "передай реакцию зрителей. Не давай вердикт «смотреть или нет». Опирайся "
+    "только на материалы ниже: не выдумывай детали и не проверяй факты по "
+    "своим знаниям — они могут устареть. Если материала мало — так и скажи"
+)
+
+# Framing for a social-link trigger when there is no video to show (Reddit
+# posts always; Instagram/YouTube when nothing downloadable was available) —
+# nobody has seen this, so retell it, same principle as SHORTS_TRIGGER_INSTRUCTION.
+SOCIAL_LINK_RETELL_INSTRUCTION = (
+    "скинул ссылку. Ниже — то, что удалось вытащить (может быть неполным или "
+    "ошибаться в деталях). В 1–2 предложениях перескажи, о чём это. Если есть "
+    "блок топ-комментариев — переведи их на русский и добавь 1 предложение о "
+    "реакции: общее настроение и за что зацепились. Не давай вердикт «смотреть "
+    "или нет». Опирайся только на материалы ниже: не выдумывай детали, которых "
+    "там нет, и не проверяй факты по своим знаниям — они могут устареть. Если "
+    "материала мало — так и скажи"
+)
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Language correction retry (src/agent/language.py,
 # src/pipeline/language_correction_node.py)

@@ -97,24 +97,26 @@ Sends a random Russian-language meme image with its post title as caption.
 
 ## Source
 
-Reddit public JSON API — no credentials required. Four subreddits are queried on every call:
+Two public sources are queried on every call, each read without any API key or
+login (`src/memes/sources/`):
 
 ```
-r/ru_memes
-r/expectedrussians
-r/ruAsska
-r/Pikabu
+9gag      — public group-posts JSON feed
+Telegram  — public t.me/s web previews of a fixed list of meme channels
 ```
 
-Each subreddit is fetched independently (`GET /hot.json?limit=100`). A subreddit failure is logged as a warning and skipped; the rest still proceed.
+Each source is fetched independently and swallows its own errors, so a failing
+source is logged as a warning and skipped while the rest still proceed. Reddit's
+public JSON API is used elsewhere — by the chat-link-summary feature
+(`src/pipeline/social_links/reddit_post.py`) — but not by `/meme`; `/meme`'s own
+sources are `ninegag.py` and `telegram.py` only (see `src/memes/sources/`).
 
 ## Post filtering
 
 ```
-is_video  = true  → skip
-is_gallery = true → skip
-post_hint = "image"
-  OR url ends with .jpg / .jpeg / .png / .gif → keep
+9gag:     type != "Photo" or nsfw=true → skip
+Telegram: message has no single embedded photo (video thumbnails, link
+          previews, galleries) → skip
 ```
 
 ## Deduplication
@@ -125,10 +127,10 @@ Sent meme URLs are recorded in the `sent_memes` table keyed by `(chat_id, url)`.
 
 ```
 /meme
-  → fetch up to 400 posts across all subreddits
-  → filter: single image only (no video, no gallery)
-  → exclude URLs already in sent_memes for this chat
+  → gather_candidates(): fetch from every registered source (9gag + Telegram channels)
+  → each source already filtered to single-image, non-NSFW candidates
+  → exclude candidates already in sent_memes for this chat
   → pick random candidate
   → INSERT into sent_memes
-  → reply_photo(url, caption=title)
+  → reply_photo(image_url, caption=title)
 ```

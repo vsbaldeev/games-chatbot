@@ -48,6 +48,11 @@ how it entered the pipeline:
     summary passes through; a failed one gets a canned «не смог посмотреть»
     reply when the sender explicitly addressed the bot, and full silence
     otherwise (no emoji reaction — the bot was never addressed).
+  - Social-link triggers (response_trigger="social_link" — Instagram Reel,
+    Reddit post, long-form YouTube video) bypass the LLM classification the
+    same way as Shorts: a successful fetch passes through, a failed one
+    gets the same canned-reply-if-addressed/full-silence-otherwise
+    treatment.
 
 Every verdict charges the sender's persistent attention budget (see
 ``engagement_gate``), and the post-charge wind-down tier decides the shape of
@@ -121,6 +126,14 @@ SHORTS_FAILED_REPLIES = [
     "Ролик не открылся. Придётся рискнуть и смотреть вслепую.",
     "Ютуб мне этот шортс не отдал. Что я, впервые ему не угодил.",
     "Не дотянулся до ролика. Перекиньте другую ссылку или смотрите так.",
+]
+
+# Honest canned acknowledgements for an explicitly addressed Instagram/Reddit/
+# YouTube link the bot failed to fetch — same principle as SHORTS_FAILED_REPLIES.
+SOCIAL_LINK_FAILED_REPLIES = [
+    "Не смог посмотреть — сайт не отдал. Сами гляньте по ссылке.",
+    "Ссылка не открылась. Придётся смотреть вслепую.",
+    "Не дотянулся до контента. Перекиньте ещё раз или смотрите так.",
 ]
 
 # Leading interrogatives that mark a message as a real question even without
@@ -399,6 +412,9 @@ class MeaninglessFilterNode:
         if state.get("response_trigger") == "youtube_short":
             return self.__handle_youtube_short(state)
 
+        if state.get("response_trigger") == "social_link":
+            return self.__handle_social_link(state)
+
         if state["incoming"]["media_type"] != "text":
             return await self.__handle_media(state)
 
@@ -519,6 +535,38 @@ class MeaninglessFilterNode:
             return {"should_respond": False, "response": random.choice(SHORTS_FAILED_REPLIES)}
         logger.info("Filter: no Shorts content for message %s, skipping silently", message_id)
         return {"should_respond": False, "drop_reason": "shorts_failed"}
+
+    def __handle_social_link(self, state: BotState) -> dict:
+        """Pass a fetched Instagram/Reddit/YouTube summary through; degrade honestly on failure.
+
+        Mirrors __handle_youtube_short: the trigger is deterministic (a link
+        was posted), so no LLM classification runs. Kept as its own method
+        rather than merged with __handle_youtube_short — the two triggers
+        are handled by entirely separate code paths by design (see the
+        design doc's "Why Shorts stays separate" section), and merging them
+        here would mean editing __handle_youtube_short's already-shipped
+        body for a refactor this feature does not require.
+
+        Args:
+            state: Current pipeline state.
+
+        Returns:
+            State update dict.
+        """
+        if state.get("social_link_content"):
+            return {"filter_verdict": "SOCIAL_LINK"}
+        message_id = state["incoming"]["message_id"]
+        telegram_message = state["incoming"]["update"].message
+        if telegram_message is not None and is_explicitly_addressed(
+            telegram_message, config.BOT_USERNAME, config.BOT_ID
+        ):
+            logger.info(
+                "Filter: no social-link content for message %s, explicit trigger — canned failure reply",
+                message_id,
+            )
+            return {"should_respond": False, "response": random.choice(SOCIAL_LINK_FAILED_REPLIES)}
+        logger.info("Filter: no social-link content for message %s, skipping silently", message_id)
+        return {"should_respond": False, "drop_reason": "social_link_failed"}
 
     async def __handle_media(self, state: BotState) -> dict:
         """Pass media through when transcribed; degrade honestly when not.

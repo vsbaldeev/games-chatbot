@@ -24,6 +24,14 @@ Respond when:
     dominant way links arrive, and «tell me what this video is» does not
     put words in the sender's mouth), but is gated by a per-chat repost
     dedup window and a daily summary cap (see ``src.pipeline.shorts``).
+  - A text message contains an Instagram Reel, Reddit post or long-form
+    YouTube video link (checked after Shorts, which keeps top priority) —
+    routed with response_trigger="social_link" so the pipeline fetches a
+    lightweight metadata-only summary (title/caption/selftext + top
+    comments, no transcript or vision). The first handler in priority
+    order whose regex matches wins the whole message; same per-item repost
+    dedup window and daily summary cap pattern as Shorts (see
+    ``src.pipeline.social_links``).
 """
 
 import random
@@ -31,7 +39,7 @@ import re
 from typing import Any
 
 from src import log
-from src.pipeline import humor_gate, shorts
+from src.pipeline import humor_gate, shorts, social_links
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
 from src.utils.ttl_gate import TtlGate
@@ -106,6 +114,9 @@ class MessageRouter:
             shorts_update = self.__detect_shorts(msg)
             if shorts_update is not None:
                 return shorts_update
+            social_link_update = self.__detect_social_link(msg)
+            if social_link_update is not None:
+                return social_link_update
 
         should_respond, response_trigger = self.__decide(msg, message)
 
@@ -177,6 +188,66 @@ class MessageRouter:
             "should_respond": True,
             "response_trigger": "youtube_short",
             "youtube_short_url": shorts.extract_shorts_url(msg["raw_text"]),
+        }
+
+    def __detect_social_link(self, msg: IncomingMessage) -> dict | None:
+        """Route the first matching Instagram/Reddit/YouTube link, if gates allow.
+
+        Mirrors __detect_shorts: runs only when Shorts found nothing (Shorts
+        keeps top priority) and tries social_links.HANDLERS in registry
+        order. Only the first handler whose regex matches anything in the
+        message is considered — every other link, same platform or
+        different, is never looked at, even when that handler's own gate
+        then rejects the match (see the design doc's multi-link precedence).
+
+        Args:
+            msg: Normalised incoming-message dict from the pipeline state.
+
+        Returns:
+            State update dict with the ``social_link`` trigger, or None when
+            no handler matched or the matched handler's gate rejected it.
+        """
+        text = msg["raw_text"]
+        for handler in social_links.HANDLERS:
+            match = handler.extract(text)
+            if match is None:
+                continue
+            item_id, canonical_url = match
+            return self.__resolve_social_link_match(msg, handler, item_id, canonical_url)
+        return None
+
+    def __resolve_social_link_match(
+        self, msg: IncomingMessage, handler, item_id: str, canonical_url: str,
+    ) -> dict | None:
+        """Gate-check the one matched handler and build its trigger update.
+
+        Args:
+            msg: Normalised incoming-message dict.
+            handler: The matched ``LinkHandler``.
+            item_id: Platform-specific id used for dedup gating.
+            canonical_url: URL to fetch, passed through to the Ingester.
+
+        Returns:
+            State update dict on a gate pass, or None on a gate rejection.
+        """
+        if handler.dedup_gate.seen((msg["chat_id"], handler.name, item_id)):
+            logger.info(
+                "%s repost in chat %s (%s) — skipping summary",
+                handler.name, msg["chat_id"], item_id,
+            )
+            return None
+        used = handler.daily_cap_gate.hit(msg["chat_id"])
+        if used > handler.daily_cap:
+            logger.warning(
+                "%s daily cap reached for chat %s (%d/%d) — skipping summary",
+                handler.name, msg["chat_id"], used, handler.daily_cap,
+            )
+            return None
+        return {
+            "should_respond": True,
+            "response_trigger": "social_link",
+            "social_link_handler": handler.name,
+            "social_link_url": canonical_url,
         }
 
     def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:

@@ -37,6 +37,13 @@ incoming message
     │     │        SHORTS_DAILY_CAP=15 summaries per chat per sliding 24h
     │     │        window — a gated link falls through to the rules below,
     │     │        costing zero downloads and zero LLM tokens)
+    │     ├─ Instagram/Reddit/YouTube link → should_respond=True, trigger="social_link"
+    │     │       (checked after Shorts — Shorts keeps top priority; tries
+    │     │        social_links.HANDLERS in priority order [instagram_reel,
+    │     │        reddit_post, youtube_video], first regex match wins the
+    │     │        whole message, every other link is ignored; same per-item
+    │     │        24h dedup_gate + daily cap=15 pattern as Shorts, gated
+    │     │        entirely by src.pipeline.social_links)
     │     ├─ @bot_username in text    → should_respond=True,  trigger="explicit"
     │     │       (word-boundary regex via is_explicitly_addressed — URLs and
     │     │        longer words containing the username do not count)
@@ -123,6 +130,21 @@ ingester (current message, should_respond=True only)
     │     are not enough to react honestly)
     │     PO tokens for YouTube bot-detection come automatically from the
     │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
+    │     trigger="social_link": summarize_social_link dispatches to the
+    │     matched handler (src.pipeline.social_links — instagram_reel,
+    │     reddit_post or youtube_video) for a metadata-only fetch: no
+    │     transcript, no vision, just title/caption/selftext + top comments
+    │     (≤10, ≤200 chars each) via yt-dlp info-extraction (YouTube) or
+    │     Reddit's public JSON API; description/selftext capped at 2000 chars
+    │     processed_text = user text + the handler's labelled block
+    │     ("[Instagram Reel]…" / "[Reddit r/x] «title»…" / "[YouTube «title»]…")
+    │     and unified_messages is updated so reply chains show the content;
+    │     social_link_content is set as the success flag (None on failure —
+    │     an unrecognized handler, an empty payload, or the handler's fetch
+    │     raising all degrade to silence, never an unhandled exception);
+    │     Instagram alone additionally downloads the Reel's video bytes into
+    │     social_link_video, posted to chat before the reply (see
+    │     src/events/README.md) — Reddit and YouTube never carry video
     ├─ voice      → Groq Whisper → transcript
     ├─ video_note → Groq Whisper + frame extraction (see below); frames' vision
     │               calls also yield media_is_real_person (majority vote — see below)
@@ -212,6 +234,10 @@ filter  (runs after ingester)
     │       │       → canned «Не смог посмотреть…» (SHORTS_FAILED_REPLIES)
     │       └─ empty + unaddressed → should_respond=False, full silence
     │               (no emoji reaction — the bot was never addressed)
+    ├─ trigger="social_link" → deterministic bypass, no LLM classification
+    │       (mirrors trigger="youtube_short" above)
+    │       ├─ social_link_content set   → pass through to guard
+    │       └─ social_link_content empty → canned reply (addressed) or silent drop
     ├─ media message, processed_text empty
     │       ├─ explicit trigger → honest canned reply, no LLM
     │       │     voice/video → «Не расслышал…» (TRANSCRIPTION_FAILED_REPLIES)
@@ -408,9 +434,10 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
     ├─ provenance: invoke_worker returns (output, tools_used) from a mechanical
     │          ToolMessage scan → worker_tools_used in state
     ├─ skipped entirely on insult paths (is_bot_insult), wind-down brush-offs
-    │          (wind_down — one short closing phrase needs no tools) and Shorts
-    │          summaries (trigger="youtube_short" — the source material is
-    │          already in processed_text; tools would only add junk) → empty output
+    │          (wind_down — one short closing phrase needs no tools) and Shorts/
+    │          social-link summaries (trigger="youtube_short"/"social_link" — the
+    │          source material is already in processed_text; tools would only
+    │          add junk) → empty output
     ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search
     ├─ DailyLimitError → advance_model(), retry with next fallback
     ├─ ContextLengthError → worker_output="" (response node still runs)
@@ -427,9 +454,9 @@ response   personality LLM (ReAct executor, no tools)
     ├─ prompt: thread_history (last 10 turns, thread-scoped, reply chains only)
     │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
     │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
-    │            + recent history (last 10; random and youtube_short triggers get only
-    │              the newest 3, RANDOM_TRIGGER_CONTEXT_LIMIT) + replied_to + worker
-    │              findings + current message
+    │            + recent history (last 10; random, youtube_short and social_link
+    │              triggers get only the newest 3, RANDOM_TRIGGER_CONTEXT_LIMIT) +
+    │              replied_to + worker findings + current message
     │          recent history is dropped entirely when thread history is present —
     │            the thread turns already carry the conversation. The replied_to
     │            block («Сообщение, на которое отвечают») is then always rendered:
@@ -453,6 +480,13 @@ response   personality LLM (ReAct executor, no tools)
     │            no worth-watching verdict, no inventing missing details, and no
     │            checking the video's facts against the model's own stale knowledge
     │            (nothing here is tool-verified — the worker is skipped for Shorts)
+    │          trigger="social_link" picks react vs. retell per request
+    │            (select_social_link_instruction): when an Instagram Reel's video
+    │            was actually downloaded and will be posted to chat before this
+    │            reply, the model reacts to it like any other media (video already
+    │            visible, do not retell it) — otherwise (Reddit always, or an
+    │            Instagram link whose download failed) it gets the same
+    │            retell-and-comments-summary framing as Shorts
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
     │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
@@ -574,10 +608,14 @@ AssembledContext:
 BotState:
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: "explicit" | "insult_check" | "random" | "youtube_short" | "humor"
+    response_trigger: "explicit" | "insult_check" | "random" | "youtube_short" | "social_link" | "humor"
     blocked: bool
     youtube_short_url: str | None      # canonical Shorts URL, set by router
     youtube_short_content: str | None  # labelled transcript/frames/comments block, set by ingester
+    social_link_handler: str | None    # matched handler name, set by router
+    social_link_url: str | None        # canonical URL, set by router
+    social_link_content: str | None    # labelled content block, set by ingester
+    social_link_video: bytes | None    # downloaded video bytes (Instagram only), set by ingester
     media_is_real_person: bool | None  # vision classification for photo/video_note/video, set by ingester; None = text/voice/unclassified
     context: AssembledContext | None
     thread_id: str | None              # {chat_id}_{root_message_id} for replies, chat_id for flat; scopes LLM history
