@@ -12,8 +12,8 @@ voice / video_note message
     ├─ forwarded                       → no reply (stored for history only)
     ├─ reply to a bot message          → should_respond=True, trigger="explicit"
     │       (@mention needs text — replying is the only way to address with voice)
-    ├─ otherwise                       → 10% roll (MEDIA_RESPONSE_CHANCE)
-    │       lost roll                  → no reply (transcript still mined for memories)
+    ├─ otherwise                       → no reply (bot never comments on media it
+    │                                    wasn't shown; transcript still mined for memories)
     ▼
 Whisper transcription (Groq whisper-large-v3, ru)
     ├─ empty/garbage + explicit        → canned «не расслышал» reply — short Russian,
