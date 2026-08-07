@@ -58,9 +58,8 @@ incoming message
     ├─ voice / video_note / video / photo
     │     ├─ @bot_username in caption → should_respond=True,  trigger="explicit"
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
-    │     ├─ album item whose media_group_id already rolled (5-min TtlGate)
-    │     │                           → should_respond=False (one roll per album)
-    │     └─ otherwise               → random.random() < MEDIA_RESPONSE_CHANCE (0.10)
+    │     └─ otherwise               → should_respond=False (bot never comments on
+    │                                    media it wasn't shown; still stored + enriched)
     │
     └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
     │

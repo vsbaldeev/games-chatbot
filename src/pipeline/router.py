@@ -17,7 +17,6 @@ Respond when:
   - The text mentions the bot by word («бот» / "bot") without addressing it —
     routed with response_trigger="insult_check"; the filter node replies only
     if it confirms the message insults the bot.
-  - Random chance fires for voice/video_note/video/photo (10%).
   - A text message contains a YouTube Shorts link — routed with
     response_trigger="youtube_short" so the pipeline summarizes the video.
     This check runs before the forwarded-message guard (forwarding is the
@@ -34,7 +33,6 @@ Respond when:
     ``src.pipeline.social_links``).
 """
 
-import random
 import re
 from typing import Any
 
@@ -42,17 +40,8 @@ from src import log
 from src.pipeline import humor_gate, shorts, social_links
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
-from src.utils.ttl_gate import TtlGate
 
 logger = log.get_logger(__name__)
-
-MEDIA_RESPONSE_CHANCE = 0.10
-
-# Albums (shared media_group_id) roll the random-response dice once for the
-# whole group instead of once per item. Albums arrive within seconds; the
-# window only needs to outlive the slowest album delivery.
-ALBUM_GATE_WINDOW_SECONDS = 5 * 60
-album_gate = TtlGate(ALBUM_GATE_WINDOW_SECONDS)
 
 
 def is_explicitly_addressed(telegram_message: Any, bot_username: str, bot_id: int) -> bool:
@@ -278,9 +267,6 @@ class MessageRouter:
         if media_type in ("voice", "video_note", "video", "photo"):
             if addressed:
                 return True, "explicit"
-            media_group_id = msg.get("media_group_id")
-            if media_group_id and album_gate.seen((msg["chat_id"], media_group_id)):
-                return False, "random"
-            return random.random() < MEDIA_RESPONSE_CHANCE, "random"
+            return False, "random"
 
         return False, "random"

@@ -123,6 +123,30 @@ class TestMediaMessages:
         should_respond, _ = call_decide(router, incoming)
         assert not should_respond
 
+    def test_unaddressed_photo_never_responds(self, router):
+        incoming = make_incoming(media_type="photo")
+        should_respond, trigger = call_decide(router, incoming)
+        assert not should_respond
+        assert trigger == "random"
+
+    def test_unaddressed_voice_never_responds(self, router):
+        incoming = make_incoming(media_type="voice")
+        should_respond, trigger = call_decide(router, incoming)
+        assert not should_respond
+        assert trigger == "random"
+
+    def test_unaddressed_video_note_never_responds(self, router):
+        incoming = make_incoming(media_type="video_note")
+        should_respond, trigger = call_decide(router, incoming)
+        assert not should_respond
+        assert trigger == "random"
+
+    def test_unaddressed_video_never_responds(self, router):
+        incoming = make_incoming(media_type="video")
+        should_respond, trigger = call_decide(router, incoming)
+        assert not should_respond
+        assert trigger == "random"
+
 
 class TestSocialLinkDetection:
     """Instagram/YouTube link auto-detection (mirrors Shorts detection).
