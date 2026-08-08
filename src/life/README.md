@@ -13,8 +13,7 @@ src/jobs/life_post.py (schedule + format) ──►
     ├─ src/life/writer.py: EpisodeWriterAgent.write_episode(post_format)
     │      reads bot_memories.get_recent_episodes(10) + get_writer_facts()
     │      (20 newest + 10 sampled older) + get_recent_activities(7);
-    │      src/life/engagement.choose_mode() picks how this post engages
-    │      the chat (see below) → prompts EPISODE_WRITER_SYSTEM (today's
+    │      → prompts EPISODE_WRITER_SYSTEM (today's
     │      date/season + dated recent activities via calendar_ru, for
     │      season-appropriate and non-contradicting episodes, plus «Формат
     │      этого поста: X») → strict JSON {episode_text, image_prompt,
@@ -49,29 +48,13 @@ Zero successful sends leaves `bot_memories` untouched — the watermark
 (`get_latest_posted_at`) stays behind, so catch-up retries the slot on the
 next startup instead of silently losing it.
 
-## Engagement — `src/life/engagement.py`
+## Engagement
 
-Жора's posts don't just narrate his own life — each one either asks the chat
-a question or pulls a real member into the story:
-
-- **SOLO** (`MEMBER_MODE_CHANCE = 0.5` chance of *not* landing on MEMBER):
-  the episode closes with a question or callout aimed at the chat.
-- **MEMBER**: `collect_mentionable_facts()` gathers `(username, fact)` pairs
-  across every registered chat from `user_memories` (in practice a single
-  friend group — life posts broadcast identically everywhere, matching
-  `bot_memories`' "one life" design), `is_safe_to_mention` drops counter-tally
-  facts («Оскорблял бота N раз», «Пытался взломать бота N раз») and
-  second-hand cross-user facts («по словам @X, ...») since broadcasting
-  either would misrepresent or embarrass the member, and one surviving
-  candidate is picked at random. The writer prompt is instructed to weave
-  the fact in warmly and to soften or drop it if it reads as too personal —
-  the prefix filter is a mechanical first pass, not a full judgment call.
-  Falls back to SOLO when no eligible candidate exists (fresh install, or
-  every stored fact is filtered out) or the lookup itself fails — a broken
-  personalization query must never block a scheduled post.
-
-The mode is picked once per post, before the writer prompt is built, and is
-not re-picked on the one retry attempt.
+Every post closes the episode with a question or subtle jab aimed at the
+chat (`build_engagement_lines` in `src/life/writer.py`). Life posts never
+mention a chat member by name — decided 2026-08-07, alongside the wider
+removal of unprompted bot humor; see
+`docs/superpowers/specs/2026-08-07-reduce-bot-absurdity-design.md`.
 
 ## Voice posts — teaser caption, story in the voice
 
@@ -79,9 +62,8 @@ People skip long voice notes that give no reason to press play, so a voice
 post never shows its full text. The caption is only `voice_teaser` — one dry
 hook line in Жора's style («Про медведя, мёд и одну плохую идею.»), never a
 summary — while the full episode lives in the spoken `voice_script`, which
-must be self-contained and carry the engagement question/mention (in MEMBER
-mode the teaser may hint «тут кое-что про одного из вас» but only the voice
-names the member). Scripts are capped at `EPISODE_VOICE_SCRIPT_MAX_CHARS`
+must be self-contained and carry the engagement question. Scripts are capped
+at `EPISODE_VOICE_SCRIPT_MAX_CHARS`
 (500 ≈ 25–40 s of Silero speech, tighter than the general `TTS_MAX_CHARS`
 synthesis limit) so the duration Telegram shows before playing stays a
 low-commitment tap. Reply-context needs no transcription:

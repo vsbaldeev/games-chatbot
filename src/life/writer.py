@@ -17,7 +17,6 @@ from src.config.prompts import (
     EPISODE_WRITER_SYSTEM,
 )
 from src.life import calendar_ru
-from src.life.engagement import MEMBER, choose_mode
 from src.store import bot_memories
 from src.utils.llm_json import load_json_object
 
@@ -62,28 +61,16 @@ class Episode:
     format: str
 
 
-def build_engagement_lines(mode: str, mention: tuple[str, str] | None) -> list[str]:
-    """Return the engagement instruction for this episode: a chat question or a member mention.
+def build_engagement_lines() -> list[str]:
+    """Return this episode's engagement instruction: always a chat question.
 
-    Args:
-        mode: ``engagement.SOLO`` or ``engagement.MEMBER``.
-        mention: ``(username, fact)`` when mode is ``MEMBER``; otherwise None.
+    Life posts never mention chat members by name (2026-08-07 decision) —
+    every post closes with a question or subtle jab aimed at the chat instead
+    of pulling a real member into the story.
 
     Returns:
         Prompt lines instructing the writer how to engage the chat this post.
     """
-    if mode == MEMBER and mention is not None:
-        username, fact = mention
-        return [
-            f"Задание: упомяни в посте живого участника чата @{username}.",
-            f"Известный факт о нём: «{fact}».",
-            "Вплети его в историю тепло и по-доброму — как соседа или друга, который "
-            "появился в твоей жизни, а не как факт для доклада. Опирайся только на этот "
-            "факт, не выдумывай про него ничего сверх. Если факт слишком личный или может "
-            "смутить человека на публике — упомяни его нейтрально, без этой детали, просто "
-            "по-дружески кольни.",
-            "",
-        ]
     return [
         "Задание: закончи пост вопросом или подколкой в адрес чата — что-то, на что "
         "хочется ответить, а не просто прочитать.",
@@ -146,8 +133,6 @@ def build_episode_prompt(
     facts: list[str],
     recent_activities: list[tuple[str, float]],
     post_format: str,
-    mode: str,
-    mention: tuple[str, str] | None,
 ) -> str:
     """Assemble the human turn for the episode writer.
 
@@ -159,9 +144,6 @@ def build_episode_prompt(
             first, for season-consistent continuity.
         post_format: Format this post ships in, assigned by the weekly
             schedule — the writer writes for it rather than picking one.
-        mode: ``engagement.SOLO`` or ``engagement.MEMBER`` — how this post
-            should engage the chat (see :func:`build_engagement_lines`).
-        mention: ``(username, fact)`` when mode is ``MEMBER``; otherwise None.
 
     Returns:
         The prompt string to send as the human turn.
@@ -171,7 +153,7 @@ def build_episode_prompt(
     parts += build_history_lines(recent_episodes, facts)
     parts.append(f"Формат этого поста: {post_format}.")
     parts.append("")
-    parts.extend(build_engagement_lines(mode, mention))
+    parts.extend(build_engagement_lines())
     parts.append("Напиши следующий эпизод. Ответь строго одним JSON-объектом.")
     return "\n".join(parts)
 
@@ -276,10 +258,7 @@ class EpisodeWriterAgent:
         recent_episodes = await bot_memories.get_recent_episodes(EPISODE_CONTEXT_EPISODES)
         facts = await bot_memories.get_writer_facts()
         recent_activities = await bot_memories.get_recent_activities(EPISODE_CONTEXT_ACTIVITIES)
-        mode, mention = await choose_mode()
-        prompt = build_episode_prompt(
-            recent_episodes, facts, recent_activities, post_format, mode, mention
-        )
+        prompt = build_episode_prompt(recent_episodes, facts, recent_activities, post_format)
         for attempt in range(WRITE_ATTEMPTS):
             episode = await self.__attempt(prompt, post_format)
             if episode is not None:

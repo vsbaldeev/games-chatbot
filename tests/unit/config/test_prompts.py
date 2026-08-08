@@ -3,7 +3,7 @@ mandatory-comedy instructions removed 2026-08-07 (see
 docs/superpowers/specs/2026-08-07-reduce-bot-absurdity-design.md).
 """
 
-from src.config.prompts import RESPONSE_PROMPT, VISION_PROMPT
+from src.config.prompts import EPISODE_WRITER_SYSTEM, RESPONSE_PROMPT, VISION_PROMPT
 
 
 class TestVisionPromptComedyIsConditional:
@@ -32,3 +32,12 @@ class TestResponsePromptGroundedHumor:
     def test_response_prompt_requires_grounded_jokes(self):
         """Assert the requirement for grounded jokes (зацепиться) is present."""
         assert "зацепиться" in RESPONSE_PROMPT
+
+
+class TestEpisodeWriterNeverMentionsMembers:
+    """Verify life posts never instruct the writer to mention a chat member."""
+
+    def test_no_member_mention_instruction(self):
+        """Assert the member-mention task and per-nickname naming instruction are gone."""
+        assert "упомяни в посте живого участника" not in EPISODE_WRITER_SYSTEM
+        assert "называй по нику" not in EPISODE_WRITER_SYSTEM
