@@ -443,10 +443,16 @@ response   personality LLM (ReAct executor, no tools)
     │            контекста разговора (во внешних источниках НЕ проверялись)]»
     │            otherwise; the system prompt allows external-world numbers
     │            (prices, player counts, dates) only from the tool-verified frame
-    │          when the current message is media (photo/voice/video), its trigger line is
-    │            framed as "@user прислал фото. Ниже — его описание… Отреагируй, не пересказывай"
-    │            (build_trigger_line) so the model reacts to the vision/transcript description
-    │            instead of retelling it as if it were the user's own words
+    │          when the current message is voice, its trigger line frames the Whisper
+    │            transcript as the person's own spoken words ("@user сказал голосовым…"),
+    │            not a description — joking is conditional on the words themselves. A
+    │            low-confidence transcript (see Media processing below) adds a note that
+    │            the transcription may be unreliable
+    │          when the current message is photo/video_note/video, its trigger line is
+    │            framed as "@user прислал фото. Ниже — его описание… Отреагируй как друг"
+    │            (build_trigger_line) so the model reacts to the vision/frame description
+    │            instead of retelling it as if it were the user's own words; joking is
+    │            conditional on there being something to joke about, never mandatory
     │          trigger="youtube_short" picks react vs. retell per request
     │            (select_shorts_instruction): when the Short's video actually
     │            downloaded and will be posted to chat before this reply, the

@@ -294,22 +294,24 @@ def select_social_link_instruction(social_link_video_present: bool) -> str:
 def build_trigger_line(
     username: str, user_input: str, media_type: str, replied_to: dict | None,
     response_trigger: str = "explicit", social_link_video_present: bool = False,
-    youtube_short_video_present: bool = False,
+    youtube_short_video_present: bool = False, voice_low_confidence: bool = False,
 ) -> str:
     """Build the final user-turn line, marking media so the model reacts to it.
 
-    Plain text renders as ``@username: text``. Photo/voice/video frame
-    ``user_input`` as a description to *react* to, not retell — the chat
-    already sees the original. A YouTube Shorts trigger picks between react
-    and retell framing depending on whether the downloaded video is actually
-    posted to chat, the same choice a social-link trigger makes for
-    Instagram (see :func:`select_shorts_instruction` /
-    :func:`select_social_link_instruction`).
+    Plain text renders as ``@username: text``. Voice is framed as the
+    person's own spoken words (a transcript, not a description) — joking is
+    conditional on the words themselves giving reason to. Photo/video_note/
+    video frame ``user_input`` as a description to *react* to, not retell —
+    the chat already sees the original; joking there is likewise conditional,
+    never mandatory. A YouTube Shorts trigger picks between react and retell
+    framing depending on whether the downloaded video is actually posted to
+    chat, the same choice a social-link trigger makes for Instagram (see
+    :func:`select_shorts_instruction` / :func:`select_social_link_instruction`).
 
     Args:
         username: Sender's username (without ``@``).
-        user_input: The user's words for ``text``, or a vision/transcript/
-            fetched-content description for media/link triggers.
+        user_input: The user's words for ``text``/``voice``, or a vision/
+            fetched-content description for other media/link triggers.
         media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"``
             or ``"video"``.
         replied_to: The message being replied to, or ``None``.
@@ -323,6 +325,10 @@ def build_trigger_line(
         youtube_short_video_present: True when a YouTube Short's video was
             downloaded and will be posted to chat before this reply —
             selects the react framing instead of retell.
+        voice_low_confidence: True when the voice transcript's mean Whisper
+            confidence was low (see :func:`src.pipeline.ingester.transcribe_bytes`)
+            — adds a note telling the model the transcription may be
+            unreliable instead of trusting it as literal content.
 
     Returns:
         The trigger line to append as the final human turn.
@@ -336,18 +342,53 @@ def build_trigger_line(
     if response_trigger == "social_link":
         instruction = select_social_link_instruction(social_link_video_present)
         return f"{speaker} {instruction}:\n{user_input}"
+    if media_type == "voice":
+        return build_voice_trigger_line(speaker, user_input, voice_low_confidence)
     label = MEDIA_TRIGGER_LABELS.get(media_type)
     if label:
         return (
             f"{speaker} прислал {label}. Ниже — его описание для тебя "
             f"(не дословные слова автора; оригинал в чате все и так видят — "
-            f"очевидное не описывай). Отреагируй и пошути: зацепись за самую "
-            f"смешную или нелепую деталь, преувеличить — можно и нужно; не "
-            f"пересказывай. Описание может ошибаться в именах и названиях: не "
-            f"строй шутку целиком на конкретном имени или названии, если его "
-            f"не подтверждает подпись или разговор:\n{user_input}"
+            f"очевидное не описывай). Если в описании есть подпись — это "
+            f"дословные слова автора, отвечай на неё по существу, а не только "
+            f"на картинку. Отреагируй как друг: есть за что зацепиться — "
+            f"пошути, преувеличивать можно; нечего — просто ответь по "
+            f"существу, не пересказывай. Описание может ошибаться в именах и "
+            f"названиях: не строй шутку целиком на конкретном имени или "
+            f"названии, если его не подтверждает подпись или разговор:\n{user_input}"
         )
     return f"{speaker}: {user_input}"
+
+
+def build_voice_trigger_line(speaker: str, user_input: str, low_confidence: bool) -> str:
+    """Frame a voice message's trigger line as the person's own spoken words.
+
+    Unlike photo/video framing, a Whisper transcript is not a third-party
+    description — it is what the person actually said, so the model is told
+    to answer them, not to react to media. Joking is conditional on the
+    words themselves, never mandatory.
+
+    Args:
+        speaker: Rendered speaker label, already including any reply-chain arrow.
+        user_input: The Whisper transcript.
+        low_confidence: True when the transcript's mean confidence was low —
+            adds a note that the transcription may be unreliable.
+
+    Returns:
+        The trigger line to append as the final human turn.
+    """
+    confidence_note = (
+        " Расшифровка может быть неточной из-за шума или плохой слышимости — "
+        "если смысл неясен, ответь на то, что разобрал, или переспроси, а не "
+        "додумывай за автора."
+        if low_confidence else ""
+    )
+    return (
+        f"{speaker} сказал голосовым (ниже — расшифровка его слов, это именно "
+        f"то, что он произнёс, а не описание).{confidence_note} Ответь ему по "
+        f"существу; шути, только если для этого есть повод в самих "
+        f"словах:\n{user_input}"
+    )
 
 
 def build_recent_history_lines(
@@ -464,6 +505,7 @@ def build_response_input(
     photo_directive: str | None = None,
     social_link_video_present: bool = False,
     youtube_short_video_present: bool = False,
+    voice_low_confidence: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
 
@@ -494,6 +536,9 @@ def build_response_input(
         youtube_short_video_present: True when a YouTube Short's video was
             downloaded and will be posted to chat before this reply; passed
             straight through to :func:`build_trigger_line`.
+        voice_low_confidence: True when the voice transcript's mean Whisper
+            confidence was low; passed straight through to
+            :func:`build_trigger_line`.
 
     Returns:
         Prompt string ready to pass as the final human turn to the response LLM.
@@ -528,6 +573,7 @@ def build_response_input(
             username, user_input, media_type, replied_to, response_trigger,
             social_link_video_present=social_link_video_present,
             youtube_short_video_present=youtube_short_video_present,
+            voice_low_confidence=voice_low_confidence,
         )
     )
     return "\n".join(parts)
@@ -662,6 +708,7 @@ class ResponseNode:
             photo_directive=resolve_photo_directive(state),
             social_link_video_present=bool(state.get("social_link_video")),
             youtube_short_video_present=bool(state.get("youtube_short_video")),
+            voice_low_confidence=bool(state.get("voice_low_confidence")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
         log_response_input(past_messages, enriched)

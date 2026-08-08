@@ -444,3 +444,51 @@ class TestResponseNodeSocialLinkFraming:
             await node(state)
         sent_messages = agent.invoke_response.call_args[0][0]
         assert "уже отправлено в чат выше" in sent_messages[-1].content
+
+
+class TestVoiceTriggerLineFraming:
+    def test_voice_is_framed_as_speech_not_description(self):
+        line = build_trigger_line("alice", "может не только до попадает", "voice", None)
+        assert "сказал голосовым" in line
+        assert "не дословные слова автора" not in line
+
+    def test_voice_carries_the_transcript(self):
+        line = build_trigger_line("alice", "привет, как дела", "voice", None)
+        assert "привет, как дела" in line
+
+    def test_low_confidence_voice_gets_a_softening_note(self):
+        line = build_trigger_line(
+            "alice", "может не только до попадает", "voice", None,
+            voice_low_confidence=True,
+        )
+        assert "неточ" in line or "разобрал" in line
+
+    def test_default_voice_confidence_is_high_no_softening_note(self):
+        line = build_trigger_line("alice", "привет", "voice", None)
+        assert "неточ" not in line
+
+
+class TestMediaTriggerLineJokeIsConditional:
+    def test_photo_no_longer_mandates_exaggeration(self):
+        line = build_trigger_line("alice", "банка лимонада на столе", "photo", None)
+        assert "можно и нужно" not in line
+
+    def test_photo_still_frames_as_description_to_react_to(self):
+        line = build_trigger_line("alice", "банка лимонада на столе", "photo", None)
+        assert "прислал фото" in line
+        assert "банка лимонада на столе" in line
+
+    def test_photo_framing_tells_model_to_answer_a_caption(self):
+        line = build_trigger_line(
+            "alice", "банка лимонада на столе\n(подпись: рекомендую)", "photo", None,
+        )
+        assert "отвечай на неё по существу" in line
+
+
+class TestBuildResponseInputVoiceConfidence:
+    def test_voice_low_confidence_flows_through_to_trigger_line(self):
+        enriched = build_response_input(
+            "alice", "может не только до попадает", "", None,
+            media_type="voice", voice_low_confidence=True,
+        )
+        assert "неточ" in enriched or "разобрал" in enriched
