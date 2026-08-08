@@ -139,6 +139,12 @@ AVG_LOGPROB_LIMIT = -1.0      # below on every segment → low-confidence decode
 COMPRESSION_RATIO_LIMIT = 2.4  # above on every segment → repetition loop
 BOILERPLATE_MAX_LENGTH = 60   # denylist applies only to short transcripts
 
+# Softer companion to AVG_LOGPROB_LIMIT's all()-based hard reject: catches a
+# transcript that is only partially garbled (a real sentence decoded through
+# background noise) instead of requiring every segment to fail. Not a reject
+# threshold — see is_low_confidence_transcript.
+LOW_CONFIDENCE_MEAN_LOGPROB = -0.7
+
 # Stock phrases Whisper hallucinates on silence/music with high confidence —
 # segment metadata alone does not catch them (verified: 1 s of silence yields
 # «Продолжение следует...» at avg_logprob −0.27).
@@ -183,12 +189,41 @@ def is_garbage_transcript(text: str, segments: list[dict]) -> bool:
     return False
 
 
-async def transcribe_bytes(audio_bytes: bytes, media_type: str, filename: str = "") -> str:
+def is_low_confidence_transcript(segments: list[dict]) -> bool:
+    """True when Whisper's mean confidence across segments is low.
+
+    Unlike :func:`is_garbage_transcript`'s ``all()`` checks — built to catch
+    total silence, music or a repetition loop — this looks at the *mean*
+    ``avg_logprob``, so a transcript that is only partially garbled (a real
+    sentence decoded through background noise) is flagged instead of passing
+    through as verified speech. Does not replace :func:`is_garbage_transcript`;
+    call on transcripts that already passed it.
+
+    Args:
+        segments: Segment dicts from a ``verbose_json`` transcription.
+
+    Returns:
+        True when the mean ``avg_logprob`` is below ``LOW_CONFIDENCE_MEAN_LOGPROB``.
+    """
+    if not segments:
+        return False
+    mean_logprob = sum(seg.get("avg_logprob", 0.0) for seg in segments) / len(segments)
+    return mean_logprob < LOW_CONFIDENCE_MEAN_LOGPROB
+
+
+async def transcribe_bytes(audio_bytes: bytes, media_type: str, filename: str = "") -> tuple[str, bool]:
     """Transcribe raw audio bytes via Groq Whisper with retries.
 
     The call is pinned to Russian, uses ``verbose_json`` for segment metadata
     and rejects garbage transcripts (see :func:`is_garbage_transcript`),
-    returning ``""`` so the existing empty-transcript handling applies.
+    returning ``("", False)`` so the existing empty-transcript handling
+    applies. A transcript that passes the garbage check but still has low
+    mean confidence (see :func:`is_low_confidence_transcript`) is returned
+    with its confidence flag set, rather than being trusted as accurate
+    speech.
+
+    Returns:
+        ``(text, is_low_confidence)``.
     """
     if not filename:
         filename = "voice.ogg" if media_type == "voice" else "video_note.mp4"
@@ -206,19 +241,23 @@ async def transcribe_bytes(audio_bytes: bytes, media_type: str, filename: str = 
             text = result.text.strip()
             segments = getattr(result, "segments", None) or []
             if is_garbage_transcript(text, segments):
-                return ""
-            return text
+                return "", False
+            return text, is_low_confidence_transcript(segments)
         except Exception as err:
             last_err = err
             if attempt < WHISPER_RETRIES:
                 logger.warning("Transcription attempt %d failed, retrying: %s", attempt + 1, err)
                 await asyncio.sleep(2 ** attempt)
     logger.error("Transcription failed after %d attempts: %s", WHISPER_RETRIES + 1, last_err)
-    return ""
+    return "", False
 
 
-async def transcribe_voice(file_id: str, media_type: str, bot) -> str:
-    """Download a voice or video_note file and return its Whisper transcript."""
+async def transcribe_voice(file_id: str, media_type: str, bot) -> tuple[str, bool]:
+    """Download a voice or video_note file and return its Whisper transcript.
+
+    Returns:
+        ``(text, is_low_confidence)`` — see :func:`transcribe_bytes`.
+    """
     try:
         filename = "voice.ogg" if media_type == "voice" else "video_note.mp4"
         tg_file = await bot.get_file(file_id)
@@ -228,7 +267,7 @@ async def transcribe_voice(file_id: str, media_type: str, bot) -> str:
         audio_bytes = buffer.read()
     except Exception as err:
         logger.error("Transcription download failed for %s: %s", file_id, err)
-        return ""
+        return "", False
     return await transcribe_bytes(audio_bytes, media_type, filename)
 
 
@@ -543,10 +582,11 @@ async def transcribe_video(file_id: str, media_type: str, bot) -> tuple[bool | N
     except Exception as err:
         logger.error("Video download failed for file %s: %s", file_id, err)
         return None, ""
-    transcript, frame_results = await asyncio.gather(
+    transcribe_result, frame_results = await asyncio.gather(
         transcribe_bytes(video_bytes, media_type),
         extract_and_describe_frames(video_bytes),
     )
+    transcript, transcript_low_confidence = transcribe_result
     frame_descriptions = [description for _, description in frame_results]
     is_real_person = aggregate_real_person(frame_results)
     return is_real_person, compose_video_content(transcript, frame_descriptions)
@@ -696,7 +736,8 @@ class MessageIngester:
         if media_type == "text":
             processed, extra_fields = await self.__ingest_text(state)
         elif media_type == "voice":
-            processed = await transcribe_voice(msg["file_id"], "voice", bot)
+            processed, voice_low_confidence = await transcribe_voice(msg["file_id"], "voice", bot)
+            extra_fields["voice_low_confidence"] = voice_low_confidence
         elif media_type in ("video_note", "video"):
             is_real_person, processed = await transcribe_video(msg["file_id"], media_type, bot)
         elif media_type == "photo":

@@ -156,6 +156,13 @@ transcription (Groq Whisper, verbose_json, temperature=0)
     compression_ratio > 2.4, or when a short transcript matches Whisper's
     known silence boilerplate («Продолжение следует…», «Спасибо за просмотр»);
     rejections are info-logged for threshold tuning
+    low-confidence flagging (is_low_confidence_transcript): a transcript that
+    survives the garbage check but has mean avg_logprob < −0.7 across segments
+    is not discarded — it is passed through with voice_low_confidence=True so
+    the response layer treats it as possibly-mangled speech (answer the
+    intelligible part or ask the person to repeat) instead of literal fact.
+    Catches the case the all()-based garbage check misses: a real sentence
+    partially decoded through background noise
 
 frame extraction (PyAV)
     duration < 15s   → 1 keyframe at 50%
