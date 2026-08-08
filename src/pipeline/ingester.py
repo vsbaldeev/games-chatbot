@@ -586,6 +586,8 @@ async def transcribe_video(file_id: str, media_type: str, bot) -> tuple[bool | N
         transcribe_bytes(video_bytes, media_type),
         extract_and_describe_frames(video_bytes),
     )
+    # unused here — video framing doesn't consume the confidence signal
+    # (voice-only, see build_voice_trigger_line)
     transcript, transcript_low_confidence = transcribe_result
     frame_descriptions = [description for _, description in frame_results]
     is_real_person = aggregate_real_person(frame_results)
@@ -661,10 +663,13 @@ async def summarize_youtube_short(url: str) -> tuple[str, bytes | None]:
     if downloaded is None:
         return "", None
     video_bytes, info = downloaded
-    transcript, frame_results = await asyncio.gather(
+    transcribe_result, frame_results = await asyncio.gather(
         transcribe_bytes(video_bytes, "video", "short.mp4"),
         extract_and_describe_frames(video_bytes),
     )
+    # unused here — video framing doesn't consume the confidence signal
+    # (voice-only, see build_voice_trigger_line)
+    transcript, transcript_low_confidence = transcribe_result
     frame_descriptions = [description for _, description in frame_results]
     if not transcript and not frame_descriptions:
         logger.warning("Shorts content extraction produced nothing for %s", url)
