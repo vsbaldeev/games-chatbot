@@ -7,10 +7,13 @@ not re-tested here.
 
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.events.messages import deliver_response
+from src.events.messages import deliver_response, passive_voice_extract
 from tests.builders import make_incoming, make_state
 
 REPLY_VOICE_PATCH_TARGET = "src.events.messages.try_send_voice_reply"
+TRANSCRIBE_VOICE_PATCH_TARGET = "src.events.messages.transcribe_voice"
+UPDATE_CONTENT_PATCH_TARGET = "src.events.messages.unified_messages.update_content"
+EXTRACT_AND_SAVE_PATCH_TARGET = "src.events.messages.extract_and_save"
 
 
 def make_msg() -> MagicMock:
@@ -60,6 +63,41 @@ class TestSocialLinkVideoDelivery:
             await deliver_response(state, msg, "reply text")
         msg.reply_video.assert_awaited_once()
         msg.reply_text.assert_awaited_once_with("reply text")
+
+
+class TestPassiveVoiceExtractPersistsTranscript:
+    async def test_voice_transcript_is_persisted(self):
+        with patch(TRANSCRIBE_VOICE_PATCH_TARGET, new=AsyncMock(return_value=("привет всем", False))), \
+             patch(UPDATE_CONTENT_PATCH_TARGET, new=AsyncMock()) as mock_update, \
+             patch(EXTRACT_AND_SAVE_PATCH_TARGET, new=AsyncMock()):
+            await passive_voice_extract(
+                file_id="file123", media_type="voice", bot=MagicMock(),
+                chat_id=1000, user_id=42, username="alice", message_id=555,
+            )
+        mock_update.assert_awaited_once_with(chat_id=1000, message_id=555, content="привет всем")
+
+    async def test_video_note_transcript_is_not_persisted(self):
+        """video_note rows are normally enriched as transcript+frames; writing
+        a bare transcript over the placeholder would be a worse, inconsistent
+        state, so persistence stays scoped to voice."""
+        with patch(TRANSCRIBE_VOICE_PATCH_TARGET, new=AsyncMock(return_value=("привет всем", False))), \
+             patch(UPDATE_CONTENT_PATCH_TARGET, new=AsyncMock()) as mock_update, \
+             patch(EXTRACT_AND_SAVE_PATCH_TARGET, new=AsyncMock()):
+            await passive_voice_extract(
+                file_id="file123", media_type="video_note", bot=MagicMock(),
+                chat_id=1000, user_id=42, username="alice", message_id=555,
+            )
+        mock_update.assert_not_awaited()
+
+    async def test_empty_transcript_is_not_persisted(self):
+        with patch(TRANSCRIBE_VOICE_PATCH_TARGET, new=AsyncMock(return_value=("", False))), \
+             patch(UPDATE_CONTENT_PATCH_TARGET, new=AsyncMock()) as mock_update, \
+             patch(EXTRACT_AND_SAVE_PATCH_TARGET, new=AsyncMock()):
+            await passive_voice_extract(
+                file_id="file123", media_type="voice", bot=MagicMock(),
+                chat_id=1000, user_id=42, username="alice", message_id=555,
+            )
+        mock_update.assert_not_awaited()
 
 
 class TestShortsVideoDelivery:

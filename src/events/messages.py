@@ -437,10 +437,38 @@ async def run_pipeline(
 
 async def passive_voice_extract(
     *, file_id: str, media_type: str, bot,
-    chat_id: int, user_id: int, username: str,
+    chat_id: int, user_id: int, username: str, message_id: int,
 ) -> None:
-    transcript = await transcribe_voice(file_id, media_type, bot)
-    if transcript and len(transcript.strip()) >= MIN_PASSIVE_LENGTH:
+    """Transcribe an unaddressed voice/video_note message and extract facts.
+
+    Runs only when the pipeline stayed silent (the bot was not addressed).
+    For ``voice`` the transcript also replaces the stored placeholder so a
+    later reply to this message (e.g. someone tagging the bot on it) sees
+    what was actually said instead of the literal ``[voice]`` placeholder.
+    ``video_note`` is not persisted here — its rows are normally enriched as
+    transcript+frames combined, and a bare transcript would leave that
+    enrichment inconsistent.
+
+    Args:
+        file_id: Telegram file id of the voice/video_note.
+        media_type: ``"voice"`` or ``"video_note"``.
+        bot: Telegram bot instance used to download the file.
+        chat_id: Chat the message belongs to.
+        user_id: Sender's Telegram user id.
+        username: Sender's username.
+        message_id: The message's id, used to update its stored row.
+    """
+    transcript, low_confidence = await transcribe_voice(file_id, media_type, bot)
+    if not transcript:
+        return
+    if media_type == "voice":
+        try:
+            await unified_messages.update_content(
+                chat_id=chat_id, message_id=message_id, content=transcript,
+            )
+        except Exception as err:
+            logger.warning("Failed to cache voice transcript for msg %s: %s", message_id, err)
+    if len(transcript.strip()) >= MIN_PASSIVE_LENGTH:
         await extract_and_save(
             chat_id=chat_id, user_id=user_id, username=username,
             user_message=transcript, source_kind="voice",
@@ -556,6 +584,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         asyncio.create_task(passive_voice_extract(
             file_id=file_id, media_type=media_type, bot=context.bot,
             chat_id=chat_id, user_id=user_id, username=username,
+            message_id=msg.message_id,
         ))
 
 
