@@ -20,3 +20,15 @@ class TestVisionPromptComedyIsConditional:
     def test_vision_prompt_enforces_strict_length(self):
         """Assert the 1–2 sentence limit is strictly stated in the prompt."""
         assert "1–2 предложения" in VISION_PROMPT or "1-2 предложения" in VISION_PROMPT
+
+
+class TestResponsePromptGroundedHumor:
+    """Verify that response prompt enforces grounded humor and bans clickbait tails."""
+
+    def test_response_prompt_forbids_clickbait_tails(self):
+        """Assert the prohibition on clickbait-style chat engagement questions is present."""
+        assert "кто из вас" in RESPONSE_PROMPT.lower()
+
+    def test_response_prompt_requires_grounded_jokes(self):
+        """Assert the requirement for grounded jokes (зацепиться) is present."""
+        assert "зацепиться" in RESPONSE_PROMPT
