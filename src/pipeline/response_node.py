@@ -445,9 +445,16 @@ def build_directive_lines(
 
     Args:
         is_bot_insult: ``True`` when the filter classified the message as an
-            insult aimed at the bot; adds a hint telling the model to clap back.
+            insult aimed at the bot; adds a hint telling the model to clap
+            back — unless ``wind_down`` is also set (see below).
         wind_down: ``True`` when the engagement gate wants the conversation
             closed; adds a hint to answer in one short phrase and disengage.
+            When combined with ``is_bot_insult``, ``filter_node`` set both
+            because the insult replies to the bot's own message
+            (``replies_to_bot``) — that reads as feedback on what the bot
+            just said, not an unprovoked attack, so only this softer line
+            fires; the aggressive comeback is suppressed to avoid mirroring
+            a counter-insult back into a running thread.
         photo_directive: Photo-request framing — ``"ack"`` (generation is
             being launched, promise the photo), ``"busy"`` (a selfie is
             already rendering, no second one), ``"refused"`` (wound-down user
@@ -457,7 +464,7 @@ def build_directive_lines(
         Directive prompt lines, possibly empty.
     """
     lines: list[str] = []
-    if is_bot_insult:
+    if is_bot_insult and not wind_down:
         lines.append(
             "[Это сообщение — наезд на тебя. Не отмалчивайся и не обижайся: "
             "ответь дерзкой, хлёсткой подколкой. Правила: бей по самому наезду, "

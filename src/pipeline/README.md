@@ -503,9 +503,13 @@ response   personality LLM (ReAct executor, no tools)
     │            both lines appear only when the ContextBuilder activity gate
     │            opened (asked, or the rare volunteer roll for the current
     │            activity) — most replies carry neither
-    │          when the filter set is_bot_insult=True, a hint is injected before the
-    │            trigger line telling the model the message is an attack on it and to
-    │            answer with a sharp comeback instead of a neutral reply
+    │          when the filter set is_bot_insult=True and NOT wind_down, a hint is
+    │            injected telling the model the message is an unprovoked attack and to
+    │            answer with a sharp comeback instead of a neutral reply. When the
+    │            insult is a reply to the bot's own message, filter_node also sets
+    │            wind_down=True (replies_to_bot) — that reads as feedback on the joke
+    │            just made, not an attack, so only the wind-down hint below fires,
+    │            never both: a mirrored counter-insult would just fuel the loop
     │          when the engagement gate set wind_down=True, a hint is injected telling
     │            the model it is bored of this conversation: answer in one short
     │            in-character phrase, close the exchange, no questions or invitations

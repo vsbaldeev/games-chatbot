@@ -23,6 +23,7 @@ from src.config.prompts import (
 from src.pipeline.response_node import (
     ResponseNode,
     build_asking_user_tag_lines,
+    build_directive_lines,
     build_recent_history_lines,
     build_response_input,
     build_trigger_line,
@@ -492,3 +493,27 @@ class TestBuildResponseInputVoiceConfidence:
             media_type="voice", voice_low_confidence=True,
         )
         assert "неточ" in enriched or "разобрал" in enriched
+
+
+class TestBuildDirectiveLinesInsultReplyingToBot:
+    def test_unprovoked_insult_gets_the_comeback(self):
+        lines = build_directive_lines(is_bot_insult=True, wind_down=False, photo_directive=None)
+        joined = "\n".join(lines)
+        assert "дерзкой" in joined
+        assert "надоел" not in joined
+
+    def test_insult_replying_to_bot_gets_wind_down_not_comeback(self):
+        """filter_node sets wind_down=True alongside is_bot_insult=True when the
+        insult replies to the bot's own message (replies_to_bot) — a mirrored
+        counter-insult would just fuel the loop, so only the softer
+        wind-down line should reach the model, never both."""
+        lines = build_directive_lines(is_bot_insult=True, wind_down=True, photo_directive=None)
+        joined = "\n".join(lines)
+        assert "дерзкой" not in joined
+        assert "надоел" in joined
+
+    def test_plain_wind_down_unaffected(self):
+        lines = build_directive_lines(is_bot_insult=False, wind_down=True, photo_directive=None)
+        joined = "\n".join(lines)
+        assert "надоел" in joined
+        assert "дерзкой" not in joined
