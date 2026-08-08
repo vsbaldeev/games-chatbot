@@ -7,7 +7,7 @@ import time
 
 from src import log
 
-from telegram import ReplyParameters, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 import asyncio
@@ -230,8 +230,7 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
     downloaded video (``final_state["social_link_video"]``, Instagram Reel
     only) or a YouTube Shorts trigger with a downloaded video
     (``final_state["youtube_short_video"]``) posts that video first —
-    best-effort, never blocking the text reply that follows. Autonomous
-    jokes (``response_trigger == "humor"``) go out via :func:`deliver_joke`.
+    best-effort, never blocking the text reply that follows.
 
     Args:
         final_state: Pipeline state after the graph run.
@@ -240,18 +239,14 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
 
     Returns:
         Tuple of the sent message id, the message id the response is anchored
-        to (None for an un-anchored joke), and the sent media type
-        ("text" or "voice").
+        to, and the sent media type ("text" or "voice").
     """
-    is_joke = final_state.get("response_trigger") == "humor"
-    log.log_outgoing_text("joke" if is_joke else "reply", msg.chat_id, clean)
+    log.log_outgoing_text("reply", msg.chat_id, clean)
     notification_msg = final_state.get("search_notification_msg")
     if notification_msg:
         await notification_msg.edit_text(clean)
         return notification_msg.message_id, msg.message_id, "text"
     await msg.chat.send_action("typing")
-    if is_joke:
-        return await deliver_joke(final_state, msg, clean)
     social_link_video = final_state.get("social_link_video")
     if social_link_video:
         await try_send_downloaded_video(msg, social_link_video)
@@ -264,32 +259,6 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
             return voice_message.message_id, msg.message_id, "voice"
     sent = await msg.reply_text(clean)
     return sent.message_id, msg.message_id, "text"
-
-
-async def deliver_joke(final_state: BotState, msg, clean: str) -> tuple[int, int | None, str]:
-    """Send an autonomous joke, anchored to the message the comedian cited.
-
-    Goes out un-anchored when there is no validated target; a cited message
-    deleted in the meantime degrades to un-anchored via
-    ``allow_sending_without_reply``.
-
-    Args:
-        final_state: Pipeline state after the graph run.
-        msg: The message that triggered the pipeline run.
-        clean: Markdown-stripped joke text.
-
-    Returns:
-        Tuple of the sent message id, the anchor message id (None when
-        un-anchored), and the media type (always ``"text"``).
-    """
-    target = final_state.get("humor_reply_to_msg_id")
-    reply_parameters = None
-    if target is not None:
-        reply_parameters = ReplyParameters(message_id=target, allow_sending_without_reply=True)
-    sent = await msg.get_bot().send_message(
-        chat_id=msg.chat_id, text=clean, reply_parameters=reply_parameters
-    )
-    return sent.message_id, target, "text"
 
 
 async def send_limit_notice(msg, chat_id: int, notice_text: str) -> None:
@@ -432,8 +401,8 @@ async def run_pipeline(
     Binds a per-update correlation id for log grouping and emits one
     canonical INFO log line summarizing the run outcome. Errors are reported
     in chat only when the user explicitly addressed the bot (mention or
-    reply-to-bot); autonomous paths (random media rolls, overheard insult
-    checks) fail silently with a log-only warning.
+    reply-to-bot); autonomous paths (overheard insult checks) fail silently
+    with a log-only warning.
     """
     log.bind_correlation_id(str(update.update_id)[-6:])
     started_at = time.monotonic()
@@ -452,7 +421,7 @@ async def run_pipeline(
         response = final_state.get("response") or ""
         if response.strip():
             await deliver_and_record(final_state, msg, context.bot.id, response)
-            action = "joked" if final_state.get("response_trigger") == "humor" else "replied"
+            action = "replied"
             if final_state.get("photo_request") and not final_state.get("photo_in_flight"):
                 launch_selfie_task(context.bot, chat.id, msg.message_id, final_state)
                 action = "replied+photo"

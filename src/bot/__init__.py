@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
 from src import log
-from src.agent import worker_agent, response_agent, roast_agent, comedian_agent
+from src.agent import worker_agent, response_agent, roast_agent
 from src.bot.jobs import (
     DailyActivityJobManager,
     LifePostJobManager,
@@ -32,7 +32,6 @@ async def __on_startup(application: Application) -> None:
     await worker_agent.init()
     await response_agent.init()
     await roast_agent.init()
-    await comedian_agent.init()
     await episode_writer_agent.init()
     await speech_service.init()
     logger.info("Bot started, all agents and jobs initialized")

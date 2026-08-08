@@ -36,7 +36,7 @@ def emit(state: BotState, action: str, elapsed_seconds: float) -> None:
 
     Args:
         state: Final (or best-available) pipeline state.
-        action: Outcome tag: ``replied``, ``joked``, ``ignored`` or
+        action: Outcome tag: ``replied``, ``ignored`` or
             ``error:<kind>``.
         elapsed_seconds: Wall-clock duration of the pipeline run.
     """

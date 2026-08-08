@@ -8,7 +8,7 @@ achievement keys.
 Only the duel achievements survive: the passive-counter and silence achievements
 were retired because they tallied behaviour and mocked absence instead of driving
 engagement. The stat counters themselves are still tracked (see TRACKABLE_STATS)
-because the autonomous comedian and offence auto-roast consume them.
+because the offence auto-roast consumes them.
 """
 
 from dataclasses import dataclass

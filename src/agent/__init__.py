@@ -21,12 +21,6 @@ from src.agent.language import (
 from src.agent.worker import WORKER_PROMPT, WorkerAgent, worker_agent
 from src.agent.response import RESPONSE_PROMPT, ResponseAgent, response_agent
 from src.agent.roast import ROAST_SYSTEM_PROMPT, RoastAgent, roast_agent
-from src.agent.comedian import (
-    COMEDIAN_SYSTEM_PROMPT,
-    ComedianAgent,
-    ComedianDecision,
-    comedian_agent,
-)
 
 __all__ = [
     "ContextLengthError",
@@ -54,8 +48,4 @@ __all__ = [
     "ROAST_SYSTEM_PROMPT",
     "RoastAgent",
     "roast_agent",
-    "COMEDIAN_SYSTEM_PROMPT",
-    "ComedianAgent",
-    "ComedianDecision",
-    "comedian_agent",
 ]

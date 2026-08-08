@@ -4,7 +4,6 @@ LangGraph StateGraph wiring for the bot pipeline.
 Graph edges:
   START → router
     ├─ text + should_respond=True  → ingester
-    ├─ text + humor gate fires     → humor → memory_writer  (autonomous joke)
     ├─ text + long + not forwarded → memory_writer
     ├─ text + other                → END
     └─ any media                  → ingester  (always, to enrich content in DB)
@@ -21,10 +20,8 @@ Graph edges:
 from langgraph.graph import END, START, StateGraph
 
 from src import config, log
-from src.agent import comedian_agent, needs_russian_correction
-from src.pipeline import humor_gate
+from src.agent import needs_russian_correction
 from src.pipeline.context_builder import ContextBuilder
-from src.pipeline.humor_node import HumorNode
 from src.pipeline.filter_node import MeaninglessFilterNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
@@ -43,8 +40,6 @@ def route_after_router(state: BotState) -> str:
     if msg["media_type"] == "text":
         if state["should_respond"]:
             return "ingester"
-        if humor_gate.should_consider(msg["chat_id"], msg):
-            return "humor"
         if not msg.get("is_forwarded") and len((msg.get("raw_text") or "").strip()) >= MIN_PASSIVE_LENGTH:
             return "memory_writer"
         return END
@@ -84,15 +79,13 @@ def build_pipeline(worker_agent, response_agent) -> StateGraph:
     graph.add_node("response", ResponseNode(response_agent))
     graph.add_node("language_correction", LanguageCorrectionNode(response_agent))
     graph.add_node("memory_writer", MemoryWriter())
-    graph.add_node("humor", HumorNode(comedian_agent))
 
     graph.add_edge(START, "router")
     graph.add_conditional_edges(
         "router",
         route_after_router,
-        {"ingester": "ingester", "humor": "humor", "memory_writer": "memory_writer", END: END},
+        {"ingester": "ingester", "memory_writer": "memory_writer", END: END},
     )
-    graph.add_edge("humor", "memory_writer")
     graph.add_conditional_edges("ingester", route_after_ingester, {"filter": "filter", END: END})
     graph.add_conditional_edges("filter", route_after_filter, {"guard": "guard", END: END})
     graph.add_conditional_edges("guard", route_by_guard, {"context_builder": "context_builder", END: END})

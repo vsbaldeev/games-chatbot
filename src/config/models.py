@@ -78,13 +78,6 @@ RESPONSE_MODEL_FALLBACKS: list[str] = [
     "llama-3.1-8b-instant",     # fallback-1: no Meta/llama intermediate on free tier
 ]
 
-# Autonomous comedian fallback chain
-COMEDIAN_MODEL_FALLBACKS: list[str] = [
-    "openai/gpt-oss-120b",
-    "llama-3.3-70b-versatile",
-    "qwen/qwen3.6-27b",
-]
-
 # Roast generation fallback chain
 ROAST_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-120b",

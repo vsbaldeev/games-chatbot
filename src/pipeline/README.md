@@ -8,7 +8,6 @@ nodes. Each node reads BotState and returns a partial update dict.
 ```
 router ──► ingester ──► filter ──► guard ──► context_builder ──► worker ──► response ─┬─► memory_writer ──► END
                                                                                         └─► language_correction ──► memory_writer ──► END
-   └─► humor ──► memory_writer ──► END   (autonomous joke when the humor gate fires)
 ```
 
 Conditional exits exist at every node — see the detailed diagrams below.
@@ -63,9 +62,6 @@ incoming message
     │
     └─ sticker / animation / audio   → should_respond=False (stored as placeholder)
     │
-    ├─ every text message → humor_gate.observe(chat_id)   [counts toward joke cadence]
-    │
-    ├─ should_respond=False + humor gate fires → humor   [autonomous joke]
     ├─ should_respond=False + non-forwarded text (≥ 20 chars) → memory_writer
     │       (route_after_router in graph.py; passive memory, background —
     │        this is the only call site, the router itself no longer fires
@@ -73,39 +69,6 @@ incoming message
     ├─ should_respond=False → END
     └─ should_respond=True  → ingester
 ```
-
-### Autonomous humor gate
-
-`humor_gate` (no LLM) decides whether an un-addressed message is worth handing to
-the comedian, keeping the model off the per-message hot path. It fires only when
-all hold: joke-worthy plain text, ≥ `MIN_MESSAGES_SINCE_JOKE` messages since the
-last joke, the `COOLDOWN_SECONDS` window elapsed since the last *sent* joke, and a
-low probability roll — tuned for "rare & sharp" so the bot opens lulls and never
-spams.
-
-When it fires, the `HumorNode` (`humor_node.py`) renders the recent conversation
-with `[#message_id]` markers (forwarded rows carry a `[переслал]` marker so the
-comedian can tell shared channel content from a participant's own words), gathers
-participant material (`src/agent/roast_material.py`), and asks the `ComedianAgent`
-(`src/agent/comedian.py`) for a strict-JSON decision that includes a `reply_to`
-citation — the id of the message the joke is actually about. On `act` the node
-validates the citation against the fetched messages (a hallucinated id or a
-citation of the bot's own message degrades to no anchor), drops the joke
-entirely when the cited target's author is wound down by the engagement gate
-(`engagement_gate.is_wound_down`, read-only score peek — bot-initiated humor
-must not restart a conversation the gate is ending), sets
-`state["response"]`, `response_trigger="humor"` and `humor_reply_to_msg_id`, and
-stamps the cooldown via `mark_joke_sent`. `run_pipeline` then anchors the joke as
-a Telegram reply to the cited message, or posts it un-anchored when there is no
-valid target — never as a reply to whichever message happened to trigger the
-gate. On an abstain or any error the node stays silent and calls
-`mark_considered`. Either way the graph continues to `memory_writer`. The
-comedian defaults to silence and only acts when it has a conversation-spawning
-hook (light by default, roast sparingly). Jokes are grounded in the rendered
-conversation itself — what people actually wrote, contradictions and irony
-between messages (including between what someone forwarded and what they then
-said) — with retro/nostalgia references allowed only as rare flavor when they
-genuinely fit the topic.
 
 ---
 
@@ -616,7 +579,7 @@ AssembledContext:
 BotState:
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: "explicit" | "insult_check" | "random" | "youtube_short" | "social_link" | "humor"
+    response_trigger: "explicit" | "insult_check" | "random" | "youtube_short" | "social_link"
     blocked: bool
     youtube_short_url: str | None      # canonical Shorts URL, set by router
     youtube_short_content: str | None  # labelled transcript/frames/comments block, set by ingester

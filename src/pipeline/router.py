@@ -37,7 +37,7 @@ import re
 from typing import Any
 
 from src import log
-from src.pipeline import humor_gate, shorts, social_links
+from src.pipeline import shorts, social_links
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
 
@@ -99,7 +99,6 @@ class MessageRouter:
         await self.__store_message(msg)
 
         if msg["media_type"] == "text":
-            humor_gate.observe(msg["chat_id"])
             shorts_update = self.__detect_shorts(msg)
             if shorts_update is not None:
                 return shorts_update

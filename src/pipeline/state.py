@@ -48,7 +48,7 @@ class BotState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (10% chance), "youtube_short" (Shorts link), "social_link" (Instagram/YouTube link) or "humor" (autonomous joke)
+    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (unprompted text reply), "youtube_short" (Shorts link) or "social_link" (Instagram/YouTube link)
     blocked: bool                  # True when Guard Node rejects the message
     context: AssembledContext | None
     response: str | None
@@ -59,7 +59,6 @@ class BotState(TypedDict):
     worker_tools_used: NotRequired[bool]   # True when the worker actually ran at least one tool (mechanical ToolMessage scan)
     search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator
     response_messages: NotRequired[list]  # assembled LangChain messages forwarded to LanguageCorrectionNode
-    humor_reply_to_msg_id: NotRequired[int | None]  # validated joke anchor; None sends the joke un-anchored
     is_bot_insult: NotRequired[bool]  # True when the filter classified the message as an insult aimed at the bot
     wind_down: NotRequired[bool]   # True when the engagement gate wants a short conversation-closing reply instead of a full one
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
