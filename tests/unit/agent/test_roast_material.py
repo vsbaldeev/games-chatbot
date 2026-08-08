@@ -2,8 +2,10 @@
 Part 2 — shared member-material gatherer.
 
 Covers the pure formatting/selection helpers and the async ``gather`` composed
-over mocked stores. The gatherer feeds both the comedian (autonomous humor) and
-the offense auto-roast, so each section must degrade cleanly to empty.
+over mocked stores. Originally fed both the comedian (autonomous humor, since
+removed) and the offense auto-roast (also retired); kept as a reusable
+building block for future roast/humor features, so each section must still
+degrade cleanly to empty.
 """
 
 from unittest.mock import AsyncMock, patch

@@ -12,8 +12,8 @@ src/jobs/life_post.py (schedule + format) ──►
     │
     ├─ src/life/writer.py: EpisodeWriterAgent.write_episode(post_format)
     │      reads bot_memories.get_recent_episodes(10) + get_writer_facts()
-    │      (20 newest + 10 sampled older) + get_recent_activities(7);
-    │      → prompts EPISODE_WRITER_SYSTEM (today's
+    │      (20 newest + 10 sampled older) + get_recent_activities(7), then
+    │      prompts EPISODE_WRITER_SYSTEM (today's
     │      date/season + dated recent activities via calendar_ru, for
     │      season-appropriate and non-contradicting episodes, plus «Формат
     │      этого поста: X») → strict JSON {episode_text, image_prompt,

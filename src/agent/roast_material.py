@@ -5,8 +5,9 @@ the existing stores and formats them into one compact prompt block. Every
 section degrades to empty when its data is absent, so callers can drop the
 formatted block straight into a prompt without conditionals.
 
-Shared by the comedian (autonomous humor) and the offense auto-roast — both want
-jokes grounded in real specifics rather than distilled facts alone.
+Originally shared by the comedian (autonomous humor, since removed) and the
+offense auto-roast (also retired) — kept as a reusable building block for
+future roast/humor features, not currently wired to anything.
 """
 
 from dataclasses import dataclass, field

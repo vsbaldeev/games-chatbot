@@ -40,6 +40,9 @@ TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 # Russian labels for the kind of media the triggering message carried. Used to
 # mark the current turn as media (not the user's typed words) so the response
 # model reacts to it instead of retelling the vision/transcript description.
+# build_trigger_line bypasses this dict for "voice" — build_voice_trigger_line
+# frames it as speech instead — but persist_thread_turn still consults the
+# "voice" entry below to label the persisted thread-history turn, so it stays.
 MEDIA_TRIGGER_LABELS = {
     "photo": "фото",
     "voice": "голосовое",
@@ -450,11 +453,12 @@ def build_directive_lines(
         wind_down: ``True`` when the engagement gate wants the conversation
             closed; adds a hint to answer in one short phrase and disengage.
             When combined with ``is_bot_insult``, ``filter_node`` set both
-            because the insult replies to the bot's own message
-            (``replies_to_bot``) — that reads as feedback on what the bot
-            just said, not an unprovoked attack, so only this softer line
-            fires; the aggressive comeback is suppressed to avoid mirroring
-            a counter-insult back into a running thread.
+            either because the insult replies to the bot's own message
+            (``replies_to_bot``), or because the sender's engagement tier had
+            already dropped below full — in both cases a mirrored
+            counter-insult would fuel a loop the gate is already trying to
+            end, so only this softer line fires and the aggressive comeback
+            is suppressed.
         photo_directive: Photo-request framing — ``"ack"`` (generation is
             being launched, promise the photo), ``"busy"`` (a selfie is
             already rendering, no second one), ``"refused"`` (wound-down user

@@ -458,6 +458,8 @@ async def passive_voice_extract(
         username: Sender's username.
         message_id: The message's id, used to update its stored row.
     """
+    # unused — persistence and fact extraction proceed regardless of
+    # transcription confidence
     transcript, low_confidence = await transcribe_voice(file_id, media_type, bot)
     if not transcript:
         return

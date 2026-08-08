@@ -446,7 +446,7 @@ response   personality LLM (ReAct executor, no tools)
     │          when the current message is voice, its trigger line frames the Whisper
     │            transcript as the person's own spoken words ("@user сказал голосовым…"),
     │            not a description — joking is conditional on the words themselves. A
-    │            low-confidence transcript (see Media processing below) adds a note that
+    │            low-confidence transcript (see Media processing above) adds a note that
     │            the transcription may be unreliable
     │          when the current message is photo/video_note/video, its trigger line is
     │            framed as "@user прислал фото. Ниже — его описание… Отреагируй как друг"
@@ -505,11 +505,14 @@ response   personality LLM (ReAct executor, no tools)
     │            activity) — most replies carry neither
     │          when the filter set is_bot_insult=True and NOT wind_down, a hint is
     │            injected telling the model the message is an unprovoked attack and to
-    │            answer with a sharp comeback instead of a neutral reply. When the
-    │            insult is a reply to the bot's own message, filter_node also sets
-    │            wind_down=True (replies_to_bot) — that reads as feedback on the joke
-    │            just made, not an attack, so only the wind-down hint below fires,
-    │            never both: a mirrored counter-insult would just fuel the loop
+    │            answer with a sharp comeback instead of a neutral reply. filter_node
+    │            also sets wind_down=True alongside is_bot_insult=True either when the
+    │            insult is a reply to the bot's own message (replies_to_bot) — that
+    │            reads as feedback on the joke just made, not an attack — or when the
+    │            sender's engagement tier had already dropped below full; either way
+    │            only the wind-down hint below fires, never both: a mirrored
+    │            counter-insult would just fuel the loop the gate is already trying
+    │            to end
     │          when the engagement gate set wind_down=True, a hint is injected telling
     │            the model it is bored of this conversation: answer in one short
     │            in-character phrase, close the exchange, no questions or invitations

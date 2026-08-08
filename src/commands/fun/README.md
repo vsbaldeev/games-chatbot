@@ -1,14 +1,14 @@
 Roast ("прожарка") text generation and the /meme command.
 
-The `/roast` command and the weekly scheduled roast were retired in favour of
-autonomous humor (see `src/pipeline/` HumorNode). The regex-based **offense
-auto-roast** was retired too, replaced by the LLM-classified engagement
-wind-down engine in `src/pipeline/filter_node.py` /
-`src/pipeline/engagement_gate.py` (comeback → LLM brush-off → bored emoji →
-silence, driven by a persistent per-user attention score). Roast generation
-(`Roaster.generate` /
-`generate_roast_text`) currently has no automatic trigger and is kept as a
-reusable building block for future commands, jobs or engagement features.
+The `/roast` command and the weekly scheduled roast were retired; roast
+generation is no longer triggered by anything (previously the autonomous
+comedian, since removed). The regex-based **offense auto-roast** was retired
+too, replaced by the LLM-classified engagement wind-down engine in
+`src/pipeline/filter_node.py` / `src/pipeline/engagement_gate.py` (comeback →
+LLM brush-off → bored emoji → silence, driven by a persistent per-user
+attention score). Roast generation (`Roaster.generate` /
+`generate_roast_text`) is kept as a reusable building block for future
+commands, jobs or engagement features.
 
 ## Trigger mode
 
