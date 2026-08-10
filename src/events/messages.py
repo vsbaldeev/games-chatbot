@@ -331,8 +331,7 @@ def launch_selfie_task(bot, chat_id: int, reply_to_msg_id: int, final_state: Bot
 
     Launched only after the in-character «ща сфоткаю» acknowledgement was
     actually delivered, so a pipeline failure never leaves a photo without
-    its promise. The current-activity phrase (when the context builder
-    loaded one) steers the scene of a bare «сфоткай себя» request.
+    its promise.
 
     Args:
         bot: Telegram Bot instance to send with.
@@ -340,13 +339,11 @@ def launch_selfie_task(bot, chat_id: int, reply_to_msg_id: int, final_state: Bot
         reply_to_msg_id: The requesting message id the photo will reply to.
         final_state: Final pipeline state after the graph run.
     """
-    activity = (final_state.get("context") or {}).get("bot_current_activity")
     asyncio.create_task(selfie.deliver_selfie(
         bot=bot,
         chat_id=chat_id,
         reply_to_msg_id=reply_to_msg_id,
         request_text=final_state["incoming"]["raw_text"] or "",
-        current_activity=activity[0] if activity else None,
     ))
 
 

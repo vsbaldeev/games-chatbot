@@ -302,9 +302,7 @@ keep reciting the score. Store errors fail open to the full tier.
     │       mirrored counter-insult mid-thread never earns a fresh full
     │       comeback (that is what fuels roast-battle loops).
     │       PHOTO_REQUEST at this tier sets photo_request=True plus a
-    │       photo_in_flight peek of both image flows (chat selfie and
-    │       scheduled life post — they share the imagegen worker, and a
-    │       photo post holds it for ~16 min): the worker is
+    │       photo_in_flight peek of the selfie generation slot: the worker is
     │       skipped, the reply is an in-character «ща сфоткаю» ack («уже
     │       фоткаю» when a selfie is already rendering), and after the ack is
     │       delivered the events layer fire-and-forgets
@@ -373,28 +371,6 @@ context_builder
     ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
     ├─ resolve @mentions (in the question + replied_to) to members and load their
     │    weekly role + reason from user_tags → mentioned_tags
-    ├─ bot canon (reuses the same embedding): top-5
-    │    bot_memories.find_similar_facts + 3 newest get_facts (dedupe, cap 8)
-    │    → bot_self_facts; top-2 find_similar_episodes above a similarity
-    │    floor → bot_self_episodes (Жора's own life canon; see src/life/README.md)
-    │    degrades to [] on any failure (embed or DB error) — never fails the pipeline
-    ├─ activity gate: the daily refresh means a fresh activity always
-    │    exists, so injecting it unconditionally made the bot narrate his
-    │    routine in nearly every reply; both activity lookups now run only
-    │    when ACTIVITY_QUESTION_RE matches the incoming text («что делаешь /
-    │    чем занят / что делал / как дела…») or, for the current activity
-    │    alone, on an ACTIVITY_VOLUNTEER_PROBABILITY (10%) roll so he
-    │    occasionally volunteers it; gate closed → (None, []) and the model
-    │    improvises per the system prompt
-    ├─ bot current activity (gate open): newest current_activity across
-    │    episode rows (life posts) and activity rows (silent daily refresh,
-    │    see src/life/README.md), bucketed by age — < 14h "fresh", < 48h
-    │    "recent", older → None (the bot improvises instead of reading a
-    │    stale answer) → bot_current_activity
-    └─ bot recent activities (asked only, never volunteered):
-         bot_memories.get_recent_activities(7), the same newest-first
-         (phrase, posted_at) history spanning episode and activity rows,
-         degrades to [] on failure → bot_recent_activities
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
@@ -488,21 +464,6 @@ response   personality LLM (ReAct executor, no tools)
     │            gets a real translation
     │          when someone asks why they (or an @mentioned member) have a role, the
     │          bot explains it from the stored reason
-    │          + Жора's own life canon (build_bot_life_lines): relevant canon facts
-    │            and past episodes from bot_self_facts/bot_self_episodes (only when
-    │            the current message actually touches that topic — background
-    │            colour, never filler), plus a current-activity line
-    │            («[Прямо сейчас ты]: …» / «[Недавно ты]: …») from
-    │            bot_current_activity so «что делаешь сейчас» answers consistently
-    │            with the latest life post or daily refresh instead of being
-    │            improvised fresh each time, plus a dated
-    │            «[Чем ты занимался в последние дни]» block (build_activity_history_lines)
-    │            from bot_recent_activities — skipping the newest entry already
-    │            shown above — so «что делал вчера/на выходных» answers consistently
-    │            too instead of inventing a different past per questioner;
-    │            both lines appear only when the ContextBuilder activity gate
-    │            opened (asked, or the rare volunteer roll for the current
-    │            activity) — most replies carry neither
     │          when the filter set is_bot_insult=True and NOT wind_down, a hint is
     │            injected telling the model the message is an unprovoked attack and to
     │            answer with a sharp comeback instead of a neutral reply. filter_node
@@ -591,10 +552,6 @@ AssembledContext:
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
     asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
-    bot_self_facts: list[str]            # Жора's own canon facts relevant to this message
-    bot_self_episodes: list[str]         # Жора's own past life-post episodes relevant to this message
-    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post or daily refresh
-    bot_recent_activities: list[tuple[str, float]]  # (phrase, posted_at) history, newest first, for dated "what did you do" answers
 
 BotState:
     incoming: IncomingMessage

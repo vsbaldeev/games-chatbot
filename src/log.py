@@ -38,8 +38,7 @@ GROQ_LOGGER = "groq"
 
 # Every outgoing bot text shares this logger name, so one grep reads back as
 # a transcript of what the bot said. Its limit is generous enough to hold a
-# whole life post (episode_text ≤ 450, or a voice teaser plus its ≤ 500-char
-# spoken script) without truncation.
+# full reply, including a long voice-in-kind script, without truncation.
 OUTGOING_LOGGER = "outgoing"
 OUTGOING_TEXT_LIMIT = 700
 

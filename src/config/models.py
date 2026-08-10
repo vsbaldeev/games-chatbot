@@ -85,24 +85,6 @@ ROAST_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-20b",
 ]
 
-# Life-post episode writer fallback chain. llama first: only Meta/llama holds
-# the casual Russian style (see RESPONSE_MODEL_FALLBACKS above).
-EPISODE_MODEL_FALLBACKS: list[str] = [
-    "llama-3.3-70b-versatile",
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.6-27b",
-]
-
-# Generous headroom over the ~1100-char JSON contract payload so a post is
-# never truncated mid-joke by the model's completion limit.
-EPISODE_MAX_TOKENS = 2000
-
-# Silent daily current-activity refresh. Single tiny call, no fallback chain
-# needed: on failure the previous activity simply ages into "recent" phrasing
-# instead of breaking anything. llama for the same reason as
-# RESPONSE_MODEL_FALLBACKS above — casual Russian style.
-ACTIVITY_MODEL = "llama-3.3-70b-versatile"
-
 # Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
 # Karras). Standard multi-step sampling, not an LCM speed hack: low-step/
 # low-guidance sampling reliably hallucinated compositions. One 512px image
@@ -127,7 +109,7 @@ PHOTO_JUDGE_MAX_TOKENS = 150
 # Chat-requested selfie scene writer (src/life/selfie.py). One small call
 # turning a member's Russian photo request into an English scene line. No
 # fallback chain: a failure degrades to a canned in-character excuse. llama
-# for the same reliable bare-string output as ACTIVITY_MODEL above.
+# for reliable bare-string output.
 SELFIE_SCENE_MODEL = "llama-3.3-70b-versatile"
 SELFIE_SCENE_MAX_TOKENS = 200
 

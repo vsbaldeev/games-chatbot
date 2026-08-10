@@ -52,8 +52,8 @@ TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 
 # Base URL of the self-hosted image-generation service (imagegen-service/).
-# Empty disables photo life posts entirely — the format is never offered to
-# the episode writer.
+# Empty disables image generation entirely — a photo request then gets the
+# canned in-character excuse.
 IMAGEGEN_URL: str = os.getenv("IMAGEGEN_URL", "")
 
 # Local path of the Silero TTS model file. Downloaded on first start when

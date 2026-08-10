@@ -1,4 +1,4 @@
-Self-hosted CPU image generation for Жора's photo life posts. A separate
+Self-hosted CPU image generation for Жора's chat-requested selfies. A separate
 deploy unit (own container, own 3 GB memory limit) so the ML workload can
 never touch the bot's memory envelope; the bot talks to it through
 `src/imagegen/client.py` and degrades photo posts to text stories whenever
@@ -46,9 +46,9 @@ conversion step complicates LoRA iteration, so it is not the baseline).
 
 ## Long prompts: Compel instead of the raw 77-token CLIP cap
 
-`CHARACTER_VISUAL_PROMPT + episode.image_prompt` routinely exceeds CLIP's
+`CHARACTER_VISUAL_PROMPT + scene prompt` routinely exceeds CLIP's
 77-token limit. Passing that combined string as `prompt=` would silently
-**truncate the tail** — exactly the episode's scene detail, breaking the
+**truncate the tail** — exactly the requested scene detail, breaking the
 text-photo coherence guarantee (a selfie could render only the character
 descriptor and drop the actual scene). `engine.py` builds
 `prompt_embeds`/`negative_prompt_embeds` with
@@ -69,7 +69,7 @@ frame, but the cow still didn't — see the next section for why.
 ## Prompt order: scene before character, not after
 
 Even with the full prompt reaching the model, `CHARACTER_VISUAL_PROMPT,
-episode.image_prompt` (character descriptor first) still reliably dropped
+scene prompt` (character descriptor first) still reliably dropped
 secondary scene objects — a test render asking for "a curious cow peeking
 from behind the fence" produced only a close-up portrait, no cow, no fence
 repair action. Leading tokens dominate composition (observed under the
@@ -86,8 +86,8 @@ Fix verified locally, three prompt variants at the same seed:
 | `"wide shot, full scene, " + scene + character` + negative prompt against close-ups, higher steps/guidance | cow prominent, but **the man vanished from frame entirely** |
 
 The middle option is what shipped (`PHOTO_FRAMING_HINT = "wide shot, "` in
-`src/config/prompts.py`, prepended to `episode.image_prompt` which is then
-followed by `CHARACTER_VISUAL_PROMPT` — see `src/life/poster.py`): it is
+`src/config/prompts.py`, prepended to the scene prompt which is then
+followed by `CHARACTER_VISUAL_PROMPT` — see `src/life/photo.py`): it is
 the only variant that kept the character in frame — the actual point of a
 selfie — while also letting the scene's secondary objects render. The more
 aggressive tuning (negative prompt + higher guidance/steps) traded away

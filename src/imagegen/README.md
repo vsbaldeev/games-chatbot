@@ -1,16 +1,14 @@
 HTTP client for the self-hosted image-generation service (`imagegen-service/`),
-used by Жора's Monday photo life posts (`src/life/poster.py`) and chat-requested
-selfies (`src/life/selfie.py`).
+used by chat-requested selfies (`src/life/selfie.py`).
 
 ## Contract
 
 `generate_image(prompt) -> bytes | None` — PNG bytes on success, `None` on any
-failure. Never raises (the TTS `speech_service` pattern): a media failure can
-only demote a photo post to a text story, never kill it.
+failure. Never raises (the TTS `speech_service` pattern): a generation failure
+degrades to a canned in-character excuse, never an unhandled error.
 
 - Disabled entirely when `IMAGEGEN_URL` is empty (the `TMDB_API_KEY`
-  optional-service pattern) — the scheduled photo slot is then written as a
-  text story up front (`poster.supported_format`).
+  optional-service pattern) — a photo request then gets the excuse reply.
 - Generation takes ~3 min on the 4 vCPU CPU host, so the service exposes an
   async job API: `POST /generations` (10 s timeout) then
   `GET /generations/{id}` every `IMAGEGEN_POLL_SECONDS` (10, with a 30 s
@@ -44,9 +42,8 @@ is what bounds the wait now.
 Generation parameters (`IMAGEGEN_STEPS = 20`, `IMAGEGEN_SIZE = 512`,
 `IMAGEGEN_GUIDANCE = 6.0`, `IMAGEGEN_CANDIDATES = 3`) live in
 `src/config/models.py`; the URL comes from the `IMAGEGEN_URL` env
-(`src/config/credentials.py`). Every generation task — scheduled Monday
-photo post and chat-requested selfie alike — renders
-`IMAGEGEN_CANDIDATES` candidates and ships the best (`poster.generate_best_photo`).
+(`src/config/credentials.py`). Every generation renders `IMAGEGEN_CANDIDATES`
+candidates and ships the best (`src/life/photo.py:generate_best_photo`).
 
 See `imagegen-service/README.md` for the service side: engine choice
 rationale, RAM budget, and API details.

@@ -37,10 +37,6 @@ class AssembledContext(TypedDict):
     reply_chain: list[dict]            # full reply chain from root to replied-to message, oldest-first
     asking_user_tag: dict | None       # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]    # username → {"tag", "reason"} for members @mentioned in the question
-    bot_self_facts: list[str]          # canon facts about the bot's own life, relevant to this message
-    bot_self_episodes: list[str]       # past life-post episodes relevant to this message
-    bot_current_activity: tuple[str, str] | None  # (phrase, "fresh"|"recent") from the newest life post, or None
-    bot_recent_activities: list[tuple[str, float]]  # (phrase, posted_at) history, newest first, for dated "what did you do" answers
 
 
 class BotState(TypedDict):
@@ -70,7 +66,7 @@ class BotState(TypedDict):
     social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester
     filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "PHOTO_REQUEST" | "SHORTS" | "SOCIAL_LINK", set by the filter node
     photo_request: NotRequired[bool]   # True when the filter accepted a photo request at the full tier; the events layer launches selfie generation after the ack is delivered
-    photo_in_flight: NotRequired[bool] # True when any image generation (chat selfie or scheduled life post) was already running at classification time; the response acks «уже фоткаю» and no second job is launched
+    photo_in_flight: NotRequired[bool] # True when a selfie was already being generated at classification time; the response acks «уже фоткаю» and no second job is launched
     engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node
     drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line
     media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified

@@ -9,10 +9,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
 from src.config.prompts import (
-    ACTIVITY_FRESH_SUFFIX,
-    ACTIVITY_HISTORY_HEADER,
-    ACTIVITY_STALE_SUFFIX,
-    BOT_CANON_HEADER,
     SHORTS_TRIGGER_INSTRUCTION,
     SHORTS_TRIGGER_REACT_INSTRUCTION,
     SOCIAL_LINK_REACT_INSTRUCTION,
@@ -199,69 +195,6 @@ def build_mentioned_tags_lines(context) -> list[str]:
         lines.append(f"@{username}: {tag_info['tag']}{suffix}")
     lines.append("")
     return lines
-
-
-def build_activity_history_lines(recent_activities: list[tuple[str, float]]) -> list[str]:
-    """Return dated activity-history lines, skipping the newest (already-shown) entry.
-
-    Args:
-        recent_activities: ``(phrase, posted_at)`` pairs, newest first, as
-            stored in ``AssembledContext.bot_recent_activities``. The first
-            entry is skipped — it is the same one already rendered as
-            ``[Прямо сейчас ты]``/``[Недавно ты]`` by the caller.
-
-    Returns:
-        Prompt lines for the remaining dated history, with a trailing blank
-        line, or an empty list when fewer than two entries exist.
-    """
-    history = recent_activities[1:]
-    if not history:
-        return []
-    now = datetime.datetime.now(calendar_ru.MOSCOW_TZ)
-    parts = [ACTIVITY_HISTORY_HEADER]
-    parts.extend(
-        f"- {calendar_ru.describe_relative_day(posted_at, now)} — {phrase}"
-        for phrase, posted_at in history
-    )
-    parts.append("")
-    return parts
-
-
-def build_bot_life_lines(context) -> list[str]:
-    """Return formatted bot-canon and current-activity lines for the response prompt.
-
-    Args:
-        context: AssembledContext dict or None.
-
-    Returns:
-        Prompt lines for relevant canon facts, relevant past episodes, the
-        current-activity line and dated activity history, each block only
-        present when data exists; empty list when there is no bot canon to
-        show (e.g. empty store).
-    """
-    context = context or {}
-    parts: list[str] = []
-    facts = context.get("bot_self_facts") or []
-    if facts:
-        parts.append(BOT_CANON_HEADER)
-        parts.extend(f"- {fact}" for fact in facts)
-        parts.append("")
-    episodes = context.get("bot_self_episodes") or []
-    if episodes:
-        parts.append("[Твои прошлые истории по теме]:")
-        parts.extend(episodes)
-        parts.append("")
-    activity = context.get("bot_current_activity")
-    if activity:
-        phrase, freshness = activity
-        if freshness == "fresh":
-            label, suffix = "Прямо сейчас ты", ACTIVITY_FRESH_SUFFIX
-        else:
-            label, suffix = "Недавно ты", ACTIVITY_STALE_SUFFIX
-        parts.append(f"[{label}]: {phrase}{suffix}")
-        parts.append("")
-    parts += build_activity_history_lines(context.get("bot_recent_activities") or [])
-    return parts
 
 
 def select_shorts_instruction(video_present: bool) -> str:
@@ -561,7 +494,6 @@ def build_response_input(
     if role_lines:
         parts.append(WEEKLY_ROLES_RULE)
         parts += role_lines
-    parts += build_bot_life_lines(context)
 
     # Skip recent history when thread history is present (thread turns already
     # provide conversational context, group chat would just confuse the model).

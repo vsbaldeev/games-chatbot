@@ -1,279 +1,93 @@
-Жора's scheduled life posts — the character's own story, told to every chat three
-times a week and remembered as canon — plus a silent daily activity refresh that
-keeps "what are you doing right now" fresh between posts.
+Жора's self-image — chat-requested selfies and the image pipeline behind them.
 
-## Flow
+## What this package is (and what it used to be)
 
-```
-src/jobs/life_post.py (schedule + format) ──►
-                    src/life/poster.py:post_life_episode(bot, post_format)
-    │
-    ├─ supported_format: downgrade photo → story when IMAGEGEN_URL is unset
-    │
-    ├─ src/life/writer.py: EpisodeWriterAgent.write_episode(post_format)
-    │      reads bot_memories.get_recent_episodes(10) + get_writer_facts()
-    │      (20 newest + 10 sampled older) + get_recent_activities(7), then
-    │      prompts EPISODE_WRITER_SYSTEM (today's
-    │      date/season + dated recent activities via calendar_ru, for
-    │      season-appropriate and non-contradicting episodes, plus «Формат
-    │      этого поста: X») → strict JSON {episode_text, image_prompt,
-    │        voice_script, voice_teaser, current_activity} → parse_episode
-    │        validates lengths (episode_text ≤ 450, voice_script ≤ 500,
-    │        voice_teaser ≤ 120) and required fields, and stamps the
-    │        scheduled format onto the Episode; one retry on a
-    │        malformed/invalid response, then None (slot skipped, catch-up
-    │        retries later)
-    │
-    ├─ resolve_media: build the episode's media once, before the fan-out —
-    │      voice: synthesize the spoken story (prepare_tts_text +
-    │      speech_service.synthesize); photo: generate the selfie on the
-    │      imagegen service (CHARACTER_VISUAL_PROMPT + the episode's
-    │      image_prompt via src/imagegen/client.py). Any failure demotes
-    │      the episode to a story — a media failure never kills a post
-    │
-    ├─ send_episode: fan out to every chat (achievements.get_all_chat_ids,
-    │      asyncio.gather(..., return_exceptions=True) — one chat's failure
-    │      cannot abort the others), record each send in unified_messages
-    │      (content = episode_text even for voice posts, so the bot's own
-    │      posts need no transcription/vision when a member replies to them)
-    │
-    └─ only if ≥1 chat received the post:
-           record_episode → bot_memories.insert_episode(...) with the
-           episode's current_activity, then distill_facts (BOT_FACT_DISTILL_SYSTEM
-           + MEMORY_MODEL, reasoning disabled) → bot_memories.upsert_facts(...)
-           (semantic dedup, newest text wins on a match)
-```
+Until 2026-08-10 this package also drove **scheduled life posts**: three
+unprompted posts a week narrating episodes from Жора's invented village life,
+backed by an episode writer, a canon store (`bot_memories`), and a silent daily
+"current activity" refresh.
 
-Zero successful sends leaves `bot_memories` untouched — the watermark
-(`get_latest_posted_at`) stays behind, so catch-up retries the slot on the
-next startup instead of silently losing it.
+That whole feature was retired. Chat feedback was consistent and came from
+several members independently: the posts read as noise («с огородом это треш»,
+«когда он какую-то смородину собирает и рандомно об этом рассказывает»), a
+member imitated the format to mock it, and the same biography leaked into
+ordinary replies — 1 reply in 10 volunteered his current activity unprompted.
+A chat poll put only ~39% actively in favour, 28% against and ~33% neutral.
 
-## Engagement
+The decision was **keep the voice, drop the biography**: Жора is still a
+village handyman in manner — dry, unimpressed, sarcastic — but he has no diary,
+tells no stories about his day, and never volunteers what he is doing. The
+`CHARACTER_SHEET` in `src/config/prompts.py` still defines who he is; nothing
+generates episodes about him any more.
 
-Every post closes the episode with a question or subtle jab aimed at the
-chat (`build_engagement_lines` in `src/life/writer.py`). Life posts never
-mention a chat member by name — decided 2026-08-07, alongside the wider
-removal of unprompted bot humor; see
-`docs/superpowers/specs/2026-08-07-reduce-bot-absurdity-design.md`.
+Retired with it: `src/life/writer.py`, `src/life/poster.py`,
+`src/life/activity.py`, `src/jobs/life_post.py`, `src/jobs/daily_activity.py`,
+`src/store/bot_memories.py`, and the bot-canon/activity blocks of the reply
+prompt. The `bot_memories` **table** is deliberately left in place — no
+migration drops it, so the data survives if the feature is ever revived.
 
-## Voice posts — teaser caption, story in the voice
-
-People skip long voice notes that give no reason to press play, so a voice
-post never shows its full text. The caption is only `voice_teaser` — one dry
-hook line in Жора's style («Про медведя, мёд и одну плохую идею.»), never a
-summary — while the full episode lives in the spoken `voice_script`, which
-must be self-contained and carry the engagement question. Scripts are capped
-at `EPISODE_VOICE_SCRIPT_MAX_CHARS`
-(500 ≈ 25–40 s of Silero speech, tighter than the general `TTS_MAX_CHARS`
-synthesis limit) so the duration Telegram shows before playing stays a
-low-commitment tap. Reply-context needs no transcription:
-`unified_messages.content` records the full `episode_text` even though
-members see only the teaser.
-
-## Photo posts — text–photo coherence
-
-A photo post must never contradict its caption. Three layers guarantee it:
-one episode JSON produces both `episode_text` (the caption) and
-`image_prompt` (the shot), so they cannot describe different events by
-construction; the writer prompt requires `image_prompt` to be **one simple
-frame from the episode** — the most visual single moment, not a retelling
-of the whole plot — that may omit parts of the story but may never
-contradict it (same place, season, time of day, only objects the story
-contains); and the poster always sends the image *with* `episode_text` as
-its caption — an image failure degrades the post to `story`, so a bare or
-mismatched photo is never posted. The fragment framing is deliberate and
-measured: across seed sweeps, two-subject-plus-interaction prompts failed
-the vision judge on 3 of 4 seeds (the second creature simply doesn't
-render), while a single-subject action frame scored 9/10 within three
-candidates. Hence the writer rule: ideally just Жора and one action in
-frame, a second participant only when the shot is meaningless without
-one — exactly like a real chat post where the story is in the text and
-the attached photo shows one detail of it. The character's appearance is deliberately absent from
-`image_prompt`: the fixed `CHARACTER_VISUAL_PROMPT` descriptor is prepended
-at generation time, so every selfie shares wardrobe/beard/style while the
-scene tracks the episode. When `IMAGEGEN_URL` is not configured, the Monday
-photo slot is written as a text story up front (`supported_format()`) rather
-than written for a photo that would then have to be demoted.
-
-A fourth layer lives on the service side: `CHARACTER_VISUAL_PROMPT +
-image_prompt` routinely exceeds CLIP's 77-token limit, and a plain
-`prompt=` string would silently truncate — dropping exactly the episode's
-scene detail. `imagegen-service/engine.py` builds embeddings via Compel
-instead, so the full prompt always reaches the model (see that service's
-README for the story of the bug this replaced).
-
-The fifth layer attacks the model's remaining weakness — SD1.5 renders
-subject *interactions* stochastically (all subjects present, nobody doing
-what the caption says). `generate_best_photo` generates up to
-`IMAGEGEN_CANDIDATES` (3) candidates with random seeds and
-`src/life/photo_judge.py` scores each against the episode's `image_prompt`
-via the existing Groq vision model (0–10, interaction weighted heaviest,
-same multimodal pattern as `src/pipeline/ingester.py`). The first candidate
-scoring ≥ `PHOTO_JUDGE_PASS_SCORE` (7) ships immediately (early exit saves
-CPU-minutes); otherwise the best-scoring one ships — **the judge ranks, it
-never gates**: a photo post degrades to a text story only when every
-generation call itself failed. A judge outage scores as "unknown" (ranked
-below any scored candidate, still postable) — a broken judge must never
-block a scheduled post. The episode writer is also instructed to keep
-`image_prompt` renderable: one subject-verb-object action, at most one
-other creature, no prop lists.
-
-Recording uses `format_photo_content(episode_text)` plus the sent photo's
-`file_id`, which plugs Жора's selfies into the existing lazy
-vision-description path — a member replying to a selfie gets a real
-description of the generated frame, same as for member photos.
+What remains here is the part members actually liked: they can ask Жора for a
+photo, and he sends one.
 
 ## Chat-requested selfies — `src/life/selfie.py`
 
-Members can ask Жора for a photo of himself in chat («сфоткай себя», «покажи
-свой огород»). The pipeline's filter classifies the request (`PHOTO_REQUEST`
+Members ask Жора for a photo of himself in chat («сфоткай себя», «покажи свой
+огород»). The pipeline's filter classifies the request (`PHOTO_REQUEST`
 verdict, the heaviest engagement-budget signal at 4.5) and the reply is an
 immediate in-character «ща сфоткаю» ack; `deliver_selfie` then runs as a
 fire-and-forget background task launched by the events layer:
 
 1. `write_selfie_scene` (`SELFIE_SCENE_MODEL`, one call, no fallback chain)
-   turns the Russian request into one English scene line under the same
-   contract as the episode writer's `image_prompt` — a named scene is
-   rendered as asked; a bare «сфоткай себя» shows the current activity from
-   the newest life post; no activity falls back to a village-yard shot.
-2. `generate_best_photo` (shared with scheduled photo posts) renders and
-   judges the candidates; the photo goes out as a reply to the requesting
-   message with a short canned caption and is recorded with
-   `format_photo_content` + `file_id`, plugging it into the lazy
-   vision-description path like every other selfie.
+   turns the Russian request into one English scene line. A named scene is
+   rendered as asked; a bare «сфоткай себя» falls back to a village-yard shot.
+2. `generate_best_photo` (`src/life/photo.py`) renders and judges the
+   candidates; the photo goes out as a reply to the requesting message with a
+   short canned caption and is recorded with `format_photo_content` +
+   `file_id`, plugging it into the lazy vision-description path like every
+   other photo.
 3. Any failure degrades to a canned in-character excuse
    (`SELFIE_FAILED_REPLIES`) — after promising a photo, silence is not an
    option.
 
-One module-global generation slot serializes chat selfies: the imagegen
-service has a single worker shared with scheduled life posts, so a request
-arriving mid-render gets an «уже фоткаю» ack and no second job. The filter's
-peek is `selfie.is_generation_in_flight() or poster.is_post_in_flight()` —
-covering both image flows, because a scheduled photo post holds the worker
-for ~16 minutes and promising a selfie during one delivered a second image
-to the chat moments after the post's own. The peek and the acquire are
-separate moments, so two overlapping pipelines can both ack while only one
-generates — the loser logs and exits; rare and low-stakes by design.
+One module-global generation slot serializes selfies: the imagegen service has
+a single worker, so a request arriving mid-render gets an «уже фоткаю» ack and
+no second job. The filter's peek is `selfie.image_generation_in_flight()`. The
+peek and the acquire are separate moments, so two overlapping pipelines can
+both ack while only one generates — the loser logs and exits; rare and
+low-stakes by design.
 
-## One scheduled post at a time — `post_in_flight`
+(Before the life posts were retired this peek also had to cover a scheduled
+photo post, which held the worker for ~16 minutes. Selfies are now the only
+flow that renders images, so the slot is this module's own.)
 
-`post_life_episode` drops a call made while another post is still being
-produced. Both triggers aim at the same slot — the daily 17:00 job and the
-startup catch-up, which runs 60 s after boot — and the watermark that tells
-catch-up "this slot is done" (`get_latest_posted_at`) is only written after a
-successful send. A photo post spends ~16 minutes rendering candidates, so for
-those minutes the slot still reads as unposted and catch-up would claim it
-again: two near-identical episodes, two images. Observed in production on the
-first Monday the photo slot ever fired, after a deploy landed in the minute
-before 17:00.
+## Best-of-N photo selection — `src/life/photo.py`, `src/life/photo_judge.py`
 
-The duplicate is dropped rather than queued: it targets the same slot, so
-posting it later is still a duplicate. Claiming the slot in `bot_memories`
-*before* generating would also close the race, but it would trade this bug
-for a worse one — a post that then failed would be recorded as done and
-silently lost, which is exactly what the write-after-send rule above exists
-to prevent.
+SD1.5 renders subject *interactions* stochastically — all subjects present,
+nobody doing what was asked. `generate_best_photo` generates up to
+`IMAGEGEN_CANDIDATES` (3) candidates with random seeds and
+`src/life/photo_judge.py` scores each against the requested scene via the Groq
+vision model (0–10, interaction weighted heaviest, the same multimodal pattern
+as `src/pipeline/ingester.py`). The first candidate scoring ≥
+`PHOTO_JUDGE_PASS_SCORE` (7) ships immediately (early exit saves CPU-minutes);
+otherwise the best-scoring one ships — **the judge ranks, it never gates**. A
+judge outage scores as "unknown" (`UNSCORED_RANK`, below any scored candidate
+but still shippable): a broken judge must never block a photo that rendered
+fine.
 
-## Format degradation ladder
+Prompt shape matters as much as the judge. Across seed sweeps,
+two-subject-plus-interaction prompts failed on 3 of 4 seeds (the second
+creature simply doesn't render), while a single-subject action frame scored
+9/10 within three candidates. Hence the scene contract: one subject-verb-object
+action, at most one other creature, no prop lists.
 
-`voice → story`, `photo → story`: media payloads are built once before the
-fan-out (`resolve_media`), and any media failure demotes the episode to a
-text story — the recorded format is the demoted one, so canon reflects what
-the chat actually saw. This is why every episode carries all three bodies
-(`episode_text`, `image_prompt`, `voice_script`) regardless of its format:
-a demotion never needs a second model call. Step 8 extends the mapping with
-`video_note → voice → story`; a media failure always demotes the post, never
-kills it.
+The character's appearance is deliberately absent from the scene line: the
+fixed `CHARACTER_VISUAL_PROMPT` descriptor is prepended at generation time
+(after `PHOTO_FRAMING_HINT`), so every selfie shares wardrobe/beard/style while
+the scene tracks the request.
 
-Note the blind spot this creates in canon: a Monday photo post that degraded
-is stored as `story`, and one that generated fine but failed to send to every
-chat is stored as nothing at all (`post_life_episode` returns before
-`record_episode`). Counting `post_format` in `bot_memories` therefore cannot
-tell you whether the photo path ran — check the imagegen service logs for
-that.
-
-## Scheduling — `src/jobs/life_post.py`
-
-- Three posts a week on fixed days, all at 17:00 Moscow Time
-  (`LIFE_POST_RUN_TIME`; `Europe/Moscow` is a fixed UTC+3 offset, no DST).
-  `WEEKLY_SCHEDULE` maps `datetime.weekday()` → format and is the single
-  source of truth for both cadence and format:
-
-  | Day       | Format  | What the chat sees                        |
-  |-----------|---------|-------------------------------------------|
-  | Monday    | `photo` | generated frame, `episode_text` as caption |
-  | Wednesday | `voice` | voice note, `voice_teaser` as caption      |
-  | Saturday  | `story` | plain text                                 |
-
-  Days absent from the map post nothing, so the posts-per-week count is just
-  the table's size — adding a day is a one-line change.
-- `life_post_job` runs daily at 17:00 and returns immediately on unscheduled
-  days; on scheduled days it posts in that day's format.
-- `catch_up_life_post_job` runs once at startup (+60s):
-  - no episode has ever been posted → this is a fresh deployment; the very
-    first life post is scheduled immediately — Жора's opener, always
-    `OPENER_FORMAT` (`story`), since there is no canon yet for a photo to
-    depict or a voice note to tease.
-  - otherwise, recovers a missed slot in **that slot's own format**, comparing
-    `bot_memories.get_latest_posted_at()` against `most_recent_due_slot`, which
-    returns `(moment, format)`. The format travels to the deferred job in
-    `job.data`, so the slot decides it, not the moment the post finally runs.
-  - a catch-up landing outside `LIFE_POST_WINDOW` (10:00–22:00) is deferred to
-    the next window start: the scheduled slot is always 17:00, but a bot that
-    restarts at 04:00 owing a post must not wake the chat to deliver it.
-- Night is quiet hours for **proactive** posts only — the reactive pipeline
-  (mentions, replies) is untouched and answers around the clock.
-
-## Canon write rules
-
-Canon (`bot_memories`) is written only by scheduled jobs — chat members
-cannot inject it. The episode writer sees the last 10 episodes plus a
-20-newest/10-sampled-older slice of facts (never the whole store), so canon
-holds months of detail without blowing the prompt budget. `current_activity`
-is stored on both `episode` rows (life posts) and `activity` rows (the daily
-refresh below); whichever is newest is the pipeline's answer for «что делаешь
-сейчас». Reply-prompt injection is question-gated: the activity enters the
-prompt only when the message asks what he's doing/did, or on a rare volunteer
-roll (see `src/pipeline/README.md`) — the refresh mechanics here are
-unchanged by that gate.
-
-## Daily activity refresh — `src/life/activity.py`, `src/jobs/daily_activity.py`
-
-Life posts land only three times a week, so between them `current_activity` used
-to sit frozen for days (the exact "рубит дрова for a week" bug this refresh
-fixes) and then go stale and get improvised inconsistently. A lightweight
-daily job closes that gap without ever posting to chat:
-
-```
-src/jobs/daily_activity.py (09:30 MSK, before the 10:00 life-post window)
-    │ skip if bot_memories.get_current_activity() already dates to today
-    │   (an earlier refresh, or a life post that already landed)
-    ▼
-src/life/activity.py: refresh_daily_activity()
-    reads bot_memories.get_recent_activities(10) + get_facts(5)
-    → build_activity_prompt: today's date/weekday/season (calendar_ru) +
-      dated recent activities ("не повторяй их") + canon facts
-    → DAILY_ACTIVITY_SYSTEM (ChatGroq, config.ACTIVITY_MODEL, temp 0.9,
-      single call, up to 2 attempts) → one bare phrase, not JSON
-    → parse_activity_phrase: strips think-blocks/quotes, drops (retry) if
-      empty or over CURRENT_ACTIVITY_MAX_CHARS (80)
-    → bot_memories.insert_activity(phrase) — kind='activity', capped at
-      MAX_BOT_ACTIVITIES (30, oldest pruned)
-```
-
-Fails soft: any exception or two unusable attempts just leave yesterday's
-activity in place (it ages from "fresh" into "recent" phrasing) — a broken
-refresh must never crash the job. `catch_up_daily_activity_job` recovers a
-refresh missed while the bot was down, same as the life-post catch-up.
-
-`src/life/calendar_ru.py` renders the shared Russian date/weekday/season and
-relative-day ("вчера", "позавчера", "8 июля") phrasing consumed by this
-generator, the episode writer (season-appropriate episodes, continuity with
-recent activities) and the response prompt (dated "what did you do
-yesterday" answers via `bot_recent_activities`, see `src/pipeline/README.md`).
-
-## Shared helper
-
-`load_json_object` (used to parse the writer's JSON output) lives in
-`src/utils/llm_json.py`, extracted from `src/jobs/roles.py` so both jobs
-share one implementation.
+A further layer lives on the service side: `CHARACTER_VISUAL_PROMPT + scene`
+routinely exceeds CLIP's 77-token limit, and a plain `prompt=` string would
+silently truncate — dropping exactly the requested scene detail.
+`imagegen-service/engine.py` builds embeddings via Compel instead, so the full
+prompt always reaches the model (see that service's README for the bug this
+replaced).

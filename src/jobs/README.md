@@ -8,8 +8,6 @@ Job managers live in src/bot/jobs.py. Implementations live here, one file per jo
 00:05 UTC        reset_model_job        agent.py        reset LLM fallback index to 0
 03:00 UTC        cleanup_messages_job   cleanup.py      prune unified_messages and thread_history rows older than 60 days
 03:30 UTC        ytdlp_update_job       ytdlp_update.py install newer yt-dlp into /app/runtime-deps and restart the bot gracefully (SIGTERM + docker restart policy); no-op outside the container or when current
-09:30 MSK        daily_activity_job     daily_activity.py silently invent Жора's current-activity phrase for the day, no chat post; skipped if already refreshed today (e.g. a life post landed); see src/life/README.md
-17:00 MSK        life_post_job          life_post.py    post one of Жора's life-story episodes — Mon photo, Wed voice, Sat story; other days no-op; see src/life/README.md
 14:00 UTC        weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
 15:00 UTC        daily_meme_job         meme.py         send one fresh unseen meme to every chat (every day)
 ```
@@ -42,32 +40,6 @@ members who share a name can never collapse into one entry.
 
 Reasons stored in `user_tags` let the response pipeline explain a member's role
 when they ask "why do I have this role?" (see `src/pipeline/README.md`).
-
-## Daily activity job
-
-Full generation flow lives in `src/life/README.md`. This job file only owns
-scheduling: a daily 09:30 MSK run (well before the 17:00 life-post slot, so a
-same-day life post always ends up as the newer
-`current_activity`) that skips silently if today's activity was already set
-— by an earlier run of this job or by a life post landing before 09:30.
-`catch_up_daily_activity_job` recovers a refresh missed while the bot was
-down, using the same "already refreshed today" check.
-
-## Life-post job
-
-Full episode-writing and posting flow lives in `src/life/README.md`. This job
-file owns scheduling **and format**: `WEEKLY_SCHEDULE` maps weekday → format
-(Mon photo, Wed voice, Sat story), all at 17:00 MSK. A daily "run at 17:00,
-act only on scheduled days" trigger fires the post; catch-up recovers a
-missed slot on startup and also fires the very first post ever right after
-deployment.
-
-The format used to be the episode writer's own choice among the offered
-formats, constrained only by "don't repeat the previous post" — which
-endless story/voice alternation satisfies forever. In production the writer
-picked `photo` exactly zero times in six posts, so the whole image-generation
-path never ran once. Cadence is a scheduling decision, not a creative one;
-it lives here now and the writer is simply told which format to write for.
 
 ### Startup catch-up
 

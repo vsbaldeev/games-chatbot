@@ -8,15 +8,11 @@ requesting message. Any failure degrades to a canned in-character excuse —
 the task never raises.
 
 One global generation slot guards the whole module: the imagegen service has
-a single worker shared with scheduled life posts, so a second chat request
-while one is rendering gets an «уже фоткаю» acknowledgement and no second
-job. The filter's peek combines this slot with
-``poster.is_post_in_flight()`` — a scheduled photo post holds the worker for
-minutes, and promising a selfie during one used to deliver a second image to
-the chat right after the post's own. The peek happens at classification time
-and the acquire here, so two overlapping pipelines can both ack while only
-one generates; the loser logs and exits — a rare, low-stakes race (one user
-gets an ack with no photo).
+a single worker, so a second chat request while one is rendering gets an
+«уже фоткаю» acknowledgement and no second job. The peek happens at
+classification time and the acquire here, so two overlapping pipelines can
+both ack while only one generates; the loser logs and exits — a rare,
+low-stakes race (one user gets an ack with no photo).
 """
 
 import random
@@ -29,8 +25,7 @@ from src import config, log
 from src.agent.middleware import ainvoke_with_backoff, strip_thinking
 from src.config.prompts import SELFIE_SCENE_SYSTEM
 from src.events.sending import send_and_store
-from src.life import poster
-from src.life.poster import generate_best_photo
+from src.life.photo import generate_best_photo
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
@@ -72,39 +67,21 @@ def image_generation_in_flight() -> bool:
 
     The authoritative "is the imagegen worker busy" answer, used by the
     filter node to ack «уже фоткаю» instead of promising a photo it would
-    deliver on top of one already coming. Covers both flows that render
-    images: a chat-requested selfie and a scheduled photo life post, which
-    holds the worker for minutes at a time.
+    deliver on top of one already coming. Chat-requested selfies are now the
+    only flow that renders images — scheduled life posts were retired — so
+    this is the module's own slot.
 
     Returns:
-        True while either flow is producing an image.
+        True while a selfie is being produced.
     """
-    return generation_in_flight or poster.is_post_in_flight()
+    return generation_in_flight
 
 
-def build_scene_input(request_text: str, current_activity: str | None) -> str:
-    """Assemble the human message for the selfie scene writer.
-
-    Args:
-        request_text: The member's raw Russian photo request.
-        current_activity: Жора's current-activity phrase from the newest life
-            post, or None when unknown.
-
-    Returns:
-        The bare request, with the current activity appended on its own
-        labelled line when available (the prompt's optional activity line).
-    """
-    if current_activity:
-        return f"{request_text}\nThe man is currently busy with: {current_activity}"
-    return request_text
-
-
-async def write_selfie_scene(request_text: str, current_activity: str | None) -> str | None:
+async def write_selfie_scene(request_text: str) -> str | None:
     """Turn the member's photo request into one English scene description.
 
     Args:
         request_text: The member's raw Russian photo request.
-        current_activity: Жора's current-activity phrase, or None.
 
     Returns:
         The trimmed scene line, or None on any LLM error or empty output —
@@ -117,7 +94,7 @@ async def write_selfie_scene(request_text: str, current_activity: str | None) ->
     try:
         result = await ainvoke_with_backoff(llm, [
             SystemMessage(content=SELFIE_SCENE_SYSTEM),
-            HumanMessage(content=build_scene_input(request_text, current_activity)),
+            HumanMessage(content=request_text),
         ])
     except Exception as error:
         logger.warning("Selfie scene writer failed: %s", error)
@@ -145,9 +122,9 @@ async def send_excuse(bot, chat_id: int, reply_to_msg_id: int) -> None:
 async def send_and_record_photo(bot, chat_id: int, reply_to_msg_id: int, photo_png: bytes) -> None:
     """Send the generated selfie and persist it to ``unified_messages``.
 
-    The row stores placeholder photo content plus the Telegram ``file_id``
-    (mirroring ``poster.record_sent_message``), which plugs the selfie into
-    the existing lazy vision-description path when a member replies to it.
+    The row stores placeholder photo content plus the Telegram ``file_id``,
+    which plugs the selfie into the existing lazy vision-description path
+    when a member replies to it.
 
     Args:
         bot: Telegram Bot instance to send with.
@@ -178,7 +155,7 @@ async def send_and_record_photo(bot, chat_id: int, reply_to_msg_id: int, photo_p
 
 async def deliver_selfie(
     *, bot, chat_id: int, reply_to_msg_id: int,
-    request_text: str, current_activity: str | None,
+    request_text: str,
 ) -> None:
     """Generate and deliver one chat-requested selfie; never raises.
 
@@ -193,7 +170,6 @@ async def deliver_selfie(
         chat_id: Chat the request came from.
         reply_to_msg_id: The requesting message id to anchor replies to.
         request_text: The member's raw Russian photo request.
-        current_activity: Жора's current-activity phrase, or None.
     """
     global generation_in_flight
     if generation_in_flight:
@@ -201,7 +177,7 @@ async def deliver_selfie(
         return
     generation_in_flight = True
     try:
-        scene = await write_selfie_scene(request_text, current_activity)
+        scene = await write_selfie_scene(request_text)
         if scene is None:
             await send_excuse(bot, chat_id, reply_to_msg_id)
             return
