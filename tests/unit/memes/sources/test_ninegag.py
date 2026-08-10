@@ -71,7 +71,6 @@ class TestParseNinegag:
         assert result == [MemeCandidate(
             key="9gag:xyz",
             image_url="https://9cache.com/photo/xyz_700b.jpg",
-            caption="Cat meme",
         )]
 
     def test_skips_animated_and_video_posts(self):
@@ -101,12 +100,6 @@ class TestParseNinegag:
         payload = make_payload([post])
         result = ninegag.parse_ninegag(payload)
         assert result[0].key == "9gag:https://9cache.com/photo/fallback.jpg"
-
-    def test_missing_title_yields_empty_caption(self):
-        post = make_post()
-        del post["title"]
-        result = ninegag.parse_ninegag(make_payload([post]))
-        assert result[0].caption == ""
 
     def test_empty_payload_returns_empty_list(self):
         assert ninegag.parse_ninegag({}) == []

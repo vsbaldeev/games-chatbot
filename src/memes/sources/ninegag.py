@@ -32,7 +32,6 @@ def parse_ninegag(payload: dict) -> list[MemeCandidate]:
         candidates.append(MemeCandidate(
             key=f"9gag:{post.get('id') or image_url}",
             image_url=image_url,
-            caption=post.get("title", ""),
         ))
     return candidates
 

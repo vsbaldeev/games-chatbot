@@ -46,11 +46,9 @@ def parse_channel(html: str) -> list[MemeCandidate]:
         match = BACKGROUND_IMAGE_PATTERN.search(photo.get("style", ""))
         if not match:
             continue
-        text = message.select_one(".tgme_widget_message_text")
         candidates.append(MemeCandidate(
             key=f"tg:{message['data-post']}",
             image_url=match.group(1),
-            caption=text.get_text(strip=True) if text else "",
         ))
     return candidates
 

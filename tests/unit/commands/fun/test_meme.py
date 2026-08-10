@@ -63,16 +63,14 @@ class TestCmdMeme:
         update.message.reply_text.assert_awaited_once_with(NO_MEMES_TEXT)
         update.message.reply_photo.assert_not_called()
 
-    async def test_happy_path_uploads_downloaded_bytes_and_logs_message(self):
+    async def test_happy_path_uploads_vetted_bytes_and_logs_message(self):
         update = make_update()
-        with patch("src.commands.fun.meme.get_meme",
-                   AsyncMock(return_value=("https://img/x.jpg", "funny"))), \
-             patch("src.commands.fun.meme.download_image", AsyncMock(return_value=b"JPEGDATA")), \
+        with patch("src.commands.fun.meme.get_meme", AsyncMock(return_value=b"JPEGDATA")), \
              patch("src.commands.fun.meme.unified_messages") as unified:
             unified.insert = AsyncMock()
-            unified.format_photo_content = MagicMock(return_value="[photo] funny")
+            unified.format_photo_content = MagicMock(return_value="[photo]")
             await meme.cmd_meme(update, make_context())
-        update.message.reply_photo.assert_awaited_once_with(b"JPEGDATA", caption="funny")
+        update.message.reply_photo.assert_awaited_once_with(b"JPEGDATA")
         unified.insert.assert_awaited_once()
         insert_kwargs = unified.insert.call_args.kwargs
         assert insert_kwargs["chat_id"] == CHAT_ID
@@ -81,33 +79,20 @@ class TestCmdMeme:
         assert insert_kwargs["file_id"] == "file-xyz"
         assert insert_kwargs["reply_to_msg_id"] == 100
 
-    async def test_empty_caption_is_sent_as_none(self):
+    async def test_history_records_photo_without_a_caption(self):
         update = make_update()
-        with patch("src.commands.fun.meme.get_meme",
-                   AsyncMock(return_value=("https://img/x.jpg", ""))), \
-             patch("src.commands.fun.meme.download_image", AsyncMock(return_value=b"JPEGDATA")), \
+        with patch("src.commands.fun.meme.get_meme", AsyncMock(return_value=b"JPEGDATA")), \
              patch("src.commands.fun.meme.unified_messages") as unified:
             unified.insert = AsyncMock()
             unified.format_photo_content = MagicMock(return_value="[photo]")
             await meme.cmd_meme(update, make_context())
-        update.message.reply_photo.assert_awaited_once_with(b"JPEGDATA", caption=None)
-
-    async def test_download_failure_sends_error_text(self):
-        update = make_update()
-        with patch("src.commands.fun.meme.get_meme",
-                   AsyncMock(return_value=("https://img/x.jpg", "funny"))), \
-             patch("src.commands.fun.meme.download_image", AsyncMock(return_value=None)):
-            await meme.cmd_meme(update, make_context())
-        update.message.reply_text.assert_awaited_once_with(SEND_FAILED_TEXT)
-        update.message.reply_photo.assert_not_called()
+        unified.format_photo_content.assert_called_once_with(None)
 
     async def test_send_failure_sends_error_text(self):
         update = make_update()
         update.message.reply_photo = AsyncMock(side_effect=RuntimeError("telegram down"))
-        with patch("src.commands.fun.meme.get_meme",
-                   AsyncMock(return_value=("https://img/x.jpg", "funny"))), \
-             patch("src.commands.fun.meme.download_image", AsyncMock(return_value=b"JPEGDATA")), \
+        with patch("src.commands.fun.meme.get_meme", AsyncMock(return_value=b"JPEGDATA")), \
              patch("src.commands.fun.meme.unified_messages") as unified:
-            unified.format_photo_content = MagicMock(return_value="[photo] funny")
+            unified.format_photo_content = MagicMock(return_value="[photo]")
             await meme.cmd_meme(update, make_context())
         update.message.reply_text.assert_awaited_once_with(SEND_FAILED_TEXT)

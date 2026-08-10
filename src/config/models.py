@@ -106,6 +106,19 @@ IMAGEGEN_CANDIDATES = 3
 PHOTO_JUDGE_PASS_SCORE = 7
 PHOTO_JUDGE_MAX_TOKENS = 150
 
+# Meme vetting gate (src/memes/judge.py). Scraped Telegram channels serve the
+# channel author's own posts — donation appeals, ads, "I'm back" announcements —
+# in markup identical to a meme post, so the source parser cannot tell them
+# apart and a vision judge scores the image itself before it is sent.
+# The same score also covers standalone-ness: captions are never reposted, so a
+# photo whose joke lives in the source channel's caption must not ship either.
+# ATTEMPTS bounds the worst case at 3 downloads + 3 vision calls per send; a
+# judge outage aborts the loop early rather than spending the remaining budget
+# on a judge that is known to be down (see fetcher.get_meme).
+MEME_JUDGE_MAX_TOKENS = 50  # the verdict is just {"score": N}
+MEME_JUDGE_PASS_SCORE = 7
+MEME_JUDGE_ATTEMPTS = 3
+
 # Chat-requested selfie scene writer (src/life/selfie.py). One small call
 # turning a member's Russian photo request into an English scene line. No
 # fallback chain: a failure degrades to a canned in-character excuse. llama

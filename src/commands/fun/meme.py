@@ -4,39 +4,44 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src import config, log
-from src.memes.fetcher import download_image, get_meme
+from src.memes.fetcher import get_meme
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
 
 async def cmd_meme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send one vetted meme in reply to /meme, with no caption.
+
+    ``get_meme`` now absorbs downloading and vision vetting, so an exhausted
+    pool, a failed download and a rejected candidate all arrive here as the
+    same ``None`` and share the one fallback message.
+
+    Args:
+        update: The incoming Telegram update carrying the command.
+        context: Telegram context, used for the bot's own id in history.
+    """
     if not update.message:
         return
     chat_id = update.effective_chat.id
     await update.message.chat.send_action("upload_photo")
-    result = await get_meme(chat_id)
-    if result is None:
+    image = await get_meme(chat_id)
+    if image is None:
         await update.message.reply_text("Мемы закончились — загляни попозже.")
         return
-    image_url, caption = result
-    image = await download_image(image_url)
-    if image is None:
-        await update.message.reply_text("Не смог отправить мем — попробуй ещё раз.")
-        return
     try:
-        sent = await update.message.reply_photo(image, caption=caption or None)
+        sent = await update.message.reply_photo(image)
         file_id = sent.photo[-1].file_id if sent.photo else None
         await unified_messages.insert(
             chat_id=chat_id,
             message_id=sent.message_id,
             user_id=context.bot.id,
             username=config.BOT_USERNAME,
-            content=unified_messages.format_photo_content(caption),
+            content=unified_messages.format_photo_content(None),
             media_type="photo",
             reply_to_msg_id=update.message.message_id,
             file_id=file_id,
         )
     except Exception as error:
-        logger.error("Failed to send meme %s in chat %s: %s", image_url, chat_id, error)
+        logger.error("Failed to send meme in chat %s: %s", chat_id, error)
         await update.message.reply_text("Не смог отправить мем — попробуй ещё раз.")

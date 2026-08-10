@@ -79,18 +79,16 @@ def page(*messages: str) -> str:
 # ---------------------------------------------------------------------------
 
 class TestParseChannel:
-    def test_extracts_key_url_and_caption(self):
+    def test_extracts_key_and_url(self):
         result = telegram.parse_channel(page(PHOTO_MESSAGE))
         assert len(result) == 1
         candidate = result[0]
         assert candidate.key == "tg:ru2ch/171337"
         assert candidate.image_url == "https://cdn4.telesco.pe/file/PHOTO1"
-        assert candidate.caption == "Подпись один"
 
-    def test_photo_without_text_has_empty_caption(self):
+    def test_photo_without_text_is_still_extracted(self):
         result = telegram.parse_channel(page(PHOTO_WITHOUT_TEXT))
         assert len(result) == 1
-        assert result[0].caption == ""
         assert result[0].image_url == "https://cdn4.telesco.pe/file/PHOTO2"
 
     def test_skips_video_messages(self):

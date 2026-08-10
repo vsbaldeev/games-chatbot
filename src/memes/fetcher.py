@@ -1,15 +1,20 @@
-"""Fetches meme image URLs from public sources and returns one unseen per chat.
+"""Fetches memes from public sources and returns one vetted, unseen image per chat.
 
 Sources (9gag, public Telegram channels) are read without any API key or login;
-see :mod:`src.memes.sources`. Each yields direct image URLs, so the meme is sent
-by URL while deduplication is keyed on a stable per-post identifier.
+see :mod:`src.memes.sources`. Deduplication is keyed on a stable per-post
+identifier rather than the CDN URL, which can rotate.
+
+Candidates are downloaded here rather than by the caller because the vision
+gate in :mod:`src.memes.judge` needs the bytes anyway — so ``get_meme`` hands
+back the image itself, already vetted.
 """
 
 import random
 
 import httpx
 
-from src import log
+from src import config, log
+from src.memes.judge import score_meme
 from src.memes.sources import SOURCES, MemeCandidate
 from src.memes.sources.base import BROWSER_HEADERS
 from src.memes.store import get_seen_urls, mark_seen
@@ -58,15 +63,64 @@ async def gather_candidates() -> list[MemeCandidate]:
     return candidates
 
 
-async def get_meme(chat_id: int) -> tuple[str, str] | None:
-    """Pick a random meme not yet sent to the given chat.
+class JudgeUnavailable(Exception):
+    """The vision judge returned no verdict, so nothing may be sent.
+
+    Distinct from a rejection: a rejection is a decision about the candidate,
+    this is the absence of one. It aborts the vetting loop rather than
+    advancing it — see :func:`get_meme`.
+    """
+
+
+async def vet_candidate(chat_id: int, candidate: MemeCandidate) -> bytes | None:
+    """Download one candidate and put it past the vision gate.
+
+    A candidate the judge rules on is marked seen either way: a reject is
+    burned permanently so the same non-meme never costs a second download and
+    vision call. A failed download is not marked — a CDN hiccup says nothing
+    about the image.
+
+    Args:
+        chat_id: Telegram chat the meme is destined for.
+        candidate: The candidate to download and score.
+
+    Returns:
+        The image bytes when it passed, or ``None`` when it should be skipped
+        because the download failed or the judge rejected it.
+
+    Raises:
+        JudgeUnavailable: The judge produced no verdict.
+    """
+    image = await download_image(candidate.image_url)
+    if image is None:
+        return None
+    score = await score_meme(image)
+    if score is None:
+        raise JudgeUnavailable(candidate.key)
+    await mark_seen(chat_id, candidate.key)
+    if score >= config.MEME_JUDGE_PASS_SCORE:
+        return image
+    logger.info("Rejected non-meme %s for chat %s (score %s)", candidate.key, chat_id, score)
+    return None
+
+
+async def get_meme(chat_id: int) -> bytes | None:
+    """Pick, download and vet a meme not yet sent to the given chat.
+
+    Candidates are gathered once and re-picked from that batch, so a retry
+    never re-scrapes the sources.
+
+    A judge outage aborts the whole loop and marks nothing seen: an outage is
+    not a verdict, and continuing would burn the remaining attempts on a judge
+    already known to be down while permanently consuming good candidates.
 
     Args:
         chat_id: Telegram chat the meme is destined for.
 
     Returns:
-        An ``(image_url, caption)`` pair for an unseen meme, or ``None`` when no
-        candidates could be fetched or all of them were already sent here.
+        The vetted image bytes, or ``None`` when nothing could be fetched,
+        everything was already sent here, no candidate passed within
+        ``MEME_JUDGE_ATTEMPTS`` tries, or the judge was unavailable.
     """
     try:
         candidates = await gather_candidates()
@@ -75,10 +129,17 @@ async def get_meme(chat_id: int) -> tuple[str, str] | None:
         return None
 
     seen = await get_seen_urls(chat_id)
-    unseen = [candidate for candidate in candidates if candidate.key not in seen]
-    if not unseen:
-        return None
-
-    chosen = random.choice(unseen)
-    await mark_seen(chat_id, chosen.key)
-    return chosen.image_url, chosen.caption
+    pool = [candidate for candidate in candidates if candidate.key not in seen]
+    for attempt in range(config.MEME_JUDGE_ATTEMPTS):
+        if not pool:
+            break
+        chosen = pool.pop(random.randrange(len(pool)))
+        try:
+            image = await vet_candidate(chat_id, chosen)
+        except JudgeUnavailable:
+            logger.warning("Meme judge unavailable on attempt %s for chat %s — sending nothing",
+                           attempt + 1, chat_id)
+            return None
+        if image is not None:
+            return image
+    return None

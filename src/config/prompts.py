@@ -253,6 +253,36 @@ PHOTO_JUDGE_SYSTEM = (
     '{"score": N}'
 )
 
+# Meme vetting gate (src/memes/judge.py). English: the judge reasons about the
+# image, not in the chat's voice. One score, not two, because the send decision
+# is binary and both properties are required for a candidate to ship — a
+# donation banner fails the first, a photo whose punchline sits in the source
+# channel's caption fails the second. The channels are mostly Russian, so the
+# prompt says outright that in-image Cyrillic still counts as a joke: the
+# expensive failure here is rejecting real memes the model half-reads.
+MEME_JUDGE_SYSTEM = (
+    "You decide whether an image is a meme that can be posted to a group chat "
+    "on its own, with no caption under it.\n"
+    "Score 0-10 on both properties at once:\n"
+    "- It is a joke. Not a donation or fundraising appeal, not an ad or "
+    "subscription plug, not a channel announcement or greeting from an author, "
+    "not a news screenshot, not a product photo, not someone's ordinary "
+    "personal photo.\n"
+    "- It stands alone. The joke is fully inside the frame. An image that is "
+    "only funny given text posted beneath it, or that continues an earlier "
+    "post, does not stand alone.\n"
+    "9-10 clearly a joke and fully self-contained; 6-8 a joke but the humour is "
+    "thin or leans slightly on missing context; 3-5 unclear, or it needs the "
+    "caption to work; 0-2 not a joke at all — an appeal, ad, announcement or "
+    "plain photo.\n"
+    "Text inside the image is normal for memes and does not lower the score. "
+    "Most of these memes are in Russian; an image whose Cyrillic text you can "
+    "only partly read is still a meme if it is laid out like one. "
+    "Judge the image alone — no caption is provided, because none will be sent. "
+    "Answer with strictly one JSON object, no other text: "
+    '{"score": N}'
+)
+
 # Chat-requested selfie scene writer (src/life/selfie.py). English, like the
 # other image-model-adjacent text: the output is a generation prompt. Same
 # contract as the episode writer's image_prompt — the character descriptor

@@ -93,7 +93,10 @@ Engagement wind-down engine (src/pipeline/filter_node.py + engagement_gate.py)
 
 # /meme
 
-Sends a random Russian-language meme image with its post title as caption.
+Sends a random meme image, vetted by a vision judge and with **no caption**.
+
+The source channel's caption is never reposted — it belongs to that channel,
+not to the bot — so the judge also requires the joke to work without one.
 
 ## Source
 
@@ -118,9 +121,13 @@ Telegram: message has no single embedded photo (video thumbnails, link
           previews, galleries) → skip
 ```
 
+Markup-level filtering cannot tell a meme from the channel author's own photo
+post — a donation appeal, an ad, an announcement all look identical here. The
+vision gate below is what separates them; see `src/memes/README.md`.
+
 ## Deduplication
 
-Sent meme URLs are recorded in the `sent_memes` table keyed by `(chat_id, url)`. Each chat has its own independent pool. Once all fetched posts for a chat have been sent, the command replies with a text message instead.
+Dedup keys are recorded in the `sent_memes` table keyed by `(chat_id, url)`. Each chat has its own independent pool. A candidate the judge rejects is recorded too, so the same non-meme never costs a second download and vision call. Once the pool is exhausted, the command replies with a text message instead.
 
 ## Flow
 
@@ -129,7 +136,10 @@ Sent meme URLs are recorded in the `sent_memes` table keyed by `(chat_id, url)`.
   → gather_candidates(): fetch from every registered source (9gag + Telegram channels)
   → each source already filtered to single-image, non-NSFW candidates
   → exclude candidates already in sent_memes for this chat
-  → pick random candidate
-  → INSERT into sent_memes
-  → reply_photo(image_url, caption=title)
+  → up to MEME_JUDGE_ATTEMPTS times:
+      pick random candidate → download bytes → judge.score_meme()
+      judge unavailable → abort, send nothing, mark nothing
+      score < pass       → INSERT into sent_memes, try the next one
+      score >= pass      → INSERT into sent_memes, ship it
+  → reply_photo(image_bytes)          # no caption
 ```

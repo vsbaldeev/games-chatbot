@@ -25,7 +25,6 @@ def assert_valid_candidate(candidate) -> None:
     """Assert a candidate has a stable key and an https image URL."""
     assert candidate.key
     assert candidate.image_url.startswith("https://")
-    assert isinstance(candidate.caption, str)
 
 
 class TestNinegagLive:
