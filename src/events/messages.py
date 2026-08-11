@@ -1,7 +1,6 @@
 """Message handlers — text, voice, photo, sticker, video."""
 
 import datetime
-import io
 import random
 import re
 import time
@@ -24,6 +23,7 @@ from src.agent import (
 )
 from src.pipeline import canonical
 from src.pipeline.graph import build_pipeline
+from src.events.link_repost import deliver_link_message, resolve_link_delivery
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
@@ -207,33 +207,15 @@ def build_pipeline_state(
     }
 
 
-async def try_send_downloaded_video(msg, video_bytes: bytes) -> None:
-    """Best-effort post of a downloaded video before the text reply.
-
-    Args:
-        msg: The triggering ``telegram.Message`` to reply to.
-        video_bytes: The downloaded video payload — an Instagram Reel or a
-            YouTube Short (long-form YouTube never attaches video).
-
-    Never raises: a failed upload (size, format, network) is logged and
-    swallowed so the text reply that follows is never blocked on it.
-    """
-    try:
-        await msg.reply_video(video=io.BytesIO(video_bytes))
-    except Exception as err:
-        logger.warning("Downloaded video send failed, continuing with text only: %s", err)
-
-
 async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int, int | None, str]:
     """Send the pipeline response to Telegram.
 
     Normal responses reply to the triggering message; when the trigger was a
     voice message or video note the reply goes out in kind as a voice note,
-    degrading to text on any synthesis failure. A social-link trigger with a
-    downloaded video (``final_state["social_link_video"]``, Instagram Reel
-    only) or a YouTube Shorts trigger with a downloaded video
-    (``final_state["youtube_short_video"]``) posts that video first —
-    best-effort, never blocking the text reply that follows.
+    degrading to text on any synthesis failure. A link trigger (social link
+    or YouTube Short) whose fetch succeeded is delegated to
+    :mod:`src.events.link_repost`, which posts video + summary as one message
+    and deletes the original when it was a bare link.
 
     Args:
         final_state: Pipeline state after the graph run.
@@ -250,12 +232,17 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
         await notification_msg.edit_text(clean)
         return notification_msg.message_id, msg.message_id, "text"
     await msg.chat.send_action("typing")
-    social_link_video = final_state.get("social_link_video")
-    if social_link_video:
-        await try_send_downloaded_video(msg, social_link_video)
-    youtube_short_video = final_state.get("youtube_short_video")
-    if youtube_short_video:
-        await try_send_downloaded_video(msg, youtube_short_video)
+    link_delivery = resolve_link_delivery(final_state)
+    if link_delivery is not None:
+        video, url = link_delivery
+        return await deliver_link_message(
+            msg,
+            summary=clean,
+            video=video,
+            username=final_state["incoming"]["username"],
+            url=url,
+            is_bare=bool(final_state.get("link_message_is_bare")),
+        )
     if final_state["incoming"]["media_type"] in VOICE_REPLY_TRIGGER_MEDIA_TYPES:
         voice_message = await try_send_voice_reply(msg, clean)
         if voice_message is not None:
