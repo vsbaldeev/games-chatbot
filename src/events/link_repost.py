@@ -11,6 +11,7 @@ check. If the send fails the original message stays and the summary still goes
 out as a plain text reply — the download and LLM spend already happened.
 """
 
+import io
 import re
 
 from src import log
@@ -105,3 +106,103 @@ async def fit_caption(summary: str, username: str | None, url: str | None) -> st
         return caption
     logger.warning("Caption still over the limit after compression, truncating")
     return build_caption(truncate_at_sentence(compressed, budget), username, url)
+
+
+async def send_combined(msg, caption: str, video: bytes | None, anchored: bool):
+    """Send the one combined message, as a reply or on its own.
+
+    Args:
+        msg: The triggering ``telegram.Message``.
+        caption: Caption for the video, or the whole body when there is none.
+        video: Downloaded video bytes, or None for a text-only link.
+        anchored: True to reply to ``msg``, False to post un-anchored because
+            ``msg`` is about to be deleted.
+
+    Returns:
+        Tuple of the sent ``telegram.Message`` and its media type.
+
+    Raises:
+        Exception: Whatever the Bot API raises on a failed send; the caller
+            turns that into the text fallback.
+    """
+    if video:
+        payload = io.BytesIO(video)
+        if anchored:
+            return await msg.reply_video(video=payload, caption=caption), "video"
+        return await msg.chat.send_video(video=payload, caption=caption), "video"
+    if anchored:
+        return await msg.reply_text(caption), "text"
+    return await msg.chat.send_message(caption), "text"
+
+
+async def try_delete_original(msg) -> None:
+    """Delete the user's link message, tolerating a missing permission.
+
+    Deleting another member's message needs the bot to be an admin with
+    ``can_delete_messages``. Without it the chat is merely left with a
+    redundant link — the summary is already delivered, so there is nothing to
+    roll back.
+
+    Args:
+        msg: The triggering ``telegram.Message`` to remove.
+    """
+    try:
+        await msg.delete()
+    except Exception as error:
+        logger.warning("Could not delete the original link message: %s", error)
+
+
+async def deliver_link_message(
+    msg, *, summary: str, video: bytes | None, username: str,
+    url: str | None, is_bare: bool,
+) -> tuple[int, int | None, str]:
+    """Deliver a link summary as one message, deleting the original if bare.
+
+    Args:
+        msg: The triggering ``telegram.Message``.
+        summary: Markdown-stripped summary produced by the pipeline.
+        video: Downloaded video bytes, or None (long-form YouTube, or a
+            failed download).
+        username: Sender's display name, credited only when deleting.
+        url: Canonical link, carried only when deleting.
+        is_bare: True when the message was the link and nothing else, which
+            is the only case where deleting it destroys nothing.
+
+    Returns:
+        Tuple of the sent message id, the message id it is anchored to (None
+        when un-anchored), and the sent media type.
+    """
+    caption = await fit_caption(
+        summary, username if is_bare else None, url if is_bare else None
+    )
+    try:
+        sent, media_type = await send_combined(msg, caption, video, anchored=not is_bare)
+    except Exception as error:
+        logger.warning("Combined link message failed, replying with text: %s", error)
+        fallback = await msg.reply_text(summary)
+        return fallback.message_id, msg.message_id, "text"
+    if not is_bare:
+        return sent.message_id, msg.message_id, media_type
+    await try_delete_original(msg)
+    return sent.message_id, None, media_type
+
+
+def resolve_link_delivery(final_state) -> tuple[bytes | None, str | None] | None:
+    """Pull the link-repost inputs out of the finished pipeline state.
+
+    Returns None unless the trigger was a link *and* the fetch produced a
+    content block — a failed download or fetch leaves the user's message
+    alone rather than trading it for an empty summary.
+
+    Args:
+        final_state: Pipeline state after the graph run.
+
+    Returns:
+        ``(video_bytes, canonical_url)`` for a deliverable link, else None.
+    """
+    trigger = final_state.get("response_trigger")
+    if trigger == "youtube_short" and final_state.get("youtube_short_content"):
+        return final_state.get("youtube_short_video"), final_state.get("youtube_short_url")
+    if trigger == "social_link" and final_state.get("social_link_content"):
+        return final_state.get("social_link_video"), final_state.get("social_link_url")
+    return None
