@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.events.link_repost import (
     CAPTION_LIMIT,
     build_caption,
@@ -148,6 +150,17 @@ class TestDeliverLinkMessageBare:
         )
         assert (sent_id, anchored_to, media_type) == (903, None, "video")
 
+    async def test_missing_url_keeps_the_original_despite_is_bare_true(self):
+        msg = make_msg()
+        sent_id, anchored_to, media_type = await deliver_link_message(
+            msg, summary="Про котиков.", video=b"bytes", username="vasya",
+            url=None, is_bare=True,
+        )
+        msg.reply_video.assert_awaited_once()
+        msg.chat.send_video.assert_not_awaited()
+        msg.delete.assert_not_awaited()
+        assert (sent_id, anchored_to, media_type) == (901, 55, "video")
+
 
 class TestDeliverLinkMessageNotBare:
     async def test_replies_with_video_and_keeps_the_original(self):
@@ -168,6 +181,28 @@ class TestDeliverLinkMessageNotBare:
             url="https://youtu.be/abc", is_bare=False,
         )
         assert msg.reply_video.await_args.kwargs["caption"] == "Про котиков."
+
+    async def test_send_failure_keeps_the_original_and_replies_with_text(self):
+        msg = make_msg()
+        msg.reply_video = AsyncMock(side_effect=RuntimeError("upload failed"))
+        sent_id, anchored_to, media_type = await deliver_link_message(
+            msg, summary="Про котиков.", video=b"bytes", username="vasya",
+            url="https://youtu.be/abc", is_bare=False,
+        )
+        msg.delete.assert_not_awaited()
+        msg.reply_text.assert_awaited_once_with("Про котиков.")
+        assert (sent_id, anchored_to, media_type) == (902, 55, "text")
+
+    async def test_text_only_send_failure_propagates_instead_of_retrying(self):
+        msg = make_msg()
+        msg.reply_text = AsyncMock(side_effect=RuntimeError("flood control"))
+        with pytest.raises(RuntimeError, match="flood control"):
+            await deliver_link_message(
+                msg, summary="Про котиков.", video=None, username="vasya",
+                url="https://youtu.be/abc", is_bare=False,
+            )
+        msg.delete.assert_not_awaited()
+        msg.reply_text.assert_awaited_once_with("Про котиков.")
 
 
 class TestResolveLinkDelivery:

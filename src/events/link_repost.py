@@ -152,6 +152,30 @@ async def try_delete_original(msg) -> None:
         logger.warning("Could not delete the original link message: %s", error)
 
 
+def resolve_bare_deletion(is_bare: bool, url: str | None) -> bool:
+    """Downgrade a bare deletion to a kept original when the URL is missing.
+
+    A missing canonical URL means deleting the trigger message would strand
+    the link nowhere in the chat, so a bare delete is only allowed when both
+    conditions hold.
+
+    Args:
+        is_bare: Whether the trigger message was the link and nothing else.
+        url: Canonical link resolved for this trigger, or None.
+
+    Returns:
+        ``is_bare`` unchanged, unless it was True with no URL, in which case
+        False.
+    """
+    if is_bare and url is None:
+        logger.warning(
+            "Bare link message has no canonical URL; keeping the original "
+            "instead of deleting it and losing the link"
+        )
+        return False
+    return is_bare
+
+
 async def deliver_link_message(
     msg, *, summary: str, video: bytes | None, username: str,
     url: str | None, is_bare: bool,
@@ -161,23 +185,30 @@ async def deliver_link_message(
     Args:
         msg: The triggering ``telegram.Message``.
         summary: Markdown-stripped summary produced by the pipeline.
-        video: Downloaded video bytes, or None (long-form YouTube, or a
-            failed download).
+        video: Downloaded video bytes, or None (long-form YouTube, or a failed download).
         username: Sender's display name, credited only when deleting.
-        url: Canonical link, carried only when deleting.
-        is_bare: True when the message was the link and nothing else, which
-            is the only case where deleting it destroys nothing.
+        url: Canonical link, carried only when deleting; see :func:`resolve_bare_deletion`.
+        is_bare: True when the message was the link and nothing else.
 
     Returns:
-        Tuple of the sent message id, the message id it is anchored to (None
-        when un-anchored), and the sent media type.
+        On success: sent message id, anchor id (None when un-anchored), and media
+        type. On a send failure that falls back to text: fallback id,
+        ``msg.message_id``, and ``"text"`` — always, since no delete follows one.
+
+    Raises:
+        Exception: Re-raised when the failed send was already the anchored text reply.
     """
+    is_bare = resolve_bare_deletion(is_bare, url)
     caption = await fit_caption(
         summary, username if is_bare else None, url if is_bare else None
     )
     try:
         sent, media_type = await send_combined(msg, caption, video, anchored=not is_bare)
     except Exception as error:
+        if video is None and not is_bare:
+            # This failed call was already the anchored text reply; retrying
+            # it would just raise again. Let the caller handle it.
+            raise
         logger.warning("Combined link message failed, replying with text: %s", error)
         fallback = await msg.reply_text(summary)
         return fallback.message_id, msg.message_id, "text"
