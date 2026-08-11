@@ -433,16 +433,11 @@ WEEKLY_ROLES_RULE = (
     "не выдумывай.]"
 )
 
-# Framing for a YouTube Shorts trigger when nothing could be extracted (the
-# dedup/cap gate passed but the download or transcription failed) — no video
-# was posted, so retell in 1-2 sentences and summarize the audience reaction
-# from the top comments. No verdict: for Shorts the worker is skipped, so
-# nothing here is tool-verified, and judging the video invites the model to
-# lean on its own stale world knowledge (e.g. declaring a device shown in the
-# video "not released yet"). This is the fallback role — mirrors
-# SOCIAL_LINK_RETELL_INSTRUCTION's fallback role for a failed Instagram
-# download. SHORTS_TRIGGER_REACT_INSTRUCTION below is used instead once the
-# video actually downloads and posts to chat.
+# Framing for a YouTube Shorts trigger. The reply is posted as the caption on
+# the downloaded video itself (src/events/link_repost.py), so it is read
+# BEFORE anyone watches — retell, never react. The character budget keeps the
+# common case inside Telegram's 1024-char caption limit without needing the
+# compression pass in src/agent/compress.py.
 SHORTS_TRIGGER_INSTRUCTION = (
     "скинул ссылку на YouTube Shorts. Ниже — его текст и то, что удалось "
     "вытащить из ролика (расшифровка звука и описание кадров могут быть "
@@ -452,45 +447,14 @@ SHORTS_TRIGGER_INSTRUCTION = (
     "«смотреть или нет». Опирайся только на материалы ниже: не выдумывай "
     "детали, которых там нет, и не проверяй факты из ролика по своим знаниям — "
     "они могут устареть; никогда не утверждай, что показанное в ролике не "
-    "существует или ещё не вышло. Если материала мало — так и скажи"
+    "существует или ещё не вышло. Если материала мало — так и скажи. Твой "
+    "текст уйдёт подписью под само видео, поэтому уложись в 600 символов"
 )
 
-# Framing for a YouTube Shorts trigger when the download+analysis succeeded
-# and the video is already posted to chat above this reply — react to it,
-# don't retell it, mirroring SOCIAL_LINK_REACT_INSTRUCTION but pointed at the
-# Whisper transcript/vision frame material instead of a caption. Same
-# no-verdict, no-fact-checking guardrails as the retell variant above.
-SHORTS_TRIGGER_REACT_INSTRUCTION = (
-    "скинул ссылку на YouTube Shorts, видео из которого уже отправлено в чат "
-    "выше. Ниже — то, что удалось вытащить из ролика (расшифровка звука и "
-    "описание кадров могут быть неполными или ошибаться в деталях). "
-    "Отреагируй на видео, не пересказывай — его уже все видели. Если есть "
-    "блок топ-комментариев — переведи их на русский и добавь 1 предложение о "
-    "реакции зрителей: общее настроение и за что зацепились. Не давай вердикт "
-    "«смотреть или нет». Опирайся только на материалы ниже: не выдумывай "
-    "детали, которых там нет, и не проверяй факты из ролика по своим знаниям — "
-    "они могут устареть; никогда не утверждай, что показанное в ролике не "
-    "существует или ещё не вышло. Если материала мало — так и скажи"
-)
-
-# Framing for a social-link trigger (Instagram Reel / long-form YouTube
-# video) when a downloaded video is already posted to chat above this
-# reply — react to it, do not retell it, mirroring the ordinary media framing
-# in MEDIA_TRIGGER_LABELS above but pointed at fetched caption/comments text
-# instead of a vision description.
-SOCIAL_LINK_REACT_INSTRUCTION = (
-    "скинул ссылку, видео из которой уже отправлено в чат выше. Ниже — подпись "
-    "и то, что удалось вытащить (может быть неполным или ошибаться в деталях). "
-    "Отреагируй на видео и подпись, не пересказывай — оно уже все видели. Если "
-    "есть блок топ-комментариев — переведи их на русский и в 1 предложении "
-    "передай реакцию зрителей. Не давай вердикт «смотреть или нет». Опирайся "
-    "только на материалы ниже: не выдумывай детали и не проверяй факты по "
-    "своим знаниям — они могут устареть. Если материала мало — так и скажи"
-)
-
-# Framing for a social-link trigger when there is no video to show
-# (Instagram/YouTube when nothing downloadable was available) — nobody has
-# seen this, so retell it, same principle as SHORTS_TRIGGER_INSTRUCTION.
+# Framing for a social-link trigger (Instagram Reel / long-form YouTube). Same
+# reasoning as SHORTS_TRIGGER_INSTRUCTION: the reply is the caption on the
+# reposted video, or the body of the single message that replaces the user's
+# link, so it always retells rather than reacts.
 SOCIAL_LINK_RETELL_INSTRUCTION = (
     "скинул ссылку. Ниже — то, что удалось вытащить (может быть неполным или "
     "ошибаться в деталях). В 1–2 предложениях перескажи, о чём это. Если есть "
@@ -498,7 +462,8 @@ SOCIAL_LINK_RETELL_INSTRUCTION = (
     "реакции: общее настроение и за что зацепились. Не давай вердикт «смотреть "
     "или нет». Опирайся только на материалы ниже: не выдумывай детали, которых "
     "там нет, и не проверяй факты по своим знаниям — они могут устареть. Если "
-    "материала мало — так и скажи"
+    "материала мало — так и скажи. Твой текст уйдёт подписью под само видео, "
+    "поэтому уложись в 600 символов"
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

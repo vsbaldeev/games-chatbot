@@ -10,8 +10,6 @@ from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
 from src.config.prompts import (
     SHORTS_TRIGGER_INSTRUCTION,
-    SHORTS_TRIGGER_REACT_INSTRUCTION,
-    SOCIAL_LINK_REACT_INSTRUCTION,
     SOCIAL_LINK_RETELL_INSTRUCTION,
     USER_FACTS_HEADER,
     WEEKLY_ROLES_RULE,
@@ -197,40 +195,9 @@ def build_mentioned_tags_lines(context) -> list[str]:
     return lines
 
 
-def select_shorts_instruction(video_present: bool) -> str:
-    """Pick the Shorts trigger's framing: react (video posted) or retell.
-
-    Args:
-        video_present: True when the Short downloaded successfully and will
-            be posted to chat before this reply.
-
-    Returns:
-        SHORTS_TRIGGER_REACT_INSTRUCTION or SHORTS_TRIGGER_INSTRUCTION.
-    """
-    if video_present:
-        return SHORTS_TRIGGER_REACT_INSTRUCTION
-    return SHORTS_TRIGGER_INSTRUCTION
-
-
-def select_social_link_instruction(social_link_video_present: bool) -> str:
-    """Pick the social-link trigger's framing: react (video posted) or retell.
-
-    Args:
-        social_link_video_present: True when an Instagram Reel video was
-            downloaded and will be posted to chat before this reply.
-
-    Returns:
-        SOCIAL_LINK_REACT_INSTRUCTION or SOCIAL_LINK_RETELL_INSTRUCTION.
-    """
-    if social_link_video_present:
-        return SOCIAL_LINK_REACT_INSTRUCTION
-    return SOCIAL_LINK_RETELL_INSTRUCTION
-
-
 def build_trigger_line(
     username: str, user_input: str, media_type: str, replied_to: dict | None,
-    response_trigger: str = "explicit", social_link_video_present: bool = False,
-    youtube_short_video_present: bool = False, voice_low_confidence: bool = False,
+    response_trigger: str = "explicit", voice_low_confidence: bool = False,
 ) -> str:
     """Build the final user-turn line, marking media so the model reacts to it.
 
@@ -239,10 +206,10 @@ def build_trigger_line(
     conditional on the words themselves giving reason to. Photo/video_note/
     video frame ``user_input`` as a description to *react* to, not retell —
     the chat already sees the original; joking there is likewise conditional,
-    never mandatory. A YouTube Shorts trigger picks between react and retell
-    framing depending on whether the downloaded video is actually posted to
-    chat, the same choice a social-link trigger makes for Instagram (see
-    :func:`select_shorts_instruction` / :func:`select_social_link_instruction`).
+    never mandatory. A YouTube Shorts or social-link trigger always uses
+    retell framing: the reply is posted as the caption on the video itself
+    (see :func:`src.events.link_repost`), so it is read before anyone
+    watches, never after.
 
     Args:
         username: Sender's username (without ``@``).
@@ -251,16 +218,8 @@ def build_trigger_line(
         media_type: ``"text"``, ``"photo"``, ``"voice"``, ``"video_note"``
             or ``"video"``.
         replied_to: The message being replied to, or ``None``.
-        response_trigger: Routing trigger; ``"youtube_short"`` selects react
-            or retell framing depending on ``youtube_short_video_present``;
-            ``"social_link"`` selects react or retell depending on
-            ``social_link_video_present``.
-        social_link_video_present: True when an Instagram Reel video was
-            downloaded and will be posted to chat before this reply —
-            selects the react framing instead of retell.
-        youtube_short_video_present: True when a YouTube Short's video was
-            downloaded and will be posted to chat before this reply —
-            selects the react framing instead of retell.
+        response_trigger: Routing trigger; ``"youtube_short"`` and
+            ``"social_link"`` select retell framing.
         voice_low_confidence: True when the voice transcript's mean Whisper
             confidence was low (see :func:`src.pipeline.ingester.transcribe_bytes`)
             — adds a note telling the model the transcription may be
@@ -273,11 +232,9 @@ def build_trigger_line(
     if replied_to:
         speaker = f"{speaker} (↳ {row_speaker(replied_to)})"
     if response_trigger == "youtube_short":
-        instruction = select_shorts_instruction(youtube_short_video_present)
-        return f"{speaker} {instruction}:\n{user_input}"
+        return f"{speaker} {SHORTS_TRIGGER_INSTRUCTION}:\n{user_input}"
     if response_trigger == "social_link":
-        instruction = select_social_link_instruction(social_link_video_present)
-        return f"{speaker} {instruction}:\n{user_input}"
+        return f"{speaker} {SOCIAL_LINK_RETELL_INSTRUCTION}:\n{user_input}"
     if media_type == "voice":
         return build_voice_trigger_line(speaker, user_input, voice_low_confidence)
     label = MEDIA_TRIGGER_LABELS.get(media_type)
@@ -459,8 +416,6 @@ def build_response_input(
     worker_tools_used: bool = False,
     photo_directive: str | None = None,
     meme_directive: str | None = None,
-    social_link_video_present: bool = False,
-    youtube_short_video_present: bool = False,
     voice_low_confidence: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
@@ -488,12 +443,6 @@ def build_response_input(
             :func:`build_directive_lines` — ``"refused"`` or None.
         photo_directive: Photo-request framing passed to
             :func:`build_directive_lines`, or None.
-        social_link_video_present: True when an Instagram Reel video was
-            downloaded and will be posted to chat before this reply; passed
-            straight through to :func:`build_trigger_line`.
-        youtube_short_video_present: True when a YouTube Short's video was
-            downloaded and will be posted to chat before this reply; passed
-            straight through to :func:`build_trigger_line`.
         voice_low_confidence: True when the voice transcript's mean Whisper
             confidence was low; passed straight through to
             :func:`build_trigger_line`.
@@ -528,8 +477,6 @@ def build_response_input(
     parts.append(
         build_trigger_line(
             username, user_input, media_type, replied_to, response_trigger,
-            social_link_video_present=social_link_video_present,
-            youtube_short_video_present=youtube_short_video_present,
             voice_low_confidence=voice_low_confidence,
         )
     )
@@ -687,8 +634,6 @@ class ResponseNode:
             worker_tools_used=bool(state.get("worker_tools_used")),
             photo_directive=resolve_photo_directive(state),
             meme_directive=resolve_meme_directive(state),
-            social_link_video_present=bool(state.get("social_link_video")),
-            youtube_short_video_present=bool(state.get("youtube_short_video")),
             voice_low_confidence=bool(state.get("voice_low_confidence")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]
