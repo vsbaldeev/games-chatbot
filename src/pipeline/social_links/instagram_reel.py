@@ -42,6 +42,7 @@ class InstagramReelHandler:
     """Downloads an Instagram Reel anonymously; caption + comments, best effort."""
 
     name = "instagram_reel"
+    pattern = INSTAGRAM_URL_RE
 
     def __init__(self) -> None:
         """Initialise this handler's own dedup and daily-cap gates."""

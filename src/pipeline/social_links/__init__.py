@@ -14,6 +14,7 @@ link, same platform or different, is ignored (design doc, "Multi-link
 messages").
 """
 
+import re
 from typing import Protocol, TypedDict
 
 from src.utils.ttl_gate import TtlGate
@@ -42,6 +43,7 @@ class LinkHandler(Protocol):
     """
 
     name: str
+    pattern: re.Pattern           # used by is_bare_link_message
     dedup_gate: TtlGate
     daily_cap_gate: TtlGate
     daily_cap: int
@@ -53,6 +55,54 @@ class LinkHandler(Protocol):
     async def fetch(self, url: str) -> SocialLinkContent | None:
         """Fetch and compose the content block, or None on any failure."""
         ...
+
+
+# Whole whitespace-delimited URL tokens. The platform patterns stop at the
+# video/reel id, so subtracting a bare pattern match would leave "?si=..."
+# or a trailing "/" behind and every real-world link would read as non-bare.
+# Removing the token the match sits inside is what handles those.
+LINK_TOKEN_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def drop_platform_links(text: str, pattern: re.Pattern) -> str:
+    """Remove whole URL tokens belonging to one platform.
+
+    Args:
+        text: Raw message text.
+        pattern: The compiled link pattern identifying the platform.
+
+    Returns:
+        The text with every URL token ``pattern`` matches removed. Links to
+        anywhere else are left in place, so a second, unrelated link still
+        counts as content the user would lose.
+    """
+    return LINK_TOKEN_RE.sub(
+        lambda token: "" if pattern.search(token.group(0)) else token.group(0), text
+    )
+
+
+def is_bare_link_message(text: str | None, pattern: re.Pattern) -> bool:
+    """Return whether the message is nothing but a link of this platform.
+
+    Removing the platform's URL tokens from the raw text must leave only
+    whitespace. Working on the raw text (not the canonical URL) is what
+    handles ``?si=`` tracking parameters, ``m.`` hosts, trailing slashes
+    and ``youtu.be`` short forms.
+
+    Deliberately fail-safe: any leftover — a word, an emoji, a second
+    link — counts as the user's own content and makes the message
+    non-bare, so the delete path never destroys something someone wrote.
+
+    Args:
+        text: Raw message text, or None.
+        pattern: The compiled link pattern that matched this message.
+
+    Returns:
+        True when the message carries the link and nothing else.
+    """
+    if not text:
+        return False
+    return not drop_platform_links(text, pattern).strip()
 
 
 def render_comment_lines(comments: list[dict], max_comments: int, char_limit: int) -> str:

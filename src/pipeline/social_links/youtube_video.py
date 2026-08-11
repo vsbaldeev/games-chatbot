@@ -41,6 +41,7 @@ class YoutubeVideoHandler:
     """Fetches a long-form YouTube video's description + top comments, no download."""
 
     name = "youtube_video"
+    pattern = YOUTUBE_VIDEO_URL_RE
 
     def __init__(self) -> None:
         """Initialise this handler's own dedup and daily-cap gates."""
