@@ -64,6 +64,7 @@ class BotState(TypedDict):
     social_link_url: NotRequired[str | None]        # canonical URL, set by Router
     social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester
     social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester
+    link_message_is_bare: NotRequired[bool]  # True when the triggering message was the link and nothing else; only then may the events layer delete it
     filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "PHOTO_REQUEST" | "MEME_REQUEST" | "SHORTS" | "SOCIAL_LINK", set by the filter node
     photo_request: NotRequired[bool]   # True when the filter accepted a photo request at the full tier; the events layer launches selfie generation after the ack is delivered
     meme_request: NotRequired[bool]    # True when the filter accepted a meme request at the full tier; the response is empty and the events layer sends the meme itself

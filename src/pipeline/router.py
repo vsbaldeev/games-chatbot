@@ -162,7 +162,9 @@ class MessageRouter:
 
         Returns:
             State update dict with the ``youtube_short`` trigger, or ``None``
-            when there is no Shorts link or a gate rejected it.
+            when there is no Shorts link or a gate rejected it. The update
+            also carries ``link_message_is_bare``, which decides whether the
+            events layer may delete the original message.
         """
         video_id = shorts.extract_video_id(msg["raw_text"])
         if video_id is None:
@@ -176,6 +178,9 @@ class MessageRouter:
             "should_respond": True,
             "response_trigger": "youtube_short",
             "youtube_short_url": shorts.extract_shorts_url(msg["raw_text"]),
+            "link_message_is_bare": social_links.is_bare_link_message(
+                msg["raw_text"], shorts.SHORTS_URL_RE
+            ),
         }
 
     def __detect_social_link(self, msg: IncomingMessage) -> dict | None:
@@ -217,6 +222,8 @@ class MessageRouter:
 
         Returns:
             State update dict on a gate pass, or None on a gate rejection.
+            The update also carries ``link_message_is_bare``, which decides
+            whether the events layer may delete the original message.
         """
         if handler.dedup_gate.seen((msg["chat_id"], handler.name, item_id)):
             logger.info(
@@ -236,6 +243,9 @@ class MessageRouter:
             "response_trigger": "social_link",
             "social_link_handler": handler.name,
             "social_link_url": canonical_url,
+            "link_message_is_bare": social_links.is_bare_link_message(
+                msg["raw_text"], handler.pattern
+            ),
         }
 
     def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:

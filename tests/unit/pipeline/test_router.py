@@ -168,6 +168,7 @@ class TestSocialLinkDetection:
             "response_trigger": "social_link",
             "social_link_handler": "instagram_reel",
             "social_link_url": "https://www.instagram.com/reel/RouterTest01/",
+            "link_message_is_bare": True,
         }
 
     def test_youtube_watch_link_triggers_social_link(self, router):
@@ -209,3 +210,41 @@ class TestSocialLinkDetection:
             )
         )
         assert router._MessageRouter__detect_social_link(combined_msg) is None
+
+
+class TestLinkMessageIsBare:
+    """Only a message that is nothing but a link may later be deleted.
+
+    Distinct link ids per test, same reason as TestSocialLinkDetection: the
+    dedup gates are module-level singletons shared across the session.
+    """
+
+    def test_bare_shorts_link_is_marked_bare(self, router):
+        msg = make_incoming(raw_text="https://www.youtube.com/shorts/RouterBare01")
+        result = router._MessageRouter__detect_shorts(msg)
+        assert result["response_trigger"] == "youtube_short"
+        assert result["link_message_is_bare"] is True
+
+    def test_shorts_link_with_user_text_is_not_bare(self, router):
+        msg = make_incoming(
+            raw_text="гляньте какая дичь https://www.youtube.com/shorts/RouterBare02"
+        )
+        result = router._MessageRouter__detect_shorts(msg)
+        assert result["link_message_is_bare"] is False
+
+    def test_shorts_link_with_tracking_params_is_bare(self, router):
+        msg = make_incoming(raw_text="https://youtube.com/shorts/RouterBare03?si=xYz")
+        result = router._MessageRouter__detect_shorts(msg)
+        assert result["link_message_is_bare"] is True
+
+    def test_bare_youtube_watch_link_is_marked_bare(self, router):
+        msg = make_incoming(raw_text="https://www.youtube.com/watch?v=RouterBare04")
+        result = router._MessageRouter__detect_social_link(msg)
+        assert result["link_message_is_bare"] is True
+
+    def test_instagram_link_with_user_text_is_not_bare(self, router):
+        msg = make_incoming(
+            raw_text="смотри https://www.instagram.com/reel/RouterBare05/"
+        )
+        result = router._MessageRouter__detect_social_link(msg)
+        assert result["link_message_is_bare"] is False
