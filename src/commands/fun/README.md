@@ -1,4 +1,8 @@
-Roast ("прожарка") text generation and the /meme command.
+Roast ("прожарка") text generation.
+
+The `/meme` command was retired: memes are asked for in words
+(«@bot скинь мем»), classified as `MEME_REQUEST` by the filter node and sent
+by `src/memes/sender.py`. See `src/memes/README.md`.
 
 The `/roast` command and the weekly scheduled roast were retired; roast
 generation is no longer triggered by anything (previously the autonomous
@@ -87,59 +91,4 @@ Engagement wind-down engine (src/pipeline/filter_node.py + engagement_gate.py)
       classifier has false positives); then: short LLM brush-off; then:
       bored emoji; finally: silence
     → each insult recorded in user_memories as "Оскорблял бота N раз"
-```
-
----
-
-# /meme
-
-Sends a random meme image, vetted by a vision judge and with **no caption**.
-
-The source channel's caption is never reposted — it belongs to that channel,
-not to the bot — so the judge also requires the joke to work without one.
-
-## Source
-
-Two public sources are queried on every call, each read without any API key or
-login (`src/memes/sources/`):
-
-```
-9gag      — public group-posts JSON feed
-Telegram  — public t.me/s web previews of a fixed list of meme channels
-```
-
-Each source is fetched independently and swallows its own errors, so a failing
-source is logged as a warning and skipped while the rest still proceed.
-`/meme`'s sources are `ninegag.py` and `telegram.py` only (see
-`src/memes/sources/`).
-
-## Post filtering
-
-```
-9gag:     type != "Photo" or nsfw=true → skip
-Telegram: message has no single embedded photo (video thumbnails, link
-          previews, galleries) → skip
-```
-
-Markup-level filtering cannot tell a meme from the channel author's own photo
-post — a donation appeal, an ad, an announcement all look identical here. The
-vision gate below is what separates them; see `src/memes/README.md`.
-
-## Deduplication
-
-Dedup keys are recorded in the `sent_memes` table keyed by `(chat_id, url)`. Each chat has its own independent pool. A candidate the judge rejects is recorded too, so the same non-meme never costs a second download and vision call. Once the pool is exhausted, the command replies with a text message instead.
-
-## Flow
-
-```
-/meme
-  → gather_candidates(): fetch from every registered source (9gag + Telegram channels)
-  → each source already filtered to single-image, non-NSFW candidates
-  → exclude candidates already in sent_memes for this chat
-  → up to MEME_JUDGE_ATTEMPTS times:
-      pick random candidate → download bytes → judge.score_meme()
-      judge unavailable → abort, send nothing, mark nothing
-      score < pass       → INSERT into sent_memes, try the next one
-      score >= pass      → INSERT into sent_memes, ship it
-  → reply_photo(image_bytes)          # no caption
 ```

@@ -47,7 +47,7 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/pipeline/](src/pipeline/README.md) | LangGraph StateGraph — message processing nodes and graph wiring |
 | [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
-| [src/commands/](src/commands/README.md) | Command handlers — /duel, /meme |
+| [src/commands/](src/commands/README.md) | Command handlers — /duel |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup, yt-dlp refresh |
 | [src/life/](src/life/README.md) | Chat-requested selfies — scene writing, best-of-N generation, vision judge |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
@@ -223,6 +223,5 @@ cookies, no extra env vars. If Shorts summaries ever go silent anyway,
 
 ```
 duel - эмодзи-дуэль между двумя участниками
-meme - случайный мем
 help - помощь
 ```

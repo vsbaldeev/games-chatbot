@@ -108,6 +108,7 @@ class WorkerNode:
             state.get("is_bot_insult")
             or state.get("wind_down")
             or state.get("photo_request")
+            or state.get("meme_request")
             or state.get("response_trigger") == "youtube_short"
             or state.get("response_trigger") == "social_link"
         ):
@@ -118,6 +119,8 @@ class WorkerNode:
             # for wind-down brush-offs, which are one short phrase closing
             # the conversation, and for photo-request acks («ща сфоткаю»),
             # which must go out fast and without a search notification.
+            # A meme request answers with the image alone and no text at all,
+            # so gathered facts would have nowhere to go.
             return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")

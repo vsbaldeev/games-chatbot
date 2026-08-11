@@ -19,7 +19,6 @@ CommandHandlerManager
     /start          — welcome message
     /help           — command list
     /duel           — emoji duel picker
-    /meme           — random image meme from Reddit
     CallbackQueryHandler(duel_*)   — duel inline buttons
 
 MessageHandlerManager

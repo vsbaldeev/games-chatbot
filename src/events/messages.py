@@ -2,6 +2,7 @@
 
 import datetime
 import io
+import random
 import re
 import time
 
@@ -26,9 +27,11 @@ from src.pipeline.graph import build_pipeline
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
+from src.config.prompts import MEME_FAILED_REPLIES
 from src.events.sending import send_and_store
 from src.events.voice_reply import try_send_voice_reply
 from src.life import selfie
+from src.memes.sender import send_meme
 from src.pipeline.router import is_explicitly_addressed
 from src.store import unified_messages
 from src.utils.ttl_gate import TtlGate
@@ -347,6 +350,45 @@ def launch_selfie_task(bot, chat_id: int, reply_to_msg_id: int, final_state: Bot
     ))
 
 
+async def deliver_meme(bot, chat_id: int, reply_to_msg_id: int) -> None:
+    """Send a meme in answer to a request, or say honestly that there is none.
+
+    An accepted meme request has no text reply — the image is the whole
+    answer — so the typing indicator is the only sign of life during the
+    download-and-vet window. The fallback line matters more than usual: with
+    the /meme command gone there is no other way to ask, so a fail-closed
+    gate must not leave a direct request in silence.
+
+    Args:
+        bot: Telegram Bot instance to send with.
+        chat_id: Chat the request came from.
+        reply_to_msg_id: The requesting message the meme replies to.
+    """
+    try:
+        await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
+    except Exception as error:
+        logger.warning("Failed to send meme upload action to chat %s: %s", chat_id, error)
+    if await send_meme(bot, chat_id, reply_to=reply_to_msg_id):
+        return
+    await send_and_store(bot, chat_id, random.choice(MEME_FAILED_REPLIES), reply_to=reply_to_msg_id)
+
+
+def launch_meme_task(bot, chat_id: int, reply_to_msg_id: int) -> None:
+    """Fire-and-forget the meme send for an accepted meme request.
+
+    Fire-and-forget like the selfie path, so the handler is not held open for
+    the download and up to three vision calls. The trade-off is the same one
+    the selfie path already makes: the canonical log line emits before the
+    meme actually lands.
+
+    Args:
+        bot: Telegram Bot instance to send with.
+        chat_id: Chat the request came from.
+        reply_to_msg_id: The requesting message the meme replies to.
+    """
+    asyncio.create_task(deliver_meme(bot, chat_id, reply_to_msg_id))
+
+
 async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed: bool) -> str:
     """Log a pipeline failure, notify the chat when addressed, name the kind.
 
@@ -423,6 +465,13 @@ async def run_pipeline(
                 launch_selfie_task(context.bot, chat.id, msg.message_id, final_state)
                 action = "replied+photo"
             canonical.emit(final_state, action, time.monotonic() - started_at)
+            return True
+        # An accepted meme request answers with the image alone, so it reaches
+        # here with an empty response — the only path that delivers media
+        # without any text.
+        if final_state.get("meme_request"):
+            launch_meme_task(context.bot, chat.id, msg.message_id)
+            canonical.emit(final_state, "meme", time.monotonic() - started_at)
             return True
     except Exception as error:
         error_kind = await notify_pipeline_failure(error, msg, chat.id, addressed)

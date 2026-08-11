@@ -1,13 +1,28 @@
-Meme fetching, vetting and deduplication for the /meme command and the daily job.
+Meme fetching, vetting, sending and deduplication.
 
 ## Modules
 
 ```
 fetcher.py   — gathers candidates, downloads and vets one, returns image bytes
 judge.py     — vision-LLM gate: is this image a meme that works with no caption?
+sender.py    — the single place a meme reaches Telegram; used by both callers
 sources/     — one module per meme source; each yields MemeCandidate(key, image_url)
 store.py     — sent_memes table: tracks which dedup keys have been sent per chat
 ```
+
+## Who asks for a meme
+
+```
+daily job     src/jobs/meme.py — one un-anchored meme per chat, 15:00 UTC
+on request    a member asks in words («@bot скинь мем»); the filter node
+              classifies MEME_REQUEST, the response stays empty and
+              src/events/messages.py::deliver_meme sends the image anchored
+              to the request
+```
+
+There is no `/meme` command any more. A request that produces nothing — pool
+exhausted, every candidate rejected, or the fail-closed gate unavailable —
+gets an honest canned line from `MEME_FAILED_REPLIES` rather than silence.
 
 Captions are never carried or reposted. They belong to the channel that posted
 them — a scraped caption once made the bot look like it was asking readers for
@@ -115,6 +130,19 @@ score_meme(bytes)        — one vision call with MEME_JUDGE_SYSTEM and the
     image alone (no caption: none will be sent, so none is judged).
     Logs the score at INFO so the threshold stays tunable. Returns None on
     any failure — "unknown", never zero.
+```
+
+## sender.py
+
+```
+send_meme(bot, chat_id, *, reply_to=None) -> bool
+    get_meme() → send_photo (never a caption) → record in unified_messages
+    as the bare [photo] placeholder, so the photo-description enricher fills
+    in a real description later.
+    reply_to anchors the image to a requesting message (allow_sending_
+    without_reply, so a deleted anchor degrades to un-anchored); the daily
+    job passes None.
+    False when no meme was available or the send failed — never raises.
 ```
 
 **Known risk — Cyrillic OCR.** Most configured channels are Russian, so the

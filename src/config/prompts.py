@@ -71,9 +71,16 @@ FILTER_SYSTEM = (
     "'покажи, как выглядишь'\n"
     "- The bot's own life and surroundings: 'сфоткай свой огород', "
     "'покажи свою избу', 'скинь фото своей мастерской'\n"
-    "- A request for a picture of anything else — memes, animals, other people, "
-    "screenshots ('скинь фотку котика', 'скинь мем') — is MEANINGFUL, "
-    "not PHOTO_REQUEST.\n\n"
+    "- A request for a picture of anything else — animals, other people, "
+    "screenshots ('скинь фотку котика') — is MEANINGFUL, not PHOTO_REQUEST. "
+    "A request for a meme is MEME_REQUEST.\n\n"
+    "MEME_REQUEST — the user asks the bot to send a meme:\n"
+    "- 'скинь мем', 'кинь мемас', 'мем давай', 'есть мемчик?', 'пришли мем', "
+    "'скинь что-нибудь смешное'\n"
+    "- Talking ABOUT a meme without asking for one ('этот мем смешной', "
+    "'мем про это видел', 'откуда этот мем') is MEANINGFUL.\n"
+    "- A request for a photo of the bot itself is PHOTO_REQUEST, not "
+    "MEME_REQUEST.\n\n"
     "MEANINGFUL — everything else that deserves a reply:\n"
     "- Questions: 'Как дела?', 'Что нового?'\n"
     "- Commands/Requests: 'Расскажи анекдот', '/duel @user'\n"
@@ -90,7 +97,7 @@ FILTER_SYSTEM = (
     "Instructions:\n"
     "1. Analyze the text (can be in Russian or English).\n"
     "2. Reply with ONLY ONE word: 'BOT_INSULT', 'BANTER', 'MEANINGLESS', "
-    "'PHOTO_REQUEST' or 'MEANINGFUL'.\n"
+    "'PHOTO_REQUEST', 'MEME_REQUEST' or 'MEANINGFUL'.\n"
     "3. Swearing directed AT THE BOT is BOT_INSULT only when it carries hostility, "
     "contempt or mockery (telling it to shut up, calling it useless/stupid). Swearing "
     "used as an intensifier for praise, excitement or agreement ('ахуенный', 'охуенно', "
@@ -103,8 +110,25 @@ FILTER_SYSTEM = (
     "6. If unsure between MEANINGLESS and MEANINGFUL, or between BANTER and "
     "MEANINGFUL, err on the side of 'MEANINGFUL'.\n"
     "7. PHOTO_REQUEST requires an actual request to send a photo of the bot "
-    "itself. If unsure between PHOTO_REQUEST and MEANINGFUL, choose 'MEANINGFUL'."
+    "itself. If unsure between PHOTO_REQUEST and MEANINGFUL, choose 'MEANINGFUL'.\n"
+    "8. MEME_REQUEST requires an actual request to send a meme. Mentioning or "
+    "discussing a meme is not a request. If unsure between MEME_REQUEST and "
+    "MEANINGFUL, choose 'MEANINGFUL'."
 )
+
+# Honest canned replies for a meme request the fetcher could not satisfy —
+# the pool for this chat is exhausted, every candidate was rejected by the
+# vision gate, or the gate itself was unavailable (it is fail-closed). Same
+# principle as the transcription/vision failure pools: deterministic, so the
+# response model never improvises about a meme it does not have. There is no
+# /meme fallback any more, so silence here would leave a direct request
+# unanswered.
+MEME_FAILED_REPLIES = [
+    "Мемы кончились, приходи попозже.",
+    "Не нашёл ничего смешного. Бывает.",
+    "Мемница пуста. Загляни попозже.",
+    "Сегодня без мемов — ничего годного не завалялось.",
+]
 
 OVERHEARD_SYSTEM = (
     "You are a telegram bot's message filter. The message you receive was posted in a group chat "

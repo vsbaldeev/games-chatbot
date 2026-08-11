@@ -261,6 +261,9 @@ filter  (runs after ingester)
     ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —
     │       «сфоткай себя», «покажи свой огород»; pictures of anything else
     │       stay MEANINGFUL) → engagement gate
+    ├─ text, LLM → MEME_REQUEST (asks the bot to send a meme — «скинь мем»,
+    │       «кинь мемас»; merely talking about a meme stays MEANINGFUL)
+    │       → engagement gate
     ├─ text, LLM → MEANINGFUL → engagement gate
     └─ text, LLM error       → should_respond=True (fails open)
 
@@ -285,7 +288,8 @@ a wound-down user. Every addressed verdict (and every double-confirmed
 overheard insult, and explicitly addressed transcribed media as MEANINGFUL)
 charges a weight — PHOTO_REQUEST 4.5 (each accepted request occupies the
 single shared imagegen worker for minutes), BOT_INSULT 3.0, BANTER/MEANINGLESS
-2.0, MEANINGFUL 1.0 — decayed with a 30-min half-life in a single atomic
+2.0, MEANINGFUL 1.0, MEME_REQUEST 1.0 (asking for a meme is an ordinary thing
+to do, not a scarce favour) — decayed with a 30-min half-life in a single atomic
 UPSERT; the post-charge
 score maps onto a tier (brush-off >7, emoji >13, silence >19), so any
 sustained conversation fades out like a person losing interest. The
@@ -309,12 +313,21 @@ keep reciting the score. Store errors fail open to the full tier.
     │       src/life/selfie.deliver_selfie (weight 4.5 → a fresh user's first
     │       request ships a photo, a rapid second one lands in the brush-off
     │       refusal below)
+    │       MEME_REQUEST at this tier sets meme_request=True: the worker is
+    │       skipped, the response node short-circuits to an EMPTY reply (the
+    │       meme is the whole answer — a «держи мем» line would be filler and
+    │       a generated line about an unseen image is the stacking failure the
+    │       absurdity work removed), and the events layer fire-and-forgets
+    │       deliver_meme. This is the only path that answers with media and
+    │       no text at all.
     ├─ BRUSH_OFF tier → should_respond=True + wind_down=True — the response
     │       node injects a close-the-conversation hint (one short in-character
     │       phrase, no questions, no invitations) and the worker is skipped;
     │       BANTER at this tier degrades straight to the bored emoji reaction;
     │       a PHOTO_REQUEST here gets an explicit in-character photo refusal
-    │       directive instead of the generic brush-off — no generation runs
+    │       directive instead of the generic brush-off — no generation runs;
+    │       a MEME_REQUEST likewise gets a meme refusal directive (which
+    │       forbids inventing a meme in text) and no meme is sent
     ├─ EMOJI tier     → should_respond=False + bored emoji reaction
     │       (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨; MEANINGLESS keeps the
     │       friendly REACTION_POOL until this tier)

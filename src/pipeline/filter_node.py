@@ -699,7 +699,8 @@ class MeaninglessFilterNode:
         tier sets ``photo_request`` (the events layer launches generation
         after the ack) plus a ``photo_in_flight`` peek covering both image
         flows (``selfie.image_generation_in_flight``); at the brush-off tier
-        it falls into the ``wind_down`` refusal.
+        it falls into the ``wind_down`` refusal. MEME_REQUEST behaves the same
+        way via ``meme_request``, whose reply is the image alone.
 
         Args:
             state: Current pipeline state.
@@ -717,6 +718,8 @@ class MeaninglessFilterNode:
         elif classification == "PHOTO_REQUEST" and tier == engagement_gate.FULL_TIER:
             update["photo_request"] = True
             update["photo_in_flight"] = selfie.image_generation_in_flight()
+        elif classification == "MEME_REQUEST" and tier == engagement_gate.FULL_TIER:
+            update["meme_request"] = True
         elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:
             update["wind_down"] = True
         logger.debug(
@@ -813,8 +816,8 @@ class MeaninglessFilterNode:
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"`` or ``"MEANINGFUL"``. Fails open to
-            ``"MEANINGFUL"`` on any LLM error.
+            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"`` or ``"MEANINGFUL"``.
+            Fails open to ``"MEANINGFUL"`` on any LLM error.
         """
         try:
             response = await self.__llm.ainvoke([
@@ -824,6 +827,8 @@ class MeaninglessFilterNode:
             result = response.content.strip().upper()
             if "PHOTO" in result:
                 return "PHOTO_REQUEST"
+            if "MEME" in result:
+                return "MEME_REQUEST"
             if "INSULT" in result:
                 return "BOT_INSULT"
             if "BANTER" in result:

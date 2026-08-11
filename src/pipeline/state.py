@@ -64,8 +64,9 @@ class BotState(TypedDict):
     social_link_url: NotRequired[str | None]        # canonical URL, set by Router
     social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester
     social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester
-    filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "PHOTO_REQUEST" | "SHORTS" | "SOCIAL_LINK", set by the filter node
+    filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "PHOTO_REQUEST" | "MEME_REQUEST" | "SHORTS" | "SOCIAL_LINK", set by the filter node
     photo_request: NotRequired[bool]   # True when the filter accepted a photo request at the full tier; the events layer launches selfie generation after the ack is delivered
+    meme_request: NotRequired[bool]    # True when the filter accepted a meme request at the full tier; the response is empty and the events layer sends the meme itself
     photo_in_flight: NotRequired[bool] # True when a selfie was already being generated at classification time; the response acks «уже фоткаю» and no second job is launched
     engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node
     drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line

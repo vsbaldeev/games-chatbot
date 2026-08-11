@@ -27,6 +27,7 @@ from src.pipeline.response_node import (
     build_recent_history_lines,
     build_response_input,
     build_trigger_line,
+    resolve_meme_directive,
     select_shorts_instruction,
     select_social_link_instruction,
 )
@@ -518,3 +519,51 @@ class TestBuildDirectiveLinesInsultReplyingToBot:
         joined = "\n".join(lines)
         assert "надоел" in joined
         assert "дерзкой" not in joined
+
+
+class TestMemeRequestSkipsGeneration:
+    async def test_accepted_meme_request_returns_an_empty_response(self):
+        """The meme is the whole reply — no LLM call, no text to stack on it."""
+        agent = make_mock_agent("этого не должно быть")
+        state = make_state(make_incoming(), meme_request=True)
+        result = await ResponseNode(agent)(state)
+        assert result == {"response": "", "response_messages": []}
+        agent.invoke_response.assert_not_called()
+
+    async def test_ordinary_message_still_generates(self):
+        agent = make_mock_agent("обычный ответ")
+        state = make_state(make_incoming(), is_flat_thread=True)
+        with patch(THREAD_APPEND_TURN, AsyncMock()):
+            result = await ResponseNode(agent)(state)
+        assert result["response"] == "обычный ответ"
+
+
+class TestResolveMemeDirective:
+    def test_wound_down_meme_request_is_refused(self):
+        state = make_state(make_incoming(), wind_down=True, filter_verdict="MEME_REQUEST")
+        assert resolve_meme_directive(state) == "refused"
+
+    def test_accepted_meme_request_has_no_directive(self):
+        state = make_state(make_incoming(), meme_request=True)
+        assert resolve_meme_directive(state) is None
+
+    def test_wound_down_other_verdict_has_no_meme_directive(self):
+        state = make_state(make_incoming(), wind_down=True, filter_verdict="BANTER")
+        assert resolve_meme_directive(state) is None
+
+
+class TestBuildDirectiveLinesMemeRefusal:
+    def test_refusal_line_forbids_inventing_a_meme(self):
+        lines = build_directive_lines(
+            is_bot_insult=False, wind_down=True, photo_directive=None,
+            meme_directive="refused",
+        )
+        joined = "\n".join(lines)
+        assert "мем" in joined
+        assert "не выдумывай" in joined
+
+    def test_no_meme_directive_adds_no_meme_line(self):
+        lines = build_directive_lines(
+            is_bot_insult=False, wind_down=False, photo_directive=None, meme_directive=None,
+        )
+        assert "мем" not in "\n".join(lines)

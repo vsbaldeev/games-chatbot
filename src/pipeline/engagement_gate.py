@@ -27,12 +27,18 @@ logger = log.get_logger(__name__)
 # occupies the single shared imagegen worker for minutes, so 4.5 keeps a
 # fresh user's first request below BRUSH_OFF_THRESHOLD (full tier, photo
 # ships) while a rapid second one lands past it and is refused in character.
+# MEME_REQUEST costs an ordinary message: asking for a meme is a normal thing
+# to do, not a scarce favour, so ~7 land before wind-down. The accepted cost
+# is up to three vision calls per request against the shared daily budget —
+# raise this constant if bursts start starving photo_judge and memory
+# extraction.
 SIGNAL_WEIGHTS = {
     "PHOTO_REQUEST": 4.5,
     "BOT_INSULT": 3.0,
     "BANTER": 2.0,
     "MEANINGLESS": 2.0,
     "MEANINGFUL": 1.0,
+    "MEME_REQUEST": 1.0,
 }
 
 HALF_LIFE_SECONDS = 60 * 60

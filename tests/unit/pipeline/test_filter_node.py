@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram import ReactionTypeEmoji
 
+from src.pipeline import engagement_gate
 from src.pipeline.filter_node import (
     FILTER_SYSTEM,
     REACTION_POOL,
@@ -64,6 +65,13 @@ class TestFilterSystemPrompt:
 
     def test_defaults_to_meaningful_when_uncertain(self):
         assert "unsure" in FILTER_SYSTEM.lower()
+
+    def test_mentions_meme_request_label(self):
+        assert "MEME_REQUEST" in FILTER_SYSTEM
+
+    def test_no_longer_routes_meme_requests_to_meaningful(self):
+        """«скинь мем» used to be named as a MEANINGFUL example by the prompt."""
+        assert "'скинь мем', 'кинь мемас'" in FILTER_SYSTEM
 
 
 class TestPassthroughWhenShouldRespondFalse:
@@ -281,6 +289,52 @@ class TestClassify:
         node, _ = make_node_with_mock_llm("UNKNOWN")
         result = await node._MeaninglessFilterNode__classify("что-то", FILTER_SYSTEM)
         assert result == "MEANINGFUL"
+
+    async def test_meme_request_response_returns_meme_request(self):
+        node, _ = make_node_with_mock_llm("MEME_REQUEST")
+        result = await node._MeaninglessFilterNode__classify("скинь мем", FILTER_SYSTEM)
+        assert result == "MEME_REQUEST"
+
+    @pytest.mark.parametrize(
+        "llm_response, expected",
+        [
+            ("MEANINGFUL", "MEANINGFUL"),
+            ("MEANINGLESS", "MEANINGLESS"),
+            ("PHOTO_REQUEST", "PHOTO_REQUEST"),
+        ],
+        ids=["meaningful", "meaningless", "photo-request"],
+    )
+    async def test_other_labels_are_not_swallowed_by_the_meme_check(self, llm_response, expected):
+        """The MEME substring test must not capture the pre-existing labels."""
+        node, _ = make_node_with_mock_llm(llm_response)
+        result = await node._MeaninglessFilterNode__classify("текст", FILTER_SYSTEM)
+        assert result == expected
+
+
+class TestMemeRequestFlags:
+    def test_full_tier_sets_meme_request(self):
+        node = MeaninglessFilterNode()
+        state = make_state(make_incoming())
+        update = node._MeaninglessFilterNode__build_reply_flags(
+            state, "MEME_REQUEST", engagement_gate.FULL_TIER
+        )
+        assert update["meme_request"] is True
+        assert not update.get("wind_down")
+
+    @pytest.mark.parametrize(
+        "tier",
+        [engagement_gate.BRUSH_OFF_TIER, engagement_gate.EMOJI_TIER],
+        ids=["brush-off", "emoji"],
+    )
+    def test_lower_tiers_wind_down_instead_of_sending(self, tier):
+        node = MeaninglessFilterNode()
+        state = make_state(make_incoming())
+        update = node._MeaninglessFilterNode__build_reply_flags(state, "MEME_REQUEST", tier)
+        assert "meme_request" not in update
+        assert update["wind_down"] is True
+
+    def test_meme_request_weight_is_an_ordinary_message(self):
+        assert engagement_gate.SIGNAL_WEIGHTS["MEME_REQUEST"] == 1.0
 
 
 class TestSendReaction:

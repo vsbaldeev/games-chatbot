@@ -54,6 +54,25 @@ the filter, no selfie already in flight), `run_pipeline` launches
 a pipeline failure never leaves a photo without its promise. The canonical
 log line records the run as `action=replied+photo`.
 
+## Chat-requested memes
+
+When the pipeline accepted a meme request (`meme_request` state flag set by the
+filter), the response node returns an **empty** reply, so `run_pipeline` falls
+past the `if response.strip():` branch into the media-only dispatch — the one
+path that answers with an image and no text. It fire-and-forgets
+`deliver_meme`, and the canonical log line records `action=meme`.
+
+`deliver_meme` sends an `upload_photo` chat action first: with no text reply,
+that indicator is the only sign of life during the download and up to three
+vision calls. If `memes.sender.send_meme` returns False — pool exhausted,
+every candidate rejected, or the fail-closed vision gate unavailable — an
+honest canned line from `MEME_FAILED_REPLIES` goes out instead. That fallback
+is load-bearing: the `/meme` command was retired, so silence here would leave
+a direct request unanswered with no other way to ask.
+
+Like the selfie path, this is fire-and-forget, so the canonical log line emits
+before the meme actually lands.
+
 ## Pipeline error handling
 
 Pipeline failures in `run_pipeline` are reported in chat only to users who

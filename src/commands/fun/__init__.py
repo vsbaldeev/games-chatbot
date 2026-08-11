@@ -1,5 +1,3 @@
-"""Fun commands — /meme."""
+"""Fun commands."""
 
-from src.commands.fun.meme import cmd_meme
-
-__all__ = ["cmd_meme"]
+__all__: list[str] = []

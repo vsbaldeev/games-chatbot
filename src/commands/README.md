@@ -12,9 +12,10 @@ general.py
     /help           — full command list
 
 fun/
-    /meme           — see src/commands/fun/README.md
-    (roast generation lives here too — no command and no automatic trigger;
-     kept as a reusable generator)
+    (roast generation lives here — no command and no automatic trigger;
+     kept as a reusable generator. /meme was retired: memes are asked for in
+     words now and handled by the MEME_REQUEST filter verdict, see
+     src/memes/README.md)
 
 games/
     /duel           — see src/commands/games/README.md

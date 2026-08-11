@@ -39,7 +39,13 @@ class TestRoastCommandRemoved:
 
     def test_core_commands_still_registered(self):
         names = registered_command_names()
-        assert {"start", "help", "meme", "duel"}.issubset(names)
+        assert {"start", "help", "duel"}.issubset(names)
+
+
+class TestMemeCommandRemoved:
+    def test_meme_command_not_registered(self):
+        """Memes are asked for in words now; the slash command is gone."""
+        assert "meme" not in registered_command_names()
 
 
 class TestWeeklyRoastJobRemoved:

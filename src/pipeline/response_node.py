@@ -375,7 +375,8 @@ def build_recent_history_lines(
 
 
 def build_directive_lines(
-    is_bot_insult: bool, wind_down: bool, photo_directive: str | None
+    is_bot_insult: bool, wind_down: bool, photo_directive: str | None,
+    meme_directive: str | None = None,
 ) -> list[str]:
     """Assemble the behavioural directive blocks appended before the trigger line.
 
@@ -396,6 +397,10 @@ def build_directive_lines(
             being launched, promise the photo), ``"busy"`` (a selfie is
             already rendering, no second one), ``"refused"`` (wound-down user
             asked for a photo, refuse it explicitly) or None.
+        meme_directive: Meme-request framing — ``"refused"`` (wound-down user
+            asked for a meme) or None. There is no ``"ack"`` counterpart: an
+            accepted meme request answers with the image and no text, so the
+            response node never runs for it.
 
     Returns:
         Directive prompt lines, possibly empty.
@@ -432,6 +437,12 @@ def build_directive_lines(
             "[Тебя просят прислать твоё фото, но фоткаться тебе лень и некогда. "
             "Откажи прямо, в своём характере, без обещаний прислать позже.]\n"
         )
+    if meme_directive == "refused":
+        lines.append(
+            "[Тебя просят скинуть мем, но тебе сейчас не до этого. Откажи "
+            "коротко и в своём характере, без обещаний скинуть позже. "
+            "Не пересказывай и не выдумывай никаких мемов.]\n"
+        )
     return lines
 
 
@@ -447,6 +458,7 @@ def build_response_input(
     wind_down: bool = False,
     worker_tools_used: bool = False,
     photo_directive: str | None = None,
+    meme_directive: str | None = None,
     social_link_video_present: bool = False,
     youtube_short_video_present: bool = False,
     voice_low_confidence: bool = False,
@@ -472,6 +484,8 @@ def build_response_input(
         worker_tools_used: ``True`` when the worker actually ran a tool;
             selects the tool-verified data frame instead of the unverified
             context-derived frame.
+        meme_directive: Meme-request framing passed to
+            :func:`build_directive_lines` — ``"refused"`` or None.
         photo_directive: Photo-request framing passed to
             :func:`build_directive_lines`, or None.
         social_link_video_present: True when an Instagram Reel video was
@@ -509,7 +523,7 @@ def build_response_input(
         header = WORKER_DATA_VERIFIED_HEADER if worker_tools_used else WORKER_DATA_UNVERIFIED_HEADER
         parts.append(f"{header}\n{worker_output}\n")
 
-    parts += build_directive_lines(is_bot_insult, wind_down, photo_directive)
+    parts += build_directive_lines(is_bot_insult, wind_down, photo_directive, meme_directive)
 
     parts.append(
         build_trigger_line(
@@ -536,6 +550,22 @@ def resolve_photo_directive(state: BotState) -> str | None:
     if state.get("photo_request"):
         return "busy" if state.get("photo_in_flight") else "ack"
     if state.get("wind_down") and state.get("filter_verdict") == "PHOTO_REQUEST":
+        return "refused"
+    return None
+
+
+def resolve_meme_directive(state: BotState) -> str | None:
+    """Derive the meme-request directive from the filter's state flags.
+
+    Args:
+        state: Current pipeline state.
+
+    Returns:
+        ``"refused"`` when a wound-down user asked for a meme, else None.
+        An accepted meme request never reaches here — the node short-circuits
+        to an empty response and the events layer sends the image alone.
+    """
+    if state.get("wind_down") and state.get("filter_verdict") == "MEME_REQUEST":
         return "refused"
     return None
 
@@ -622,6 +652,13 @@ class ResponseNode:
             Dict with ``response`` and ``response_messages`` keys; the latter
             carries the assembled LangChain message list for the correction node.
         """
+        if state.get("meme_request"):
+            # The meme is the whole reply: a «держи мем» line would be filler,
+            # and a generated line about an image this model never sees is the
+            # stacking failure the 2026-08-07 absurdity work removed. Returning
+            # empty also skips the response LLM entirely.
+            return {"response": "", "response_messages": []}
+
         msg = state["incoming"]
 
         if state.get("is_flat_thread"):
@@ -649,6 +686,7 @@ class ResponseNode:
             wind_down=bool(state.get("wind_down")),
             worker_tools_used=bool(state.get("worker_tools_used")),
             photo_directive=resolve_photo_directive(state),
+            meme_directive=resolve_meme_directive(state),
             social_link_video_present=bool(state.get("social_link_video")),
             youtube_short_video_present=bool(state.get("youtube_short_video")),
             voice_low_confidence=bool(state.get("voice_low_confidence")),
