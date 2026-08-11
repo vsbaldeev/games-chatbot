@@ -37,6 +37,12 @@ def build_caption(summary: str, username: str | None, url: str | None) -> str:
         bare summary otherwise.
     """
     if username is None or url is None:
+        if username is not None or url is not None:
+            logger.warning(
+                "Link caption got a half-filled credit pair (username=%s, url=%s); "
+                "falling back to the bare summary",
+                username, url,
+            )
         return summary
     return f"Скинул @{username}\n{url}\n\n{summary}"
 
@@ -86,6 +92,13 @@ async def fit_caption(summary: str, username: str | None, url: str | None) -> st
     if len(caption) <= CAPTION_LIMIT:
         return caption
     budget = CAPTION_LIMIT - (len(caption) - len(summary))
+    if budget <= 0:
+        # The credit line and URL alone overflow the cap. Canonical link URLs
+        # run about 50 characters, so this is unreachable in practice — but
+        # the return contract is absolute and the Bot API rejects anything
+        # longer, so hand back something it will accept.
+        logger.warning("Link caption overhead alone exceeds the caption limit")
+        return caption[:CAPTION_LIMIT]
     compressed = await compress_to_budget(summary, budget)
     caption = build_caption(compressed, username, url)
     if len(caption) <= CAPTION_LIMIT:

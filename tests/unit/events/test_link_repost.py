@@ -20,6 +20,10 @@ class TestBuildCaption:
     def test_summary_alone_when_the_original_survives(self):
         assert build_caption("Про котиков.", None, None) == "Про котиков."
 
+    def test_summary_alone_when_only_one_of_the_pair_is_given(self):
+        assert build_caption("Про котиков.", "vasya", None) == "Про котиков."
+        assert build_caption("Про котиков.", None, "https://youtu.be/abc") == "Про котиков."
+
 
 class TestTruncateAtSentence:
     def test_short_text_is_untouched(self):
@@ -68,4 +72,11 @@ class TestFitCaption:
     async def test_overflow_without_credit_still_fits(self):
         with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="б" * 1200)):
             caption = await fit_caption("а" * 1200, None, None)
+        assert len(caption) <= CAPTION_LIMIT
+
+    async def test_absurd_url_overhead_still_fits(self):
+        with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="Сжато.")):
+            caption = await fit_caption(
+                "Про котиков.", "vasya", "https://example.com/" + "a" * 1200
+            )
         assert len(caption) <= CAPTION_LIMIT
