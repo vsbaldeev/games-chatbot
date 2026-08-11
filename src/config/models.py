@@ -126,6 +126,15 @@ MEME_JUDGE_ATTEMPTS = 3
 SELFIE_SCENE_MODEL = "llama-3.3-70b-versatile"
 SELFIE_SCENE_MAX_TOKENS = 200
 
+# Caption compressor (src/agent/compress.py). One small call that rewrites an
+# over-budget video caption shorter without dropping meaning — cutting mid-
+# sentence is the thing this exists to avoid. Same llama the other bare-string
+# callers use, for the same reason: reliable plain-text output, no <think>
+# block to strip. No fallback chain: a failure degrades to the deterministic
+# sentence-boundary truncation in src/events/link_repost.py.
+CAPTION_COMPRESS_MODEL = "llama-3.3-70b-versatile"
+CAPTION_COMPRESS_MAX_TOKENS = 400
+
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly
 # stressed words are the loudest tell of synthetic Russian speech.

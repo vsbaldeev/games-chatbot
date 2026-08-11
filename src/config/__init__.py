@@ -22,6 +22,8 @@ from src.config.credentials import (
     TWITCH_CLIENT_SECRET,
 )
 from src.config.models import (
+    CAPTION_COMPRESS_MAX_TOKENS,
+    CAPTION_COMPRESS_MODEL,
     FILTER_FALLBACK_MODEL,
     FILTER_MODEL,
     GUARD_MODEL,
@@ -73,6 +75,8 @@ __all__ = [
     "TWITCH_CLIENT_ID",
     "TWITCH_CLIENT_SECRET",
     # models
+    "CAPTION_COMPRESS_MAX_TOKENS",
+    "CAPTION_COMPRESS_MODEL",
     "FILTER_FALLBACK_MODEL",
     "FILTER_MODEL",
     "GUARD_MODEL",

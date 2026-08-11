@@ -18,6 +18,7 @@ from src.agent.language import (
     needs_russian_correction,
     normalize_homoglyphs,
 )
+from src.agent.compress import compress_to_budget
 from src.agent.worker import WORKER_PROMPT, WorkerAgent, worker_agent
 from src.agent.response import RESPONSE_PROMPT, ResponseAgent, response_agent
 from src.agent.roast import ROAST_SYSTEM_PROMPT, RoastAgent, roast_agent
@@ -39,6 +40,7 @@ __all__ = [
     "apply_language_correction",
     "needs_russian_correction",
     "normalize_homoglyphs",
+    "compress_to_budget",
     "WORKER_PROMPT",
     "WorkerAgent",
     "worker_agent",
