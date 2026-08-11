@@ -44,6 +44,16 @@ class TestBareLinkMessage:
     def test_empty_text_is_not_bare(self):
         assert not is_bare_link_message(None, SHORTS_URL_RE)
 
+    def test_emoji_glued_to_the_link_is_not_bare(self):
+        assert not is_bare_link_message(
+            "https://www.youtube.com/shorts/abc123🔥", SHORTS_URL_RE
+        )
+
+    def test_word_glued_to_the_link_is_not_bare(self):
+        assert not is_bare_link_message(
+            "https://www.youtube.com/shorts/abc123смотри", SHORTS_URL_RE
+        )
+
 
 class TestHandlersExposePattern:
     """Every handler's own pattern must match the links it claims."""

@@ -57,28 +57,35 @@ class LinkHandler(Protocol):
         ...
 
 
-# Whole whitespace-delimited URL tokens. The platform patterns stop at the
-# video/reel id, so subtracting a bare pattern match would leave "?si=..."
-# or a trailing "/" behind and every real-world link would read as non-bare.
-# Removing the token the match sits inside is what handles those.
-LINK_TOKEN_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+# Characters that may legitimately continue a URL past the point the platform
+# pattern stops matching: RFC 3986 unreserved + reserved + percent-encoding.
+# This is what swallows "?si=..." tracking parameters and trailing slashes.
+# Emoji, Cyrillic and ordinary words fall outside it, so content glued
+# straight onto a link survives and keeps the message non-bare.
+URL_TAIL_RE = re.compile(r"[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]*")
 
 
 def drop_platform_links(text: str, pattern: re.Pattern) -> str:
-    """Remove whole URL tokens belonging to one platform.
+    """Remove this platform's links, each with its full URL tail.
 
     Args:
         text: Raw message text.
         pattern: The compiled link pattern identifying the platform.
 
     Returns:
-        The text with every URL token ``pattern`` matches removed. Links to
-        anywhere else are left in place, so a second, unrelated link still
-        counts as content the user would lose.
+        The text with every match of ``pattern`` removed together with the
+        URL characters trailing it. Links to anywhere else are left in
+        place, so a second, unrelated link still counts as content the user
+        would lose.
     """
-    return LINK_TOKEN_RE.sub(
-        lambda token: "" if pattern.search(token.group(0)) else token.group(0), text
-    )
+    pieces = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        tail = URL_TAIL_RE.match(text, match.end())
+        pieces.append(text[cursor:match.start()])
+        cursor = tail.end()
+    pieces.append(text[cursor:])
+    return "".join(pieces)
 
 
 def is_bare_link_message(text: str | None, pattern: re.Pattern) -> bool:
