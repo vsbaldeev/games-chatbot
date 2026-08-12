@@ -20,6 +20,7 @@ from src.agent.compress import compress_to_budget
 logger = log.get_logger(__name__)
 
 CAPTION_LIMIT = 1024  # Telegram Bot API cap on media captions
+TEXT_LIMIT = 4096  # Telegram Bot API cap on a plain text message
 
 SENTENCE_END_RE = re.compile(r"[.!?…]")
 
@@ -74,8 +75,10 @@ def truncate_at_sentence(text: str, budget: int) -> str:
     return head[:budget - 1].rstrip() + "…"
 
 
-async def fit_caption(summary: str, username: str | None, url: str | None) -> str:
-    """Compose a caption guaranteed to fit Telegram's caption limit.
+async def fit_caption(
+    summary: str, username: str | None, url: str | None, has_video: bool,
+) -> str:
+    """Compose a caption guaranteed to fit Telegram's relevant length limit.
 
     Three rungs: send as composed when it already fits; otherwise compress the
     summary against the budget left by the credit line and link; and only if
@@ -85,24 +88,29 @@ async def fit_caption(summary: str, username: str | None, url: str | None) -> st
         summary: The pipeline's summary text.
         username: Sender to credit, or None — see :func:`build_caption`.
         url: Canonical link to carry, or None — see :func:`build_caption`.
+        has_video: True when the message is sent as a video caption (capped
+            at :data:`CAPTION_LIMIT`); False when it is a plain text message
+            (capped at the much larger :data:`TEXT_LIMIT`).
 
     Returns:
-        A caption of at most :data:`CAPTION_LIMIT` characters.
+        A caption of at most :data:`CAPTION_LIMIT` characters when
+        ``has_video`` is True, or :data:`TEXT_LIMIT` characters otherwise.
     """
+    limit = CAPTION_LIMIT if has_video else TEXT_LIMIT
     caption = build_caption(summary, username, url)
-    if len(caption) <= CAPTION_LIMIT:
+    if len(caption) <= limit:
         return caption
-    budget = CAPTION_LIMIT - (len(caption) - len(summary))
+    budget = limit - (len(caption) - len(summary))
     if budget <= 0:
         # The credit line and URL alone overflow the cap. Canonical link URLs
         # run about 50 characters, so this is unreachable in practice — but
         # the return contract is absolute and the Bot API rejects anything
         # longer, so hand back something it will accept.
         logger.warning("Link caption overhead alone exceeds the caption limit")
-        return caption[:CAPTION_LIMIT]
+        return caption[:limit]
     compressed = await compress_to_budget(summary, budget)
     caption = build_caption(compressed, username, url)
-    if len(caption) <= CAPTION_LIMIT:
+    if len(caption) <= limit:
         return caption
     logger.warning("Caption still over the limit after compression, truncating")
     return build_caption(truncate_at_sentence(compressed, budget), username, url)
@@ -110,6 +118,11 @@ async def fit_caption(summary: str, username: str | None, url: str | None) -> st
 
 async def send_combined(msg, caption: str, video: bytes | None, anchored: bool):
     """Send the one combined message, as a reply or on its own.
+
+    The un-anchored branches post directly on ``msg.chat`` rather than
+    replying, so they need ``message_thread_id`` spelled out explicitly to
+    land in the right forum topic — ``reply_video``/``reply_text`` get that
+    for free from python-telegram-bot because they reply to ``msg`` itself.
 
     Args:
         msg: The triggering ``telegram.Message``.
@@ -125,14 +138,17 @@ async def send_combined(msg, caption: str, video: bytes | None, anchored: bool):
         Exception: Whatever the Bot API raises on a failed send; the caller
             turns that into the text fallback.
     """
+    thread_id = msg.message_thread_id if msg.is_topic_message else None
     if video:
         payload = io.BytesIO(video)
         if anchored:
             return await msg.reply_video(video=payload, caption=caption), "video"
-        return await msg.chat.send_video(video=payload, caption=caption), "video"
+        return await msg.chat.send_video(
+            video=payload, caption=caption, message_thread_id=thread_id,
+        ), "video"
     if anchored:
         return await msg.reply_text(caption), "text"
-    return await msg.chat.send_message(caption), "text"
+    return await msg.chat.send_message(caption, message_thread_id=thread_id), "text"
 
 
 async def try_delete_original(msg) -> None:
@@ -200,7 +216,8 @@ async def deliver_link_message(
     """
     is_bare = resolve_bare_deletion(is_bare, url)
     caption = await fit_caption(
-        summary, username if is_bare else None, url if is_bare else None
+        summary, username if is_bare else None, url if is_bare else None,
+        has_video=bool(video),
     )
     try:
         sent, media_type = await send_combined(msg, caption, video, anchored=not is_bare)

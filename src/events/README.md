@@ -65,7 +65,11 @@ permission just logs a warning and leaves the link message in place —
 everything else about the feature still works. When the message carried more
 than the link, it is left alone and the bot's single message replies to it
 instead, with the bare summary only (no credit line, no link — both are
-already visible in the original message).
+already visible in the original message). A bare link with no resolvable
+canonical URL (`resolve_bare_deletion`) is never deleted regardless of the
+bareness flag — deleting it would strand the link nowhere in the chat, so
+the original is kept and the bot's reply carries the bare summary, same as
+any other non-bare send.
 
 If the combined send itself fails for any reason, `deliver_link_message` falls
 back to an ordinary anchored text reply (`msg.reply_text`) and never deletes

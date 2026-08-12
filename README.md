@@ -210,7 +210,8 @@ git pull && docker compose up -d --build
 ```
 
 Bot requires **Privacy Mode off** (BotFather → Bot Settings → Group Privacy → Turn off)
-and **admin rights** with `can_manage_tags` for weekly member roles.
+and **admin rights** with `can_manage_tags` for weekly member roles and
+`can_delete_messages` for the single-message link repost.
 
 ### Shorts summaries are self-maintaining
 

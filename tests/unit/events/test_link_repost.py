@@ -1,11 +1,12 @@
 """Caption composition and the 1024-character fitting ladder."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.events.link_repost import (
     CAPTION_LIMIT,
+    TEXT_LIMIT,
     build_caption,
     deliver_link_message,
     fit_caption,
@@ -51,46 +52,68 @@ class TestFitCaption:
     async def test_within_budget_skips_compression(self):
         compress = AsyncMock()
         with patch(COMPRESS_PATCH_TARGET, new=compress):
-            caption = await fit_caption("Коротко.", "vasya", "https://youtu.be/abc")
+            caption = await fit_caption(
+                "Коротко.", "vasya", "https://youtu.be/abc", has_video=True,
+            )
         compress.assert_not_awaited()
         assert caption.endswith("Коротко.")
 
     async def test_overflow_is_compressed(self):
         long_summary = "а" * 1200
         with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="Сжато.")):
-            caption = await fit_caption(long_summary, "vasya", "https://youtu.be/abc")
+            caption = await fit_caption(
+                long_summary, "vasya", "https://youtu.be/abc", has_video=True,
+            )
         assert caption.endswith("Сжато.")
         assert len(caption) <= CAPTION_LIMIT
 
     async def test_compressor_gets_the_budget_minus_overhead(self):
         compress = AsyncMock(return_value="Сжато.")
         with patch(COMPRESS_PATCH_TARGET, new=compress):
-            await fit_caption("а" * 1200, "vasya", "https://youtu.be/abc")
+            await fit_caption("а" * 1200, "vasya", "https://youtu.be/abc", has_video=True)
         budget = compress.await_args.args[1]
         assert 0 < budget < CAPTION_LIMIT
 
     async def test_still_over_budget_falls_back_to_truncation(self):
         with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="б" * 1200)):
-            caption = await fit_caption("а" * 1200, "vasya", "https://youtu.be/abc")
+            caption = await fit_caption(
+                "а" * 1200, "vasya", "https://youtu.be/abc", has_video=True,
+            )
         assert len(caption) <= CAPTION_LIMIT
 
     async def test_overflow_without_credit_still_fits(self):
         with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="б" * 1200)):
-            caption = await fit_caption("а" * 1200, None, None)
+            caption = await fit_caption("а" * 1200, None, None, has_video=True)
         assert len(caption) <= CAPTION_LIMIT
 
     async def test_absurd_url_overhead_still_fits(self):
         with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="Сжато.")):
             caption = await fit_caption(
-                "Про котиков.", "vasya", "https://example.com/" + "a" * 1200
+                "Про котиков.", "vasya", "https://example.com/" + "a" * 1200,
+                has_video=True,
             )
         assert len(caption) <= CAPTION_LIMIT
+
+    async def test_text_only_send_uses_the_larger_text_limit(self):
+        long_summary = "а" * 1200
+        compress = AsyncMock()
+        with patch(COMPRESS_PATCH_TARGET, new=compress):
+            caption = await fit_caption(long_summary, None, None, has_video=False)
+        compress.assert_not_awaited()
+        assert len(caption) <= TEXT_LIMIT
+
+    async def test_text_only_overflow_past_4096_is_still_compressed(self):
+        long_summary = "а" * 4200
+        with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="Сжато.")):
+            caption = await fit_caption(long_summary, None, None, has_video=False)
+        assert len(caption) <= TEXT_LIMIT
 
 
 def make_msg() -> MagicMock:
     msg = MagicMock()
     msg.chat_id = 1000
     msg.message_id = 55
+    msg.is_topic_message = False
     msg.delete = AsyncMock()
     msg.reply_video = AsyncMock(return_value=MagicMock(message_id=901))
     msg.reply_text = AsyncMock(return_value=MagicMock(message_id=902))
@@ -149,6 +172,18 @@ class TestDeliverLinkMessageBare:
             url="https://youtu.be/abc", is_bare=True,
         )
         assert (sent_id, anchored_to, media_type) == (903, None, "video")
+
+    async def test_unanchored_send_carries_the_forum_topic_thread(self):
+        msg = make_msg()
+        msg.is_topic_message = True
+        msg.message_thread_id = 77
+        await deliver_link_message(
+            msg, summary="Про котиков.", video=b"bytes", username="vasya",
+            url="https://youtu.be/abc", is_bare=True,
+        )
+        msg.chat.send_video.assert_awaited_once_with(
+            video=ANY, caption=ANY, message_thread_id=77,
+        )
 
     async def test_missing_url_keeps_the_original_despite_is_bare_true(self):
         msg = make_msg()

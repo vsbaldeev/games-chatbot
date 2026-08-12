@@ -234,8 +234,9 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
     if notification_msg:
         await notification_msg.edit_text(clean)
         return notification_msg.message_id, msg.message_id, "text"
-    await msg.chat.send_action("typing")
     link_delivery = resolve_link_delivery(final_state)
+    video_attached = link_delivery is not None and link_delivery[0] is not None
+    await msg.chat.send_action("upload_video" if video_attached else "typing")
     if link_delivery is not None:
         video, url = link_delivery
         return await deliver_link_message(
