@@ -302,13 +302,17 @@ async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) 
     """Deliver the pipeline response and store the sent message.
 
     Args:
-        final_state: Final pipeline state (drives the delivery mode).
+        final_state: Final pipeline state (drives the delivery mode). For a
+            link trigger whose fetch produced content, the ingested content
+            block is also persisted on the stored row as ``link_material``,
+            so a direct reply to this message can be grounded in it later.
         msg: The triggering ``telegram.Message``.
         bot_id: The bot's own user id, recorded as the message author.
         response_text: Raw response text produced by the pipeline.
     """
     clean = normalize_homoglyphs(strip_markdown(response_text))
     sent_id, anchored_to, sent_media_type = await deliver_response(final_state, msg, clean)
+    link_material = final_state.get("youtube_short_content") or final_state.get("social_link_content")
     await unified_messages.insert(
         chat_id=msg.chat_id,
         message_id=sent_id,
@@ -317,6 +321,7 @@ async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) 
         content=clean,
         media_type=sent_media_type,
         reply_to_msg_id=anchored_to,
+        link_material=link_material,
     )
 
 

@@ -8,7 +8,7 @@ re-tested here.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.events.messages import deliver_response, passive_voice_extract
+from src.events.messages import deliver_and_record, deliver_response, passive_voice_extract
 from tests.builders import make_incoming, make_state
 
 REPLY_VOICE_PATCH_TARGET = "src.events.messages.try_send_voice_reply"
@@ -16,6 +16,7 @@ TRANSCRIBE_VOICE_PATCH_TARGET = "src.events.messages.transcribe_voice"
 UPDATE_CONTENT_PATCH_TARGET = "src.events.messages.unified_messages.update_content"
 EXTRACT_AND_SAVE_PATCH_TARGET = "src.events.messages.extract_and_save"
 LINK_DELIVER_PATCH_TARGET = "src.events.messages.deliver_link_message"
+INSERT_PATCH_TARGET = "src.events.messages.unified_messages.insert"
 
 
 def make_msg() -> MagicMock:
@@ -117,3 +118,40 @@ class TestPassiveVoiceExtractPersistsTranscript:
                 chat_id=1000, user_id=42, username="alice", message_id=555,
             )
         mock_update.assert_not_awaited()
+
+
+class TestDeliverAndRecordPersistsLinkMaterial:
+    async def test_shorts_content_is_persisted_as_link_material(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text")
+        state = make_state(
+            incoming, response_trigger="youtube_short",
+            youtube_short_content="[YouTube Shorts] транскрипт и кадры",
+        )
+        deliver = AsyncMock(return_value=(901, None, "video"))
+        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver), \
+             patch(INSERT_PATCH_TARGET, new=AsyncMock()) as mock_insert:
+            await deliver_and_record(state, msg, bot_id=42, response_text="Про котиков.")
+        assert mock_insert.await_args.kwargs["link_material"] == "[YouTube Shorts] транскрипт и кадры"
+
+    async def test_social_link_content_is_persisted_as_link_material(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text")
+        state = make_state(
+            incoming, response_trigger="social_link",
+            social_link_content="[Instagram Reel] подпись и комментарии",
+        )
+        deliver = AsyncMock(return_value=(901, None, "video"))
+        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver), \
+             patch(INSERT_PATCH_TARGET, new=AsyncMock()) as mock_insert:
+            await deliver_and_record(state, msg, bot_id=42, response_text="Реакция.")
+        assert mock_insert.await_args.kwargs["link_material"] == "[Instagram Reel] подпись и комментарии"
+
+    async def test_ordinary_reply_persists_no_link_material(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text")
+        state = make_state(incoming, response_trigger="explicit")
+        with patch(REPLY_VOICE_PATCH_TARGET, new=AsyncMock(return_value=None)), \
+             patch(INSERT_PATCH_TARGET, new=AsyncMock()) as mock_insert:
+            await deliver_and_record(state, msg, bot_id=42, response_text="Ответ.")
+        assert mock_insert.await_args.kwargs["link_material"] is None
