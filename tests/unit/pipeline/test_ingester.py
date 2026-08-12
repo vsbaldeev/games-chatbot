@@ -4,6 +4,7 @@ Characterizes the existing Shorts behavior first (no test file covered this
 before), then adds the new social-link behavior alongside it.
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,12 +12,13 @@ import pytest
 from src.pipeline import shorts
 from src.pipeline.ingester import (
     MessageIngester,
+    extract_and_describe_frames,
     is_low_confidence_transcript,
     summarize_social_link,
     summarize_youtube_short,
     transcribe_bytes,
 )
-from tests.builders import make_incoming, make_state
+from tests.builders import make_incoming, make_rate_limit_error, make_state
 
 SUMMARIZE_SHORT_TARGET = "src.pipeline.ingester.summarize_youtube_short"
 SUMMARIZE_SOCIAL_LINK_TARGET = "src.pipeline.ingester.summarize_social_link"
@@ -203,6 +205,28 @@ class TestSummarizeYoutubeShort:
         ):
             content_block, video_bytes = await summarize_youtube_short("https://youtube.com/shorts/abc")
         assert (content_block, video_bytes) == ("", None)
+
+
+class TestExtractAndDescribeFrames:
+    """A daily-quota RateLimitError from the vision LLM (reproduced live against
+    Groq: qwen/qwen3.6-27b hit its tokens-per-day cap) used to vanish inside
+    ``asyncio.gather(..., return_exceptions=True)`` with no log line, so a
+    Short that failed here looked identical in the logs to one where the
+    frame just had nothing worth describing.
+    """
+
+    async def test_frame_description_failure_is_logged_and_degrades_to_no_frames(self, caplog):
+        rate_limit_error = make_rate_limit_error(
+            "Rate limit reached for model `qwen/qwen3.6-27b` ... tokens per day (TPD)"
+        )
+        with (
+            patch("src.pipeline.ingester.extract_frames_sync", return_value=[b"frame bytes"]),
+            patch("src.pipeline.ingester.describe_frame", new=AsyncMock(side_effect=rate_limit_error)),
+            caplog.at_level(logging.WARNING, logger="src.pipeline.ingester"),
+        ):
+            frame_results = await extract_and_describe_frames(b"irrelevant video bytes")
+        assert frame_results == []
+        assert "Frame description failed" in caplog.text
 
 
 class TestLowConfidenceTranscript:
