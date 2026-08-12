@@ -121,9 +121,6 @@ detect_image_mime(bytes) — sniffs JPEG/PNG/WebP/GIF magic bytes. Needed
     because meme CDNs serve mixed formats and the data URL must declare
     the right one (life/photo_judge.py can hardcode PNG; this cannot).
 
-make_judge_llm()         — VISION_MODEL with reasoning_effort="none".
-    Without it the whole token budget burns inside a <think> block.
-
 parse_verdict(data)      — 0-10 score, or None when missing/out of range.
 
 score_meme(bytes)        — one vision call with MEME_JUDGE_SYSTEM and the

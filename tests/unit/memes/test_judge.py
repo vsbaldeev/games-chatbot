@@ -18,8 +18,17 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"payload"
 WEBP = b"RIFF\x00\x00\x00\x00WEBPVP8 "
 GIF = b"GIF89a" + b"payload"
 
-INVOKE = "src.memes.judge.ainvoke_with_backoff"
-MAKE_LLM = "src.memes.judge.make_judge_llm"
+MAKE_VISION_LLM = "src.memes.judge.make_vision_llm"
+
+
+def make_mock_llm(content: str = "", side_effect=None) -> MagicMock:
+    """Build a mock vision LLM whose .ainvoke resolves to the given response."""
+    mock_llm = MagicMock()
+    if side_effect is not None:
+        mock_llm.ainvoke = AsyncMock(side_effect=side_effect)
+    else:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response(content))
+    return mock_llm
 
 
 def llm_response(content: str) -> MagicMock:
@@ -90,23 +99,22 @@ class TestParseVerdict:
 
 class TestScoreMeme:
     async def test_returns_parsed_score(self):
-        with patch(MAKE_LLM, MagicMock()), \
-             patch(INVOKE, AsyncMock(return_value=llm_response('{"score": 9}'))):
+        with patch(MAKE_VISION_LLM, return_value=make_mock_llm('{"score": 9}')):
             assert await judge.score_meme(JPEG) == 9
 
     async def test_sends_image_with_sniffed_mime_type(self):
-        with patch(MAKE_LLM, MagicMock()), \
-             patch(INVOKE, AsyncMock(return_value=llm_response('{"score": 8}'))) as invoke:
+        mock_llm = make_mock_llm('{"score": 8}')
+        with patch(MAKE_VISION_LLM, return_value=mock_llm):
             await judge.score_meme(PNG)
-        image_part = invoke.await_args.args[1][1].content[0]
+        image_part = mock_llm.ainvoke.await_args.args[0][1].content[0]
         assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
 
     async def test_sends_no_caption_text_to_the_model(self):
         """The gate must judge the image alone — none will be sent with it."""
-        with patch(MAKE_LLM, MagicMock()), \
-             patch(INVOKE, AsyncMock(return_value=llm_response('{"score": 8}'))) as invoke:
+        mock_llm = make_mock_llm('{"score": 8}')
+        with patch(MAKE_VISION_LLM, return_value=mock_llm):
             await judge.score_meme(JPEG)
-        human_content = invoke.await_args.args[1][1].content
+        human_content = mock_llm.ainvoke.await_args.args[0][1].content
         assert [part["type"] for part in human_content] == ["image_url"]
 
     @pytest.mark.parametrize(
@@ -115,11 +123,9 @@ class TestScoreMeme:
         ids=["non-json", "empty", "out-of-range", "json-but-not-object"],
     )
     async def test_unusable_response_returns_none(self, content):
-        with patch(MAKE_LLM, MagicMock()), \
-             patch(INVOKE, AsyncMock(return_value=llm_response(content))):
+        with patch(MAKE_VISION_LLM, return_value=make_mock_llm(content)):
             assert await judge.score_meme(JPEG) is None
 
     async def test_llm_failure_returns_none(self):
-        with patch(MAKE_LLM, MagicMock()), \
-             patch(INVOKE, AsyncMock(side_effect=RuntimeError("groq down"))):
+        with patch(MAKE_VISION_LLM, return_value=make_mock_llm(side_effect=RuntimeError("groq down"))):
             assert await judge.score_meme(JPEG) is None

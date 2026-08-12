@@ -13,10 +13,9 @@ either. See :data:`src.config.prompts.MEME_JUDGE_SYSTEM`.
 import base64
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent.middleware import ainvoke_with_backoff
+from src.agent.vision import make_vision_llm
 from src.config.prompts import MEME_JUDGE_SYSTEM
 from src.utils.llm_json import load_json_object
 
@@ -54,26 +53,6 @@ def detect_image_mime(image_bytes: bytes) -> str:
     return DEFAULT_MIME
 
 
-def make_judge_llm() -> ChatGroq:
-    """Return a ChatGroq instance configured for meme vetting.
-
-    VISION_MODEL is a reasoning model; without ``reasoning_effort="none"`` the
-    whole token budget burns inside a ``<think>`` block and no JSON verdict is
-    produced (same trap as :mod:`src.life.photo_judge`).
-
-    Returns:
-        Configured vision LLM.
-    """
-    return ChatGroq(
-        model=config.VISION_MODEL,
-        api_key=config.GROQ_API_KEY,
-        temperature=0.1,
-        max_tokens=config.MEME_JUDGE_MAX_TOKENS,
-        max_retries=0,
-        reasoning_effort="none",
-    )
-
-
 def parse_verdict(data: dict | None) -> int | None:
     """Extract and validate the 0-10 score from the judge's JSON verdict.
 
@@ -108,7 +87,7 @@ async def score_meme(image_bytes: bytes) -> int | None:
     try:
         b64_image = base64.b64encode(image_bytes).decode()
         mime = detect_image_mime(image_bytes)
-        response = await ainvoke_with_backoff(make_judge_llm(), [
+        response = await make_vision_llm(max_tokens=config.MEME_JUDGE_MAX_TOKENS).ainvoke([
             SystemMessage(content=MEME_JUDGE_SYSTEM),
             HumanMessage(content=[
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
