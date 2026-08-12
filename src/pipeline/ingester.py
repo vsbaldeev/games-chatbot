@@ -56,11 +56,10 @@ from src import log
 
 import av
 from groq import AsyncGroq
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 
 from src import config
-from src.agent import ainvoke_with_backoff
+from src.agent import make_vision_llm
 from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
 from src.pipeline import shorts, social_links
 from src.pipeline.state import BotState
@@ -109,22 +108,6 @@ def aggregate_real_person(frame_results: list[tuple[bool | None, str]]) -> bool 
     if not votes:
         return None
     return sum(votes) > len(votes) / 2
-
-def _make_vision_llm() -> ChatGroq:
-    """Return a ChatGroq instance configured for vision tasks.
-
-    VISION_MODEL is a reasoning model; without ``reasoning_effort="none"``
-    it spends the whole max_tokens budget inside a ``<think>`` block and the
-    "description" comes back as truncated reasoning text.
-    """
-    return ChatGroq(
-        model=config.VISION_MODEL,
-        api_key=config.GROQ_API_KEY,
-        temperature=0.1,
-        max_tokens=200,
-        max_retries=0,
-        reasoning_effort="none",
-    )
 
 
 FRAME_DURATION_AUDIO_ONLY = 120
@@ -290,8 +273,8 @@ async def describe_image_bytes(raw_bytes: bytes) -> tuple[bool | None, str]:
         mime = "image/jpeg"
 
     b64_image = base64.b64encode(raw_bytes).decode()
-    llm = _make_vision_llm()
-    response = await ainvoke_with_backoff(llm, [
+    llm = make_vision_llm(max_tokens=200)
+    response = await llm.ainvoke([
         HumanMessage(content=[
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_image}"}},
             {"type": "text", "text": VISION_PROMPT},
@@ -504,8 +487,8 @@ async def describe_frame(frame_bytes: bytes) -> tuple[bool | None, str]:
         ``(is_real_person, description)`` — see :func:`parse_vision_response`.
     """
     b64_image = base64.b64encode(frame_bytes).decode()
-    llm = _make_vision_llm()
-    response = await ainvoke_with_backoff(llm, [
+    llm = make_vision_llm(max_tokens=200)
+    response = await llm.ainvoke([
         HumanMessage(content=[
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
             {"type": "text", "text": VISION_PROMPT},
@@ -520,7 +503,7 @@ async def extract_and_describe_frames(video_bytes: bytes) -> list[tuple[bool | N
     Returns:
         ``(is_real_person, description)`` pairs for successfully described
         frames; a failed frame extraction or a failed individual frame
-        description is dropped rather than raised.
+        description is logged and dropped rather than raised.
     """
     loop = asyncio.get_event_loop()
     try:
@@ -532,10 +515,14 @@ async def extract_and_describe_frames(video_bytes: bytes) -> list[tuple[bool | N
         *[describe_frame(frame) for frame in frames],
         return_exceptions=True,
     )
-    return [
-        result for result in results
-        if isinstance(result, tuple) and result[1]
-    ]
+    described = []
+    for result in results:
+        if isinstance(result, Exception):
+            logger.warning("Frame description failed: %s", result)
+            continue
+        if result[1]:
+            described.append(result)
+    return described
 
 
 def compose_video_content(transcript: str, frame_descriptions: list[str]) -> str:
