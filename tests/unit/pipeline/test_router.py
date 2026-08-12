@@ -2,13 +2,16 @@
 Router routing-decision tests.
 
 Exercises MessageRouter.__decide() directly — the pure function that picks
-should_respond + response_trigger from the incoming message.  No DB or LLM
+should_respond + response_trigger from the incoming message. DB calls the
+addressing gate makes are mocked via mock_link_repost_lookup below; no LLM
 calls happen here; the storage side of __call__ is not under test.
 
 Scenarios anchored to real bugs:
   e8fa36c — forwarded posts must never trigger a response
   c21fe1c — forwarded messages must not be routed anywhere active
 """
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -24,126 +27,140 @@ def router() -> MessageRouter:
     return MessageRouter(bot_username=BOT_USERNAME, bot_id=BOT_ID)
 
 
-def call_decide(router: MessageRouter, incoming: dict) -> tuple[bool, str]:
+@pytest.fixture(autouse=True)
+def mock_link_repost_lookup():
+    """Default every test to 'not a link-repost row' — today's blanket rule.
+
+    Individual tests override ``return_value`` to simulate a reply landing
+    on the bot's link-repost message and exercise the addressing gate.
+    """
+    with patch(
+        "src.pipeline.router.unified_messages.get_by_id",
+        new_callable=AsyncMock, return_value=None,
+    ) as mock:
+        yield mock
+
+
+async def call_decide(router: MessageRouter, incoming: dict) -> tuple[bool, str]:
     """Invoke the private routing decision method."""
     telegram_message = incoming["update"].message
-    return router._MessageRouter__decide(incoming, telegram_message)
+    return await router._MessageRouter__decide(incoming, telegram_message)
 
 
 class TestForwardedMessages:
     """Forwarded messages must never produce a response (e8fa36c, c21fe1c)."""
 
-    def test_forwarded_plain_text_does_not_respond(self, router):
+    async def test_forwarded_plain_text_does_not_respond(self, router):
         incoming = make_incoming(is_forwarded=True, raw_text="check this out")
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
-    def test_forwarded_text_with_bot_mention_does_not_respond(self, router):
+    async def test_forwarded_text_with_bot_mention_does_not_respond(self, router):
         incoming = make_incoming(
             is_forwarded=True,
             raw_text=f"@{BOT_USERNAME} что думаешь?",
         )
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
-    def test_forwarded_voice_does_not_respond(self, router):
+    async def test_forwarded_voice_does_not_respond(self, router):
         incoming = make_incoming(is_forwarded=True, media_type="voice")
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
-    def test_forwarded_photo_does_not_respond(self, router):
+    async def test_forwarded_photo_does_not_respond(self, router):
         incoming = make_incoming(is_forwarded=True, media_type="photo")
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
 
 class TestExplicitMention:
     """@mention in text body triggers an explicit response."""
 
-    def test_mention_in_text_responds_explicitly(self, router):
+    async def test_mention_in_text_responds_explicitly(self, router):
         incoming = make_incoming(raw_text=f"@{BOT_USERNAME} как дела?")
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert should_respond
         assert trigger == "explicit"
 
-    def test_mention_matching_is_case_insensitive(self, router):
+    async def test_mention_matching_is_case_insensitive(self, router):
         incoming = make_incoming(raw_text=f"@{BOT_USERNAME.upper()} привет")
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert should_respond
         assert trigger == "explicit"
 
-    def test_plain_text_without_mention_does_not_respond(self, router):
+    async def test_plain_text_without_mention_does_not_respond(self, router):
         incoming = make_incoming(raw_text="обычное сообщение ни о чём")
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
 
 class TestReplyToBotMessage:
     """Reply to a bot message is treated as an explicit trigger (core reply-chain flow)."""
 
-    def test_reply_to_bot_responds_explicitly(self, router):
+    async def test_reply_to_bot_responds_explicitly(self, router):
         telegram_message = make_telegram_message(reply_to_user_id=BOT_ID)
         incoming = make_incoming(telegram_message=telegram_message)
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert should_respond
         assert trigger == "explicit"
 
-    def test_reply_to_bot_without_mention_still_explicit(self, router):
+    async def test_reply_to_bot_without_mention_still_explicit(self, router):
         """A reply to a bot message should respond even without @mention text."""
         telegram_message = make_telegram_message(reply_to_user_id=BOT_ID)
         incoming = make_incoming(raw_text="ок понял", telegram_message=telegram_message)
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert should_respond
         assert trigger == "explicit"
 
-    def test_reply_to_other_user_does_not_respond(self, router):
+    async def test_reply_to_other_user_does_not_respond(self, router):
         telegram_message = make_telegram_message(reply_to_user_id=99999)
         incoming = make_incoming(telegram_message=telegram_message)
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
 
 class TestMediaMessages:
-    def test_voice_with_bot_mention_in_caption_responds_explicitly(self, router):
+    async def test_voice_with_bot_mention_in_caption_responds_explicitly(self, router):
         telegram_message = make_telegram_message(caption=f"@{BOT_USERNAME}")
         incoming = make_incoming(media_type="voice", telegram_message=telegram_message)
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert should_respond
         assert trigger == "explicit"
 
-    def test_voice_reply_to_bot_responds_explicitly(self, router):
+    async def test_voice_reply_to_bot_responds_explicitly(self, router):
         telegram_message = make_telegram_message(reply_to_user_id=BOT_ID)
         incoming = make_incoming(media_type="voice", telegram_message=telegram_message)
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert should_respond
         assert trigger == "explicit"
 
-    def test_sticker_never_responds(self, router):
+    async def test_sticker_never_responds(self, router):
         incoming = make_incoming(media_type="sticker")
-        should_respond, _ = call_decide(router, incoming)
+        should_respond, _ = await call_decide(router, incoming)
         assert not should_respond
 
-    def test_unaddressed_photo_never_responds(self, router):
+    async def test_unaddressed_photo_never_responds(self, router):
         incoming = make_incoming(media_type="photo")
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert not should_respond
         assert trigger == "random"
 
-    def test_unaddressed_voice_never_responds(self, router):
+    async def test_unaddressed_voice_never_responds(self, router):
         incoming = make_incoming(media_type="voice")
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert not should_respond
         assert trigger == "random"
 
-    def test_unaddressed_video_note_never_responds(self, router):
+    async def test_unaddressed_video_note_never_responds(self, router):
         incoming = make_incoming(media_type="video_note")
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert not should_respond
         assert trigger == "random"
 
-    def test_unaddressed_video_never_responds(self, router):
+    async def test_unaddressed_video_never_responds(self, router):
         incoming = make_incoming(media_type="video")
-        should_respond, trigger = call_decide(router, incoming)
+        should_respond, trigger = await call_decide(router, incoming)
         assert not should_respond
         assert trigger == "random"
 
@@ -248,3 +265,81 @@ class TestLinkMessageIsBare:
         )
         result = router._MessageRouter__detect_social_link(msg)
         assert result["link_message_is_bare"] is False
+
+
+class TestLinkRepostReplyGate:
+    """A reply to the bot's link-repost message needs a mention or a
+    request-like phrasing to count as addressing the bot (see the design
+    spec's Addressing Gate). Any other bot message keeps the blanket rule —
+    mock_link_repost_lookup defaults to None, i.e. 'not a link-repost row'.
+    """
+
+    async def test_bare_reply_to_link_repost_message_does_not_respond(
+        self, router, mock_link_repost_lookup
+    ):
+        mock_link_repost_lookup.return_value = {"link_material": "материал о видео"}
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text="ору")
+        incoming = make_incoming(raw_text="ору", telegram_message=telegram_message)
+        should_respond, trigger = await call_decide(router, incoming)
+        assert not should_respond
+        assert trigger == "random"
+
+    async def test_question_reply_to_link_repost_message_responds_explicitly(
+        self, router, mock_link_repost_lookup
+    ):
+        mock_link_repost_lookup.return_value = {"link_material": "материал о видео"}
+        question = "а что он в конце сказал?"
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text=question)
+        incoming = make_incoming(raw_text=question, telegram_message=telegram_message)
+        should_respond, trigger = await call_decide(router, incoming)
+        assert should_respond
+        assert trigger == "explicit"
+
+    async def test_mentioning_reply_to_link_repost_message_responds_explicitly(
+        self, router, mock_link_repost_lookup
+    ):
+        mock_link_repost_lookup.return_value = {"link_material": "материал о видео"}
+        mentioning_text = f"@{BOT_USERNAME} ору"
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text=mentioning_text)
+        incoming = make_incoming(raw_text=mentioning_text, telegram_message=telegram_message)
+        should_respond, trigger = await call_decide(router, incoming)
+        assert should_respond
+        assert trigger == "explicit"
+
+    async def test_reply_to_non_link_repost_bot_message_keeps_blanket_rule(
+        self, router, mock_link_repost_lookup
+    ):
+        # mock_link_repost_lookup already defaults to None (an ordinary bot
+        # message, e.g. a joke) — also covers a purged/missing row: never
+        # gate more aggressively on missing data than on a confirmed
+        # non-link-repost row.
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID)
+        incoming = make_incoming(raw_text="ору", telegram_message=telegram_message)
+        should_respond, trigger = await call_decide(router, incoming)
+        assert should_respond
+        assert trigger == "explicit"
+
+    async def test_gate_requires_mention_for_non_text_replies(
+        self, router, mock_link_repost_lookup
+    ):
+        # The router runs before transcription, so a real voice message's
+        # telegram_message.text/.caption are both None at this point (no
+        # caption on the voice note) — __decide derives its addressing text
+        # from the Telegram object, not msg["raw_text"], so
+        # make_telegram_message() with neither text= nor caption= set
+        # (its defaults) genuinely reproduces "no text yet" — looks_like_request
+        # has nothing to judge, and only an explicit mention can satisfy the
+        # gate.
+        mock_link_repost_lookup.return_value = {"link_material": "материал о видео"}
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID)
+        incoming = make_incoming(media_type="voice", telegram_message=telegram_message)
+        should_respond, trigger = await call_decide(router, incoming)
+        assert not should_respond
+        assert trigger == "random"
+
+    async def test_lookup_is_only_called_when_replying_to_the_bot(
+        self, router, mock_link_repost_lookup
+    ):
+        incoming = make_incoming(raw_text="обычное сообщение ни о чём")
+        await call_decide(router, incoming)
+        mock_link_repost_lookup.assert_not_called()

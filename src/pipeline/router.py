@@ -13,7 +13,11 @@ Respond when:
   - The bot is @mentioned in the text / caption as a whole word
     (word-boundary match — URLs or longer words containing the username
     do not count).
-  - The message is a direct reply to a bot message (text or any media type).
+  - The message is a direct reply to a bot message (text or any media type)
+    — except a reply to the bot's own link-repost message (see
+    src.events.link_repost), which needs a mention or a genuine
+    question/request — reposted third-party content invites chat among
+    members discussing it, not necessarily talk to the bot.
   - The text mentions the bot by word («бот» / "bot") without addressing it —
     routed with response_trigger="insult_check"; the filter node replies only
     if it confirms the message insults the bot.
@@ -214,7 +218,7 @@ class MessageRouter:
             if social_link_update is not None:
                 return social_link_update
 
-        should_respond, response_trigger = self.__decide(msg, message)
+        should_respond, response_trigger = await self.__decide(msg, message)
 
         return {"should_respond": should_respond, "response_trigger": response_trigger}
 
@@ -356,8 +360,40 @@ class MessageRouter:
             ),
         }
 
-    def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:
+    async def __is_link_repost_reply(self, chat_id: int, reply: Any) -> bool:
+        """Check whether a replied-to bot message is a link-repost row.
+
+        Reuses the ``link_material`` column (set only for the bot's own
+        link-repost messages — see src.events.messages.deliver_and_record)
+        as the marker: any other bot message (jokes, roasts, voice replies)
+        has it ``NULL``.
+
+        Args:
+            chat_id: Chat the reply belongs to.
+            reply: The ``telegram.Message`` being replied to (already
+                confirmed sent by the bot).
+
+        Returns:
+            ``True`` when the stored row carries persisted link material. A
+            missing or purged row degrades to ``False`` — never gate more
+            aggressively on missing data than on a confirmed non-link-repost
+            row.
+        """
+        row = await unified_messages.get_by_id(chat_id=chat_id, message_id=reply.message_id)
+        return bool(row and row.get("link_material"))
+
+    async def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:
         """Pick the routing decision for one incoming message.
+
+        A reply to the bot's link-repost message (see
+        src.events.link_repost) needs a mention or request-like phrasing to
+        count as addressing the bot — replying to reposted third-party
+        content is often chat among members discussing the video, not
+        talking to the bot, unlike a reply to the bot's own conversational
+        output. Every other bot message keeps the blanket rule: any reply
+        counts as addressing it. The router runs before transcription, so a
+        non-text reply has no content for looks_like_request to judge —
+        only an explicit mention can satisfy the gate for those.
 
         Args:
             msg: Normalised incoming-message dict from the pipeline state.
@@ -370,9 +406,24 @@ class MessageRouter:
             return False, "random"
 
         media_type = msg["media_type"]
-        addressed = is_explicitly_addressed(
-            telegram_message, self.__bot_username, self.__bot_id
+        # Matches is_explicitly_addressed's original derivation exactly: text
+        # OR caption, read from the Telegram object itself, not msg["raw_text"]
+        # — a photo/voice message's @mention lives in its caption, and
+        # msg["raw_text"] is not guaranteed to carry it (it does in
+        # production, via build_pipeline_state, but nothing here should rely
+        # on that indirection when the source object is right here).
+        text = (
+            getattr(telegram_message, "text", None)
+            or getattr(telegram_message, "caption", None)
+            or ""
         )
+        mentioned = is_mentioned(text, self.__bot_username)
+        reply_to_bot = is_reply_to_bot(telegram_message, self.__bot_id)
+        addressed = mentioned or reply_to_bot
+        if reply_to_bot and not mentioned:
+            reply = telegram_message.reply_to_message
+            if await self.__is_link_repost_reply(msg["chat_id"], reply):
+                addressed = looks_like_request(text)
 
         if media_type == "text":
             if addressed:
