@@ -23,19 +23,22 @@ phrase each morning with no chat post, so the answer changes daily instead of
 sitting frozen for up to a week — and a dated history of recent activities
 lets Жора answer "what did you do yesterday" consistently too.
 Tracks per-user stats, extracts long-term memories, and routes every message through
-a typed LangGraph pipeline. YouTube Shorts links posted in the chat are watched for
-everyone: the bot downloads the short, transcribes and looks at it, reads the top
-comments, then reposts the downloaded video to chat and reacts to it — translating
-and summarizing the comment reaction — instead of retelling it, since the whole
-group can now see the clip; only a failed download or transcription falls back to
-a 1–2 sentence text retell plus the comment summary, with no verdict and no
-fact-checking the video against the model's own (possibly stale) knowledge.
-Instagram Reel and long-form YouTube video links get the same
-lightweight treatment (title/caption + top comments, no transcript or
-vision): Instagram Reels also have their video downloaded and reposted to chat
-ahead of the reply, so the bot reacts to the clip the same way Shorts does; long-form
-YouTube links, and any Instagram Reel or Short whose download
-fails always get the text retell framing instead. Voice messages and
+a typed LangGraph pipeline. YouTube Shorts, Instagram Reels, and long-form YouTube
+links posted in the chat are watched for everyone: the bot downloads the clip
+(Shorts and Reels only — long-form YouTube never carries video), transcribes and
+looks at it (Shorts) or reads its title/caption and top comments (Reels and
+long-form YouTube), and replies with a single message — the video with a 1–2
+sentence summary and comment-reaction recap as its caption, or, when there's no
+video, a plain text message with a link preview. If the sender's message was
+nothing but the link, the bot deletes it once its own message has gone out and
+credits the sender inside the caption ("Скинул @username" + the link + the
+summary); if the sender wrote anything else alongside the link, their message is
+left untouched and the bot's message replies to it instead, carrying just the
+summary. A failed combined send falls back to an ordinary text reply, and the
+original is never deleted when that happens. Deleting the original requires the
+bot to be a chat administrator with the `can_delete_messages` permission — without
+it, everything else still works and the link message simply stays in the chat.
+Voice messages and
 video notes are answered in kind: the reply comes back as a voice note spoken
 by a local Silero v5 Russian TTS voice, degrading to plain text whenever the
 reply is unspeakable (too long, no Cyrillic) or synthesis fails.

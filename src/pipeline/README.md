@@ -36,7 +36,8 @@ incoming message
     │     │        SHORTS_DAILY_CAP=15 summaries per chat per sliding 24h
     │     │        window — a gated link falls through to the rules below,
     │     │        costing zero downloads and zero LLM tokens; on success the
-    │     │        downloaded video is posted to chat before the reply, see
+    │     │        response is delivered as a single message — the downloaded
+    │     │        video with the summary as its caption, see
     │     │        src/events/README.md)
     │     ├─ Instagram/YouTube link → should_respond=True, trigger="social_link"
     │     │       (checked after Shorts — Shorts keeps top priority; tries
@@ -92,9 +93,9 @@ ingester (current message, should_respond=True only)
     │     youtube_short_content is set as the success flag (None on failure —
     │     no transcript AND no frames counts as failure; title/comments alone
     │     are not enough to react honestly); on success the downloaded video
-    │     bytes are also kept in youtube_short_video and posted to chat
-    │     before the reply (see src/events/README.md) — same as Instagram's
-    │     social_link_video
+    │     bytes are also kept in youtube_short_video, delivered as one
+    │     message together with the summary caption (see src/events/README.md)
+    │     — same as Instagram's social_link_video
     │     PO tokens for YouTube bot-detection come automatically from the
     │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
     │     trigger="social_link": summarize_social_link dispatches to the
@@ -109,8 +110,9 @@ ingester (current message, should_respond=True only)
     │     an unrecognized handler, an empty payload, or the handler's fetch
     │     raising all degrade to silence, never an unhandled exception);
     │     Instagram alone additionally downloads the Reel's video bytes into
-    │     social_link_video, posted to chat before the reply (see
-    │     src/events/README.md) — YouTube never carries video
+    │     social_link_video, delivered as one message together with the
+    │     summary caption (see src/events/README.md) — YouTube never carries
+    │     video
     ├─ voice      → Groq Whisper → transcript
     ├─ video_note → Groq Whisper + frame extraction (see below); frames' vision
     │               calls also yield media_is_real_person (majority vote — see below)
@@ -442,24 +444,25 @@ response   personality LLM (ReAct executor, no tools)
     │            (build_trigger_line) so the model reacts to the vision/frame description
     │            instead of retelling it as if it were the user's own words; joking is
     │            conditional on there being something to joke about, never mandatory
-    │          trigger="youtube_short" picks react vs. retell per request
-    │            (select_shorts_instruction): when the Short's video actually
-    │            downloaded and will be posted to chat before this reply, the
-    │            model reacts to it like any other media (video already
-    │            visible, do not retell it) — otherwise (gate passed but the
-    │            download or transcription failed) it retells in 1–2
-    │            sentences and summarizes the audience reaction from the top
-    │            comments; no worth-watching verdict, no inventing missing
-    │            details, and no checking the video's facts against the
-    │            model's own stale knowledge (nothing here is tool-verified —
-    │            the worker is skipped for Shorts)
-    │          trigger="social_link" picks react vs. retell the same way
-    │            (select_social_link_instruction): when an Instagram Reel's
-    │            video was actually downloaded and will be posted to chat
-    │            before this reply, the model reacts to it like any other
-    │            media — otherwise (YouTube always, or an Instagram link whose
-    │            download failed) it gets the same retell-and-comments-summary
-    │            framing as Shorts
+    │          trigger="youtube_short" and trigger="social_link" always use
+    │            retell framing (SHORTS_TRIGGER_INSTRUCTION /
+    │            SOCIAL_LINK_RETELL_INSTRUCTION, src/config/prompts.py): in
+    │            1–2 sentences the model retells what the clip is about and
+    │            summarizes the audience reaction from the top comments; no
+    │            worth-watching verdict, no inventing missing details, and no
+    │            checking the video's facts against the model's own stale
+    │            knowledge (nothing here is tool-verified — the worker is
+    │            skipped for both triggers). There is no react framing
+    │            anymore: the reply becomes the caption on the reposted video,
+    │            or the body of the single message that replaces a bare link
+    │            when there is no video (src/events/link_repost.py, see
+    │            src/events/README.md) — read BEFORE anyone has watched the
+    │            clip, never posted after it the way a reply beneath an
+    │            already-seen video would be. A message body has no
+    │            "everyone's already seen it" moment to react to, so retell
+    │            framing is the only framing that ever made sense here — this
+    │            is unrelated to whether the fetch happened to also download a
+    │            video
     │          the bot's own past messages render as "Ты (бот): …" (via row_speaker,
     │            keyed on user_id == BOT_ID) so the model never @mentions or replies to itself
     │          system prompt (RESPONSE_PROMPT) is prepended internally by the executor
@@ -578,6 +581,7 @@ BotState:
     social_link_url: str | None        # canonical URL, set by router
     social_link_content: str | None    # labelled content block, set by ingester
     social_link_video: bytes | None    # downloaded video bytes (Instagram only), set by ingester
+    link_message_is_bare: bool | None  # True when the triggering message was the link and nothing else, set by router; only then may the events layer delete the original (src/events/link_repost.py)
     media_is_real_person: bool | None  # vision classification for photo/video_note/video, set by ingester; None = text/voice/unclassified
     context: AssembledContext | None
     thread_id: str | None              # {chat_id}_{root_message_id} for replies, chat_id for flat; scopes LLM history

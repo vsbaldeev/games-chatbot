@@ -32,18 +32,55 @@ voice_reply.py
                                       the plain text reply
 
 messages.py (deliver_response)
-    try_send_downloaded_video(msg, video_bytes) — best-effort post of a
-                                      downloaded video (Instagram Reel or
-                                      YouTube Shorts — long-form YouTube
-                                      never attaches video) before the
-                                      text reply; a failed upload is logged
-                                      and swallowed, never blocking the reply
+    deliver_response(final_state, msg, clean) — dispatches the pipeline's
+                                      reply. A link trigger (youtube_short /
+                                      social_link) whose fetch produced
+                                      content is handed off to
+                                      link_repost.deliver_link_message;
+                                      voice/video_note triggers try a
+                                      synthesized voice reply first
+                                      (voice_reply.py, falling back to text);
+                                      everything else is a plain text reply
+
+link_repost.py
+    deliver_link_message(msg, summary, video, username, url, is_bare) —
+                                      sends the bot's ONE combined message
+                                      for a link trigger: the downloaded
+                                      video with the summary as its caption
+                                      when there is one (YouTube Shorts,
+                                      Instagram Reel), or a plain text
+                                      message when there isn't (long-form
+                                      YouTube never carries video, and a
+                                      failed download degrades the same way)
 ```
 
-deliver_response posts the video first when the pipeline downloaded one
-(``final_state["social_link_video"]`` for Instagram, or
-``final_state["youtube_short_video"]`` for Shorts), then the text reply, so
-the video appears in chat before the bot's reaction to it.
+When the triggering message was nothing but the link (`link_message_is_bare`,
+set by the router — see src/pipeline/README.md), the message is sent
+un-anchored and `build_caption` credits the sender ("Скинул @username" + the
+canonical link + the summary), then `try_delete_original` removes the user's
+original link message — only after the send already succeeded, never before,
+and never at all if the send failed. Deleting degrades quietly: it needs the
+bot to be a chat administrator with `can_delete_messages`, and a missing
+permission just logs a warning and leaves the link message in place —
+everything else about the feature still works. When the message carried more
+than the link, it is left alone and the bot's single message replies to it
+instead, with the bare summary only (no credit line, no link — both are
+already visible in the original message).
+
+If the combined send itself fails for any reason, `deliver_link_message` falls
+back to an ordinary anchored text reply (`msg.reply_text`) and never deletes
+the original — the download and LLM spend already happened, so the summary
+still reaches the chat. The one exception is a video-less, non-bare send that
+failed: that call already *was* the anchored text reply, so it re-raises
+instead of retrying itself.
+
+`fit_caption` fits the caption inside Telegram's 1024-character caption cap
+through a three-rung ladder: send as composed when it already fits; otherwise
+compress the summary against the budget left by the credit line and URL via
+`src/agent/compress.py` (LLM-based compression); and only if the compressor
+still overshoots, `truncate_at_sentence` cuts it deterministically at the
+last sentence boundary inside the budget (or appends an ellipsis when none
+exists) as a last-resort backstop that can never fail to fit.
 
 ## Chat-requested selfies
 
