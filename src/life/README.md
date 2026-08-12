@@ -65,9 +65,10 @@ flow that renders images, so the slot is this module's own.)
 SD1.5 renders subject *interactions* stochastically — all subjects present,
 nobody doing what was asked. `generate_best_photo` generates up to
 `IMAGEGEN_CANDIDATES` (3) candidates with random seeds and
-`src/life/photo_judge.py` scores each against the requested scene via the Groq
-vision model (0–10, interaction weighted heaviest, the same multimodal pattern
-as `src/pipeline/ingester.py`). The first candidate scoring ≥
+`src/life/photo_judge.py` scores each against the requested scene via the
+shared vision LLM factory (`src.agent.vision.make_vision_llm`, Groq primary
+with an OpenRouter fallback; 0–10, interaction weighted heaviest, the same
+multimodal pattern as `src/pipeline/ingester.py`). The first candidate scoring ≥
 `PHOTO_JUDGE_PASS_SCORE` (7) ships immediately (early exit saves CPU-minutes);
 otherwise the best-scoring one ships — **the judge ranks, it never gates**. A
 judge outage scores as "unknown" (`UNSCORED_RANK`, below any scored candidate

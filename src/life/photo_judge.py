@@ -11,34 +11,13 @@ the best candidate even when none reaches the pass score.
 import base64
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent.middleware import ainvoke_with_backoff
+from src.agent.vision import make_vision_llm
 from src.config.prompts import PHOTO_JUDGE_SYSTEM
 from src.utils.llm_json import load_json_object
 
 logger = log.get_logger(__name__)
-
-
-def make_judge_llm() -> ChatGroq:
-    """Return a ChatGroq instance configured for photo judging.
-
-    VISION_MODEL is a reasoning model; without ``reasoning_effort="none"``
-    the whole token budget burns inside a ``<think>`` block and no JSON
-    verdict is produced (same trap as ``src/pipeline/ingester.py``).
-
-    Returns:
-        Configured vision LLM.
-    """
-    return ChatGroq(
-        model=config.VISION_MODEL,
-        api_key=config.GROQ_API_KEY,
-        temperature=0.1,
-        max_tokens=config.PHOTO_JUDGE_MAX_TOKENS,
-        max_retries=0,
-        reasoning_effort="none",
-    )
 
 
 def parse_score(data: dict | None) -> int | None:
@@ -77,7 +56,7 @@ async def score_photo(png_bytes: bytes, image_prompt: str) -> int | None:
     """
     try:
         b64_image = base64.b64encode(png_bytes).decode()
-        response = await ainvoke_with_backoff(make_judge_llm(), [
+        response = await make_vision_llm(max_tokens=config.PHOTO_JUDGE_MAX_TOKENS).ainvoke([
             SystemMessage(content=PHOTO_JUDGE_SYSTEM),
             HumanMessage(content=[
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
