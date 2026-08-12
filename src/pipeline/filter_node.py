@@ -87,7 +87,7 @@ from src.life import selfie
 from src.pipeline import engagement_gate
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
-from src.pipeline.router import is_explicitly_addressed
+from src.pipeline.router import is_explicitly_addressed, looks_like_request
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -136,46 +136,6 @@ SOCIAL_LINK_FAILED_REPLIES = [
     "Не дотянулся до контента. Перекиньте ещё раз или смотрите так.",
 ]
 
-# Leading interrogatives that mark a message as a real question even without
-# a question mark — Russian and English.
-QUESTION_WORDS = frozenset({
-    "что", "чё", "че", "чо", "как", "почему", "зачем", "кто", "кого", "кому",
-    "где", "когда", "куда", "откуда", "сколько", "какой", "какая", "какое",
-    "какие", "каким", "чем", "чей", "чья", "чьё",
-    "what", "how", "why", "who", "where", "when", "which", "whose",
-})
-
-# Leading imperative request verbs — a short command addressed to the bot is
-# never meaningless, even when the classifier errs (e.g. a reply to a photo
-# it could not see, like «переведи» under an unenriched meme).
-REQUEST_WORDS = frozenset({
-    "переведи", "переведите", "расскажи", "расскажите", "скажи", "скажите",
-    "подскажи", "подскажите", "назови", "назовите",
-    "покажи", "покажите", "напиши", "напишите", "объясни", "объясните",
-    "поясни", "поясните", "сделай", "сделайте", "найди", "найдите",
-    "проверь", "проверьте", "посчитай", "придумай", "кинь", "скинь",
-    "дай", "давай", "помоги", "помогите",
-    "поищи", "поищите", "загугли", "загуглите", "погугли", "погуглите",
-    "гугли", "нагугли", "узнай", "узнайте",
-    "translate", "tell", "show", "write", "make", "find", "check", "explain",
-    "say", "give", "help", "search", "google", "lookup",
-})
-
-# A message with more than this many non-laughter word tokens is treated as
-# substantive: every MEANINGLESS category is a SHORT reaction (laughter, «ок»,
-# «бля», emoji, «хз»), so a longer message is essentially never meaningless.
-SUBSTANTIVE_WORD_COUNT = 6
-
-# Tokens that are pure laughter — skipped when looking for the leading word,
-# so «ахаха что за бред» still reads as a question.
-LAUGHTER_RE = re.compile(r"^(?:[хаеоы]+|[ha]+|l[ol]+|лол|кек|rofl|lmao)$", re.IGNORECASE)
-
-# @handles are dropped before the leading-word analysis: an addressed message
-# usually opens with «@bot …», and the handle would otherwise take the
-# leading-word slot («@bot что это» reading as «bot») and inflate the word
-# count. No handle is ever an interrogative or an imperative.
-MENTION_RE = re.compile(r"@\w+")
-
 # Cap on how much replied-to text is fed to the classifier as context.
 REPLIED_TO_CHAR_LIMIT = 500
 
@@ -215,41 +175,6 @@ def is_meme_random_trigger(state: BotState, media_type: str) -> bool:
     if media_type not in RANDOM_MEDIA_MEME_GATE_TYPES:
         return False
     return state.get("media_is_real_person") is False
-
-
-def looks_like_request(text: str) -> bool:
-    """Cheap deterministic check that a message is a question or imperative request.
-
-    Used to override a MEANINGLESS verdict: a question or request addressed
-    to the bot always deserves a reply, however short it is — even when the
-    classifier erred because the quoted content was opaque to it.
-
-    Every MEANINGLESS category is a SHORT reaction (laughter, «ок», «бля»,
-    emoji, «хз»), so a message with more than ``SUBSTANTIVE_WORD_COUNT``
-    non-laughter word tokens is treated as substantive regardless of its
-    leading word — this catches long requests like «поищи в интернете, когда…»
-    that a weak classifier mislabels and that no leading-word check would save.
-
-    The text arrives as the user typed it, so an addressed message still
-    carries its «@bot» handle; handles are stripped before tokenizing, or
-    every @mentioned question would be judged on the bot's own username.
-
-    Args:
-        text: Raw message text.
-
-    Returns:
-        True when the text contains a question mark, has more than
-        ``SUBSTANTIVE_WORD_COUNT`` non-laughter words, or its first
-        non-laughter word is an interrogative from ``QUESTION_WORDS`` or an
-        imperative from ``REQUEST_WORDS`` — all judged with @handles removed.
-    """
-    if "?" in text:
-        return True
-    without_mentions = MENTION_RE.sub(" ", text.lower())
-    words = [word for word in re.findall(r"\w+", without_mentions) if not LAUGHTER_RE.fullmatch(word)]
-    if len(words) > SUBSTANTIVE_WORD_COUNT:
-        return True
-    return bool(words) and words[0] in (QUESTION_WORDS | REQUEST_WORDS)
 
 
 def replies_to_bot(msg: dict) -> bool:
