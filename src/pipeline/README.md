@@ -50,6 +50,9 @@ incoming message
     │     │       (word-boundary regex via is_explicitly_addressed — URLs and
     │     │        longer words containing the username do not count)
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
+    │     │       (a reply to the bot's link-repost message is the one
+    │     │        exception — needs a mention or a genuine question/request,
+    │     │        see src.events.link_repost and MessageRouter.__decide)
     │     ├─ word «бот»/"bot" in text → should_respond=True,  trigger="insult_check"
     │     │       (BOT_WORD_RE, cheap regex precondition; the filter node then
     │     │        decides whether the message actually insults the bot)
@@ -58,6 +61,7 @@ incoming message
     ├─ voice / video_note / video / photo
     │     ├─ @bot_username in caption → should_respond=True,  trigger="explicit"
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
+    │     │       (same link-repost exception as above)
     │     └─ otherwise               → should_respond=False (bot never comments on
     │                                    media it wasn't shown; still stored + enriched)
     │
@@ -564,7 +568,11 @@ IncomingMessage:
 AssembledContext:
     user_facts: dict[str, list[str]]     # username → facts relevant to THIS message (top-5 per user above 0.85 cosine), closest first; not the user's whole stored list. Counter tallies like «Оскорблял бота N раз» never appear — NULL embedding, plus an explicit is_counter_fact filter
     recent_history: list[dict]           # flat window (last 20), newest-first
-    replied_to: dict | None              # the specific message being replied to (for annotation)
+    replied_to: dict | None              # the specific message being replied to (for annotation);
+                                          # carries link_material when the row is one of the bot's own
+                                          # link-repost messages — build_recent_history_lines injects
+                                          # it into the prompt (response_node.py); the same column also
+                                          # marks the row for MessageRouter's addressing gate
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
     asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question

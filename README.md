@@ -38,6 +38,12 @@ summary. A failed combined send falls back to an ordinary text reply, and the
 original is never deleted when that happens. Deleting the original requires the
 bot to be a chat administrator with the `can_delete_messages` permission — without
 it, everything else still works and the link message simply stays in the chat.
+Replying directly to the bot's link-repost message with a real question gets
+a grounded answer, using the same transcript/comment material the caption
+was written from — but a bare reply with no question and no `@mention`
+doesn't automatically count as addressing the bot the way replying to its
+other messages does, since it's often just chat among members about the
+video rather than talk to the bot.
 Voice messages and
 video notes are answered in kind: the reply comes back as a voice note spoken
 by a local Silero v5 Russian TTS voice, degrading to plain text whenever the

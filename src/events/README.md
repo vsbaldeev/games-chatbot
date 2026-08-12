@@ -78,13 +78,30 @@ still reaches the chat. The one exception is a video-less, non-bare send that
 failed: that call already *was* the anchored text reply, so it re-raises
 instead of retrying itself.
 
-`fit_caption` fits the caption inside Telegram's 1024-character caption cap
-through a three-rung ladder: send as composed when it already fits; otherwise
-compress the summary against the budget left by the credit line and URL via
-`src/agent/compress.py` (LLM-based compression); and only if the compressor
-still overshoots, `truncate_at_sentence` cuts it deterministically at the
-last sentence boundary inside the budget (or appends an ellipsis when none
-exists) as a last-resort backstop that can never fail to fit.
+`fit_caption` fits the text inside the relevant Telegram limit through a
+three-rung ladder: send as composed when it already fits; otherwise compress
+the summary against the remaining budget via `src/agent/compress.py`
+(LLM-based compression); and only if the compressor still overshoots,
+`truncate_at_sentence` cuts it deterministically at the last sentence
+boundary inside the budget (or appends an ellipsis when none exists) as a
+last-resort backstop that can never fail to fit. The limit itself depends on
+whether a video is attached: 1024 characters (Telegram's caption cap) when
+there is one, 4096 (the plain text-message cap) when there isn't — long-form
+YouTube links and any download failure that falls back to a text-only send
+are not bound by the tighter caption limit.
+
+The content block computed for the caption (transcript/frame
+descriptions/comments for a Short, description/comments for a Reel or
+long-form YouTube link) is also persisted on the bot's own message row
+(`link_material` on `unified_messages`, written by `deliver_and_record` in
+`messages.py`). When a member replies directly to that message,
+`response_node.py` injects it back into the prompt with a no-fabrication
+instruction, so the reply can be as specific as the original caption was —
+see `docs/superpowers/specs/2026-08-12-link-reply-grounding-design.md`. The
+same column also marks the row for `MessageRouter`'s addressing gate: a
+reply to a link-repost message only counts as addressing the bot when it
+also mentions the bot or reads as a genuine question or request, unlike
+every other bot message.
 
 ## Chat-requested selfies
 

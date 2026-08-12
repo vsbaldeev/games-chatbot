@@ -33,7 +33,7 @@ class AssembledContext(TypedDict):
 
     user_facts: dict[str, list[str]]   # username → list of LLM-extracted fact strings
     recent_history: list[dict]         # flat recent messages used to fill the context window
-    replied_to: dict | None            # the specific message being replied to, for annotation
+    replied_to: dict | None            # the specific message being replied to, for annotation; may carry link_material (see src.pipeline.router's addressing gate)
     reply_chain: list[dict]            # full reply chain from root to replied-to message, oldest-first
     asking_user_tag: dict | None       # {"tag", "reason"} weekly role of the message sender, if any
     mentioned_tags: dict[str, dict]    # username → {"tag", "reason"} for members @mentioned in the question
