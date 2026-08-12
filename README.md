@@ -84,8 +84,8 @@ LLM (roles)  Groq llama-3.3-70b-versatile
 LLM (filter) Groq llama-3.3-70b-versatile → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
 STT          Groq whisper-large-v3
 TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
-Image gen    Stable Diffusion 1.5 (DreamShaper 8), DPM++ 2M Karras 20 steps, self-hosted CPU service (diffusers/FastAPI, async job API); best-of-3 candidates ranked by the Groq vision judge
-Vision       Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat the whole token budget)
+Image gen    Stable Diffusion 1.5 (DreamShaper 8), DPM++ 2M Karras 20 steps, self-hosted CPU service (diffusers/FastAPI, async job API); best-of-3 candidates ranked by the vision judge
+Vision       Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat the whole token budget) → OpenRouter qwen/qwen3-vl-32b-instruct (cross-provider fallback; make_vision_llm)
 Security     Groq llama-prompt-guard-2-86m
 Video frames PyAV (in-process, no subprocess)
 Shorts DL    yt-dlp (in-process Python API; self-updates on start + daily check)

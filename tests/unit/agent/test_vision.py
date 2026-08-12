@@ -1,5 +1,6 @@
 """Tests for the shared cross-provider vision LLM factory."""
 
+import logging
 from unittest.mock import patch
 
 from langchain_core.runnables.fallbacks import RunnableWithFallbacks
@@ -21,7 +22,6 @@ class TestMakeVisionLlm:
         assert llm.temperature == 0.1
 
     def test_without_openrouter_key_logs_warning(self, caplog):
-        import logging
         with (
             patch(OPENROUTER_KEY_TARGET, ""),
             caplog.at_level(logging.WARNING, logger="src.agent.vision"),

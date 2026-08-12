@@ -59,7 +59,7 @@ from groq import AsyncGroq
 from langchain_core.messages import HumanMessage
 
 from src import config
-from src.agent import make_vision_llm
+from src.agent.vision import make_vision_llm
 from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
 from src.pipeline import shorts, social_links
 from src.pipeline.state import BotState
@@ -517,7 +517,7 @@ async def extract_and_describe_frames(video_bytes: bytes) -> list[tuple[bool | N
     )
     described = []
     for result in results:
-        if isinstance(result, Exception):
+        if not isinstance(result, tuple):
             logger.warning("Frame description failed: %s", result)
             continue
         if result[1]:

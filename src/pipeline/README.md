@@ -178,6 +178,16 @@ frame extraction (PyAV)
     without frames the transcript is labelled "[Аудиодорожка видео — возможно
     музыка или речь за кадром]:" so lyrics are not read as the sender's words
 
+vision LLM fallback (src.agent.vision.make_vision_llm)
+    every vision call in this file (photo, sticker, video/video_note frames)
+    goes through the shared factory: Groq primary (qwen/qwen3.6-27b,
+    reasoning_effort="none") with an OpenRouter fallback
+    (qwen/qwen3-vl-32b-instruct) so a Groq daily-quota exhaustion or outage
+    degrades to a paid call instead of silently dropping the description —
+    same cross-provider pattern as the filter's make_filter_llm above.
+    Without OPENROUTER_API_KEY, vision calls stay Groq-only and degrade the
+    same way they always have.
+
 shared lazy media enrichment (ingester.enrich_media_row, on demand)
     used by the filter node (replied-to row, before classification) and by
     context_builder (every photo/sticker row in the reply chain); other media

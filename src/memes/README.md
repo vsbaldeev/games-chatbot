@@ -124,7 +124,9 @@ detect_image_mime(bytes) — sniffs JPEG/PNG/WebP/GIF magic bytes. Needed
 parse_verdict(data)      — 0-10 score, or None when missing/out of range.
 
 score_meme(bytes)        — one vision call with MEME_JUDGE_SYSTEM and the
-    image alone (no caption: none will be sent, so none is judged).
+    image alone (no caption: none will be sent, so none is judged), built via
+    the shared vision LLM factory (`src.agent.vision.make_vision_llm`, Groq
+    primary with an OpenRouter fallback — same pattern as `src/life/photo_judge.py`).
     Logs the score at INFO so the threshold stays tunable. Returns None on
     any failure — "unknown", never zero.
 ```
