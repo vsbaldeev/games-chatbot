@@ -96,21 +96,29 @@ async def insert(
     file_id: str | None = None,
     media_group_id: str | None = None,
     is_forwarded: bool = False,
+    link_material: str | None = None,
 ) -> None:
-    """Insert a new message row. Silently ignores duplicate (chat_id, message_id) pairs."""
+    """Insert a new message row. Silently ignores duplicate (chat_id, message_id) pairs.
+
+    Args:
+        link_material: Persisted ingestion content block (transcript, frame
+            descriptions, comments) for the bot's own link-repost messages
+            only — set by ``deliver_and_record`` when the pipeline run
+            fetched link content. ``None`` for every other message.
+    """
     async with database.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO unified_messages
                 (message_id, chat_id, user_id, username, content,
                  media_type, reply_to_msg_id, file_id, media_group_id,
-                 is_forwarded, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 is_forwarded, created_at, link_material)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (chat_id, message_id) DO NOTHING
             """,
             message_id, chat_id, user_id, username, content,
             media_type, reply_to_msg_id, file_id, media_group_id,
-            is_forwarded, time.time(),
+            is_forwarded, time.time(), link_material,
         )
 
 
@@ -207,7 +215,8 @@ async def get_by_id(*, chat_id: int, message_id: int) -> dict | None:
         row = await conn.fetchrow(
             """
             SELECT message_id, user_id, username, content, media_type,
-                   reply_to_msg_id, file_id, media_group_id, is_forwarded
+                   reply_to_msg_id, file_id, media_group_id, is_forwarded,
+                   link_material
             FROM unified_messages
             WHERE chat_id = $1 AND message_id = $2
             """,
@@ -222,7 +231,7 @@ async def get_recent(*, chat_id: int, limit: int = 20) -> list[dict]:
         rows = await conn.fetch(
             """
             SELECT message_id, user_id, username, content, media_type,
-                   is_forwarded, created_at
+                   is_forwarded, created_at, link_material
             FROM unified_messages
             WHERE chat_id = $1
             ORDER BY created_at DESC
