@@ -15,6 +15,7 @@ import pytest
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
 from src.config.prompts import (
+    LINK_REPLY_GROUNDING_INSTRUCTION,
     SHORTS_TRIGGER_INSTRUCTION,
     SOCIAL_LINK_RETELL_INSTRUCTION,
 )
@@ -374,6 +375,16 @@ class TestCaptionBudgetIsInPrompts:
         assert "600 символов" in SOCIAL_LINK_RETELL_INSTRUCTION
 
 
+class TestLinkReplyGroundingPromptText:
+    def test_grounding_instruction_names_the_no_fabrication_rule(self):
+        assert "не выдумывай детали" in LINK_REPLY_GROUNDING_INSTRUCTION
+        assert "не проверяй факты по своим знаниям" in LINK_REPLY_GROUNDING_INSTRUCTION
+
+    def test_grounding_instruction_has_a_material_placeholder(self):
+        rendered = LINK_REPLY_GROUNDING_INSTRUCTION.format(material="ТЕСТ")
+        assert "ТЕСТ" in rendered
+
+
 class TestVoiceTriggerLineFraming:
     def test_voice_is_framed_as_speech_not_description(self):
         line = build_trigger_line("alice", "может не только до попадает", "voice", None)
@@ -493,3 +504,45 @@ class TestBuildDirectiveLinesMemeRefusal:
             is_bot_insult=False, wind_down=False, photo_directive=None, meme_directive=None,
         )
         assert "мем" not in "\n".join(lines)
+
+
+class TestLinkReplyGrounding:
+    def test_material_is_injected_after_the_replied_to_block(self):
+        context = {
+            "replied_to": {
+                "message_id": 5, "user_id": 42, "username": "zhora",
+                "content": "Про котиков.", "media_type": "video",
+                "link_material": "[YouTube Shorts] транскрипт и кадры",
+            },
+        }
+        lines, _ = build_recent_history_lines(context, "explicit", has_thread_history=False)
+        joined = "\n".join(lines)
+        assert "[Материал по видео, которое ты запостил]:" in joined
+        assert "транскрипт и кадры" in joined
+        assert joined.index("Сообщение, на которое отвечают:") < joined.index("[Материал")
+
+    def test_no_material_key_injects_nothing(self):
+        context = {
+            "replied_to": {
+                "message_id": 5, "user_id": 42, "username": "zhora",
+                "content": "Обычный ответ.", "media_type": "text",
+            },
+        }
+        lines, _ = build_recent_history_lines(context, "explicit", has_thread_history=False)
+        assert not any("Материал по видео" in line for line in lines)
+
+    def test_material_injected_even_when_replied_to_already_shown_in_recent(self):
+        row = {
+            "message_id": 5, "user_id": 42, "username": "zhora",
+            "content": "Про котиков.", "media_type": "video",
+            "link_material": "[Instagram Reel] подпись и комментарии",
+        }
+        context = {"recent_history": [row], "replied_to": row}
+        lines, _ = build_recent_history_lines(context, "explicit", has_thread_history=False)
+        joined = "\n".join(lines)
+        # The row is folded into "Недавние сообщения чата:" and the dedicated
+        # "Сообщение, на которое отвечают:" header is skipped — but the
+        # material itself was never rendered by that block, so it must still
+        # appear.
+        assert "Сообщение, на которое отвечают:" not in joined
+        assert "подпись и комментарии" in joined

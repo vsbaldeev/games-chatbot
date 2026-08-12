@@ -597,3 +597,21 @@ CAPTION_COMPRESS_SYSTEM = (
     "готовым текстом, без пояснений и без кавычек."
 )
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Grounded replies to link-repost messages (src/pipeline/response_node.py)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Formatted with the persisted ingestion material (transcript/frame
+# descriptions/comments for a Short, description/comments for a Reel or
+# long-form YouTube link) when a member replies directly to the bot's
+# link-repost message. Injected only for that direct reply — see the
+# addressing gate in src.pipeline.router and the (unmodified) replied-to
+# resolution in src.pipeline.context_builder.
+LINK_REPLY_GROUNDING_INSTRUCTION = (
+    "[Материал по видео, которое ты запостил]:\n{material}\n\n"
+    "Это материал, на основе которого ты писал подпись к видео. Отвечай по "
+    "существу, опираясь только на него: не выдумывай детали, которых там нет, "
+    "и не проверяй факты по своим знаниям — они могут устареть. Если "
+    "материала не хватает, чтобы ответить — так и скажи."
+)
+

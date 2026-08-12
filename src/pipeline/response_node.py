@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
 from src.config.prompts import (
+    LINK_REPLY_GROUNDING_INSTRUCTION,
     SHORTS_TRIGGER_INSTRUCTION,
     SOCIAL_LINK_RETELL_INSTRUCTION,
     USER_FACTS_HEADER,
@@ -297,6 +298,15 @@ def build_recent_history_lines(
     shown"), leaving the model with an unanchored ``(↳ …)`` arrow and no way
     to resolve a short follow-up like «На четвертом».
 
+    When the replied-to row carries ``link_material`` (a direct reply to one
+    of the bot's own link-repost messages — see the addressing gate in
+    ``src.pipeline.router.MessageRouter``), the persisted ingestion material
+    is injected as a labelled, honesty-guarded block. This happens
+    independently of whether the "Сообщение, на которое отвечают:" header
+    itself was shown — that header renders the caption text, which
+    recent-history may already have shown, but the material is never
+    rendered by anything else, so it must still appear.
+
     Args:
         context: AssembledContext dict or None.
         response_trigger: Routing trigger; ``"random"``/``"youtube_short"``/
@@ -327,6 +337,10 @@ def build_recent_history_lines(
         if replied_to["message_id"] not in rendered_ids:
             parts.append("Сообщение, на которое отвечают:")
             parts.append(render_row(replied_to))
+            parts.append("")
+        link_material = replied_to.get("link_material")
+        if link_material:
+            parts.append(LINK_REPLY_GROUNDING_INSTRUCTION.format(material=link_material))
             parts.append("")
     return parts, replied_to
 
