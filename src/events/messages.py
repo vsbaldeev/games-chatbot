@@ -224,7 +224,10 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
 
     Returns:
         Tuple of the sent message id, the message id the response is anchored
-        to, and the sent media type ("text" or "voice").
+        to, and the sent media type (``"text"``, ``"voice"``, or ``"video"``).
+        The anchor id is ``None`` specifically for an un-anchored link
+        repost — sent without a reply-to because the original message is
+        about to be deleted.
     """
     log.log_outgoing_text("reply", msg.chat_id, clean)
     notification_msg = final_state.get("search_notification_msg")

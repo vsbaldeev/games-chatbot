@@ -6,7 +6,7 @@ Scoped to these branches; the rest of deliver_response's existing behavior
 re-tested here.
 """
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.events.messages import deliver_response, passive_voice_extract
 from tests.builders import make_incoming, make_state
@@ -46,6 +46,31 @@ class TestLinkTriggerDelegatesToLinkRepost:
             "username": "vasya", "url": "https://youtu.be/abc", "is_bare": True,
         }
         msg.reply_text.assert_not_awaited()
+
+    async def test_non_bare_message_is_delegated_as_not_bare(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text", username="vasya")
+        state = make_state(
+            incoming, response_trigger="social_link", social_link_content="блок",
+            social_link_video=b"video bytes", social_link_url="https://youtu.be/abc",
+            link_message_is_bare=False,
+        )
+        deliver = AsyncMock(return_value=(901, 55, "video"))
+        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver):
+            await deliver_response(state, msg, "Про котиков.")
+        assert deliver.await_args.kwargs["is_bare"] is False
+
+    async def test_missing_bare_flag_defaults_to_not_bare(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text", username="vasya")
+        state = make_state(
+            incoming, response_trigger="social_link", social_link_content="блок",
+            social_link_video=b"video bytes", social_link_url="https://youtu.be/abc",
+        )
+        deliver = AsyncMock(return_value=(901, 55, "video"))
+        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver):
+            await deliver_response(state, msg, "Про котиков.")
+        assert deliver.await_args.kwargs["is_bare"] is False
 
     async def test_failed_fetch_falls_back_to_an_ordinary_reply(self):
         msg = make_msg()
