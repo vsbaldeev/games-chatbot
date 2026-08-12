@@ -21,6 +21,14 @@ WHISPER_LANGUAGE = "ru"
 # max_tokens budget is burned inside a <think> block.
 VISION_MODEL = "qwen/qwen3.6-27b"
 
+# Cross-provider fallback for the vision model, used when Groq's daily quota
+# for VISION_MODEL is exhausted or the API is unreachable (see
+# src.agent.vision.make_vision_llm). Closest size match on OpenRouter, and an
+# "instruct" (non-reasoning) variant, so no reasoning_effort workaround is
+# needed on this leg. Requires OPENROUTER_API_KEY; without it vision calls
+# stay Groq-only. Same OPENROUTER_BASE_URL as the text filter's fallback.
+VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
+
 # Meaningless-message filter. Was llama-3.1-8b-instant for its 14.4K RPD, but
 # measured against 30 days of this chat's real addressed messages the 8B model
 # answered 3/8 of the drops it should not have made — it labelled plain

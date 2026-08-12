@@ -22,6 +22,7 @@ from src.agent.compress import compress_to_budget
 from src.agent.worker import WORKER_PROMPT, WorkerAgent, worker_agent
 from src.agent.response import RESPONSE_PROMPT, ResponseAgent, response_agent
 from src.agent.roast import ROAST_SYSTEM_PROMPT, RoastAgent, roast_agent
+from src.agent.vision import make_vision_llm
 
 __all__ = [
     "ContextLengthError",
@@ -50,4 +51,5 @@ __all__ = [
     "ROAST_SYSTEM_PROMPT",
     "RoastAgent",
     "roast_agent",
+    "make_vision_llm",
 ]
