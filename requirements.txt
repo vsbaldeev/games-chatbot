@@ -22,7 +22,9 @@ tavily-python>=0.5.0
 av>=12.0.0
 numpy>=1.26.0
 scipy>=1.11.0  # required by the Silero TTS model package at load time
-yt-dlp>=2026.7.4
+# curl-cffi extra: yt-dlp's Instagram extractor requires browser
+# impersonation to pass Instagram's anti-bot check, even anonymously.
+yt-dlp[curl-cffi]>=2026.7.4
 bgutil-ytdlp-pot-provider>=1.3.1
 Pillow>=10.0.0
 fastembed>=0.4.0
