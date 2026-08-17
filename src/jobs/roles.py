@@ -18,6 +18,7 @@ from telegram.ext import ContextTypes
 
 from src import achievements, config, log
 from src.agent import ainvoke_with_backoff
+from src.agent.language import normalize_homoglyphs
 from src.config.prompts import ROLES_SYSTEM_PROMPT, TAG_MAX_CHARS
 from src.store import unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users
@@ -42,14 +43,18 @@ FALLBACK_REASON = "Пока загадка — фактов маловато, н
 async def call_role_model(system_prompt: str, user_content: str) -> str:
     """Run a single Groq round-trip and return the raw text response.
 
-    TAG_MODEL is a reasoning model; reasoning_effort="low" keeps enough of
-    max_tokens free for the JSON body itself. Unconstrained, reasoning has been
-    observed eating most of the budget on larger rosters, truncating the JSON
-    mid-string (finish_reason="length") — "none" is not an option here, Groq
-    rejects it for this model (400: must be low/medium/high). Retries transient
-    TPM 429s via ainvoke_with_backoff, since a truncated call re-asks for the
-    same members (fill_missing_roles, reask_unique) and can trip the per-minute
-    limit on the follow-up call.
+    TAG_MODEL is a reasoning model; reasoning_effort="none" (which Groq accepts
+    for this model, unlike the previous gpt-oss-120b primary) keeps the whole
+    max_tokens budget free for the JSON body itself, so a large roster cannot
+    truncate it mid-string the way an unconstrained or "low"-capped reasoning
+    pass could (finish_reason="length" — the check below is a backstop, not
+    the primary defense). Retries transient TPM 429s via ainvoke_with_backoff,
+    since a truncated call re-asks for the same members (fill_missing_roles,
+    reask_unique) and can trip the per-minute limit on the follow-up call.
+    normalize_homoglyphs repairs the occasional Latin/Greek glyph this model
+    splices into an otherwise-Cyrillic word (e.g. a role rendered
+    "Синдikat") — the same deterministic pass already applied to
+    RESPONSE/ROAST output.
 
     Args:
         system_prompt: System instruction for the role model.
@@ -65,7 +70,7 @@ async def call_role_model(system_prompt: str, user_content: str) -> str:
         top_p=0.9,
         max_tokens=MAX_TOKENS,
         max_retries=0,
-        reasoning_effort="low",
+        reasoning_effort="none",
     )
     response = await ainvoke_with_backoff(llm, [
         SystemMessage(content=system_prompt),
@@ -73,11 +78,11 @@ async def call_role_model(system_prompt: str, user_content: str) -> str:
     ])
     if response.response_metadata.get("finish_reason") == "length":
         logger.warning(
-            "Role generation hit max_tokens=%d before the JSON finished — "
-            "reasoning likely consumed part of the budget; response will fail to parse",
+            "Role generation hit max_tokens=%d before the JSON finished; "
+            "response will fail to parse",
             MAX_TOKENS,
         )
-    return response.content
+    return normalize_homoglyphs(response.content)
 
 
 def build_fact_line(anon: str, facts: list[str]) -> str:

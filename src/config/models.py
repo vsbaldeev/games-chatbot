@@ -47,10 +47,10 @@ VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
 # "no thinking" mode here, and FILTER_MAX_TOKENS=10 leaves no room to find out.
 # Its classification accuracy on this chat's real messages is UNVALIDATED —
 # the 8/8-vs-3/8 comparison above no longer reflects the model in use, and it
-# now shares a Groq daily quota bucket with VISION_MODEL and
-# MEMORY_MODEL_FALLBACKS[0], undoing the original point of picking a
-# different model family for this call site. Re-split if quota exhaustion
-# starts correlating across the three.
+# now shares a Groq daily quota bucket with VISION_MODEL,
+# MEMORY_MODEL_FALLBACKS[0], and TAG_MODEL (see below), undoing the original
+# point of picking a different model family for this call site. Re-split if
+# quota exhaustion starts correlating across them.
 FILTER_MODEL = "qwen/qwen3.6-27b"
 
 # Cross-provider fallback for the filter, used when Groq is out of quota or
@@ -84,9 +84,25 @@ MEMORY_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-20b",   # fallback: separate, larger daily quota
 ]
 
-# Weekly member-role assignment. Was llama-3.3-70b-versatile, decommissioned
-# by Groq on 2026-08-16 with no free-tier same-family replacement.
-TAG_MODEL = "openai/gpt-oss-120b"
+# Weekly member-role assignment and on-request group profiling (roles.py,
+# group_profile/generate.py). Was llama-3.3-70b-versatile, decommissioned by
+# Groq on 2026-08-16 with no free-tier same-family replacement; the
+# immediate stand-in was openai/gpt-oss-120b (a reasoning model), which then
+# needed its own truncation fix (reasoning tokens eating into max_tokens,
+# see git history) before it could even produce complete JSON reliably.
+# qwen/qwen3.6-27b replaced it after a side-by-side on this call's actual
+# shape (8 members x 4 rubrics): zero reasoning tokens on every call versus
+# gpt-oss's "low" spiking to 289-339 on some calls (same truncation risk,
+# just less often), no JSON errors (gpt-oss produced one: a "veredict" key
+# typo that silently drops a member), and better rubric adherence and
+# Russian-localized output in that same comparison. Called with
+# reasoning_effort="none", which Groq accepts for this model (unlike
+# gpt-oss-120b, which 400s on "none" — only low/medium/high). Shares this
+# Groq quota bucket with VISION_MODEL, FILTER_MODEL and
+# MEMORY_MODEL_FALLBACKS[0]; accepted given this call site's low volume
+# (weekly roles, cooldown-gated group-profile requests) but unmeasured — see
+# FILTER_MODEL's note above on the same bucket getting crowded.
+TAG_MODEL = "qwen/qwen3.6-27b"
 
 # Tool-calling worker fallback chain. No 8B floor: at that size the worker
 # skips tools and fabricates facts from parametric memory — for a
