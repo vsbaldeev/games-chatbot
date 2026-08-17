@@ -24,7 +24,13 @@ members who share a name can never collapse into one entry.
    (factless members are left untagged)
 3. generate_roles: anonymise to user_0, user_1, … via src/utils/anon_map.py
    (shared with src/group_profile/, real ids never sent to LLM);
-   LLM (openai/gpt-oss-120b) returns {role, reason} per anon key; remap back
+   LLM (openai/gpt-oss-120b) returns {role, reason} per anon key; remap back.
+   Called with reasoning_effort="low" (not "none" — Groq rejects that value
+   for this model): on larger rosters, unconstrained reasoning has consumed
+   enough of max_tokens=2048 to truncate the JSON mid-string, which then
+   doubled the load by re-asking the same members in step 4. Transient TPM
+   429s are retried with backoff (src.agent.ainvoke_with_backoff), since a
+   truncated call's re-ask is a second full-size request in the same window
 4. fill_missing_roles: members the LLM omitted are re-asked once, then any still
    missing get the neutral FALLBACK_ROLE + reason — every eligible member ends up tagged
 5. enforce_unique_roles: case-insensitive duplicate roles trigger one re-ask for

@@ -39,6 +39,16 @@ generate.py    generate_verdicts(rubric, materials_by_uid) -> dict[int, dict]
                one Groq call (TAG_MODEL) with the rubric delimited in the
                human turn and each member's dossier below it; parses
                {"verdict", "reason"} per anon key and remaps back.
+               TAG_MODEL is a reasoning model called with reasoning_effort="low"
+               (not "none" — Groq rejects that value for this model): reasoning
+               tokens count against max_tokens=2048, and on larger rosters
+               unconstrained reasoning has consumed enough of the budget to
+               truncate the JSON mid-string, which used to look like a random
+               parse failure and then double the load by re-asking the whole
+               roster in fill_missing_verdicts. Transient TPM 429s are retried
+               with backoff (src.agent.ainvoke_with_backoff) for the same
+               reason — a truncated first call's re-ask is a second full-size
+               request inside the same rate-limit window.
               fill_missing_verdicts(...) — members the LLM omitted from its
                JSON are re-asked once, then get a neutral fallback verdict —
                every eligible member ends up with an entry, mirroring
