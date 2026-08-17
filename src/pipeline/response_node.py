@@ -347,7 +347,7 @@ def build_recent_history_lines(
 
 def build_directive_lines(
     is_bot_insult: bool, wind_down: bool, photo_directive: str | None,
-    meme_directive: str | None = None,
+    meme_directive: str | None = None, group_profile_directive: str | None = None,
 ) -> list[str]:
     """Assemble the behavioural directive blocks appended before the trigger line.
 
@@ -372,6 +372,9 @@ def build_directive_lines(
             asked for a meme) or None. There is no ``"ack"`` counterpart: an
             accepted meme request answers with the image and no text, so the
             response node never runs for it.
+        group_profile_directive: Group-profile-request framing —
+            ``"refused"`` (wound-down user asked for one) or None. There is no
+            ``"ack"`` counterpart, same reason as ``meme_directive``.
 
     Returns:
         Directive prompt lines, possibly empty.
@@ -414,6 +417,13 @@ def build_directive_lines(
             "коротко и в своём характере, без обещаний скинуть позже. "
             "Не пересказывай и не выдумывай никаких мемов.]\n"
         )
+    if group_profile_directive == "refused":
+        lines.append(
+            "[Тебя просят разобрать всех в чате по какой-то теме, но тебе "
+            "сейчас не до этого. Откажи коротко и в своём характере, без "
+            "обещаний сделать это позже. Не придумывай и не называй никаких "
+            "ролей, оценок или вердиктов сам.]\n"
+        )
     return lines
 
 
@@ -430,6 +440,7 @@ def build_response_input(
     worker_tools_used: bool = False,
     photo_directive: str | None = None,
     meme_directive: str | None = None,
+    group_profile_directive: str | None = None,
     voice_low_confidence: bool = False,
 ) -> str:
     """Assemble the enriched user-turn string for the response LLM.
@@ -457,6 +468,8 @@ def build_response_input(
             :func:`build_directive_lines` — ``"refused"`` or None.
         photo_directive: Photo-request framing passed to
             :func:`build_directive_lines`, or None.
+        group_profile_directive: Group-profile-request framing passed to
+            :func:`build_directive_lines` — ``"refused"`` or None.
         voice_low_confidence: True when the voice transcript's mean Whisper
             confidence was low; passed straight through to
             :func:`build_trigger_line`.
@@ -486,7 +499,9 @@ def build_response_input(
         header = WORKER_DATA_VERIFIED_HEADER if worker_tools_used else WORKER_DATA_UNVERIFIED_HEADER
         parts.append(f"{header}\n{worker_output}\n")
 
-    parts += build_directive_lines(is_bot_insult, wind_down, photo_directive, meme_directive)
+    parts += build_directive_lines(
+        is_bot_insult, wind_down, photo_directive, meme_directive, group_profile_directive
+    )
 
     parts.append(
         build_trigger_line(
@@ -527,6 +542,23 @@ def resolve_meme_directive(state: BotState) -> str | None:
         to an empty response and the events layer sends the image alone.
     """
     if state.get("wind_down") and state.get("filter_verdict") == "MEME_REQUEST":
+        return "refused"
+    return None
+
+
+def resolve_group_profile_directive(state: BotState) -> str | None:
+    """Derive the group-profile-request directive from the filter's state flags.
+
+    Args:
+        state: Current pipeline state.
+
+    Returns:
+        ``"refused"`` when a wound-down user asked for a group profile, else
+        None. An accepted request never reaches here — the node short-circuits
+        to an empty response and the events layer generates and sends the
+        profile message itself.
+    """
+    if state.get("wind_down") and state.get("filter_verdict") == "GROUP_PROFILE_REQUEST":
         return "refused"
     return None
 
@@ -613,11 +645,12 @@ class ResponseNode:
             Dict with ``response`` and ``response_messages`` keys; the latter
             carries the assembled LangChain message list for the correction node.
         """
-        if state.get("meme_request"):
-            # The meme is the whole reply: a «держи мем» line would be filler,
-            # and a generated line about an image this model never sees is the
-            # stacking failure the 2026-08-07 absurdity work removed. Returning
-            # empty also skips the response LLM entirely.
+        if state.get("meme_request") or state.get("group_profile_request"):
+            # The meme (or the group-profile message) is the whole reply: a
+            # filler line here would be redundant, and a generated comment on
+            # content this model never sees is the stacking failure the
+            # 2026-08-07 absurdity work removed. Returning empty also skips
+            # the response LLM entirely.
             return {"response": "", "response_messages": []}
 
         msg = state["incoming"]
@@ -648,6 +681,7 @@ class ResponseNode:
             worker_tools_used=bool(state.get("worker_tools_used")),
             photo_directive=resolve_photo_directive(state),
             meme_directive=resolve_meme_directive(state),
+            group_profile_directive=resolve_group_profile_directive(state),
             voice_low_confidence=bool(state.get("voice_low_confidence")),
         )
         messages = past_messages + [HumanMessage(content=enriched)]

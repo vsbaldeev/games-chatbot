@@ -228,3 +228,12 @@ class TestSkipConditions:
         assert result == {
             "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
         }
+
+    async def test_group_profile_request_skips_worker(self):
+        node = WorkerNode(agent=MagicMock())
+        incoming = make_incoming(raw_text="раздай всем роли из Людей Икс")
+        state = make_state(incoming, should_respond=True, group_profile_request=True)
+        result = await node(state)
+        assert result == {
+            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+        }

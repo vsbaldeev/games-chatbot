@@ -7,6 +7,7 @@ import yt_dlp
 
 from src.pipeline.social_links.instagram_reel import (
     INSTAGRAM_ACCESS_RETRY_ATTEMPTS,
+    INSTAGRAM_REEL_DAILY_CAP,
     InstagramReelHandler,
 )
 
@@ -14,6 +15,11 @@ from src.pipeline.social_links.instagram_reel import (
 @pytest.fixture
 def handler() -> InstagramReelHandler:
     return InstagramReelHandler()
+
+
+class TestDailyCap:
+    def test_daily_cap_is_thirty(self, handler):
+        assert handler.daily_cap == INSTAGRAM_REEL_DAILY_CAP == 30
 
 
 class TestExtract:

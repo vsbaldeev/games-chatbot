@@ -287,6 +287,17 @@ filter  (runs after ingester)
     ├─ text, LLM → MEME_REQUEST (asks the bot to send a meme — «скинь мем»,
     │       «кинь мемас»; merely talking about a meme stays MEANINGFUL)
     │       → engagement gate
+    ├─ text, LLM → GROUP_PROFILE_REQUEST (asks the bot to judge/rate/rank
+    │       EVERY member at once against a theme the user supplies —
+    │       «раздай всем роли из Людей Икс», «оцени всем счастье от 1 до 10»;
+    │       asking about one named person stays MEANINGFUL). Trusted only
+    │       when GROUP_PROFILE_MARKER_RE also matches the raw text (a
+    │       deterministic floor under a classifier already carrying six
+    │       other labels — same relationship the request-word override below
+    │       has to the model); otherwise downgraded to MEANINGFUL in code
+    │       before the engagement gate ever sees it. See
+    │       src/group_profile/README.md
+    │       → engagement gate
     ├─ text, LLM → MEANINGFUL → engagement gate
     └─ text, LLM error       → should_respond=True (fails open)
 
@@ -312,7 +323,9 @@ score per (chat_id, user_id), persisted in Postgres so a redeploy never resets
 a wound-down user. Every addressed verdict (and every double-confirmed
 overheard insult, and explicitly addressed transcribed media as MEANINGFUL)
 charges a weight — PHOTO_REQUEST 4.5 (each accepted request occupies the
-single shared imagegen worker for minutes), BOT_INSULT 3.0, BANTER/MEANINGLESS
+single shared imagegen worker for minutes), GROUP_PROFILE_REQUEST 3.0 (one
+LLM call plus a store query per chat member — real cost, but not a scarce
+shared resource like the imagegen worker), BOT_INSULT 3.0, BANTER/MEANINGLESS
 2.0, MEANINGFUL 1.0, MEME_REQUEST 1.0 (asking for a meme is an ordinary thing
 to do, not a scarce favour) — decayed with a 30-min half-life in a single atomic
 UPSERT; the post-charge
@@ -343,8 +356,17 @@ keep reciting the score. Store errors fail open to the full tier.
     │       meme is the whole answer — a «держи мем» line would be filler and
     │       a generated line about an unseen image is the stacking failure the
     │       absurdity work removed), and the events layer fire-and-forgets
-    │       deliver_meme. This is the only path that answers with media and
-    │       no text at all.
+    │       deliver_meme.
+    │       GROUP_PROFILE_REQUEST at this tier sets group_profile_request=True
+    │       (unless the per-chat 10-minute cooldown is active, in which case a
+    │       canned refusal is returned directly and no flag is set at all —
+    │       see src/group_profile/README.md): the worker is skipped, the
+    │       response node short-circuits to an EMPTY reply (same reasoning as
+    │       MEME_REQUEST above), and the events layer fire-and-forgets
+    │       deliver_group_profile, which gathers every member's dossier,
+    │       runs one LLM call against the user's own rubric, and sends the
+    │       rendered result. This and MEME_REQUEST are the only paths that
+    │       answer with no response-node text at all.
     ├─ BRUSH_OFF tier → should_respond=True + wind_down=True — the response
     │       node injects a close-the-conversation hint (one short in-character
     │       phrase, no questions, no invitations) and the worker is skipped;
@@ -352,7 +374,9 @@ keep reciting the score. Store errors fail open to the full tier.
     │       a PHOTO_REQUEST here gets an explicit in-character photo refusal
     │       directive instead of the generic brush-off — no generation runs;
     │       a MEME_REQUEST likewise gets a meme refusal directive (which
-    │       forbids inventing a meme in text) and no meme is sent
+    │       forbids inventing a meme in text) and no meme is sent; a
+    │       GROUP_PROFILE_REQUEST gets the same treatment via its own refusal
+    │       directive (forbids inventing roles/scores/verdicts in text)
     ├─ EMOJI tier     → should_respond=False + bored emoji reaction
     │       (DISMISSIVE_REACTIONS pool: 🥱 😴 🗿 🤨; MEANINGLESS keeps the
     │       friendly REACTION_POOL until this tier)
@@ -421,10 +445,13 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
     ├─ provenance: invoke_worker returns (output, tools_used) from a mechanical
     │          ToolMessage scan → worker_tools_used in state
     ├─ skipped entirely on insult paths (is_bot_insult), wind-down brush-offs
-    │          (wind_down — one short closing phrase needs no tools) and Shorts/
+    │          (wind_down — one short closing phrase needs no tools), Shorts/
     │          social-link summaries (trigger="youtube_short"/"social_link" — the
     │          source material is already in processed_text; tools would only
-    │          add junk) → empty output
+    │          add junk), photo/meme requests (photo_request/meme_request — no
+    │          text to attach findings to) and group-profile requests
+    │          (group_profile_request — it runs its own dedicated LLM call over
+    │          the roster's own dossiers, not IGDB-style tool facts) → empty output
     ├─ SearchNotificationCallback sends "🔍 Ищу…" before web_search
     ├─ DailyLimitError → advance_model(), retry with next fallback
     ├─ ContextLengthError → worker_output="" (response node still runs)
@@ -620,4 +647,6 @@ BotState:
     response: str | None
     response_messages: list | None     # LangChain messages passed from response → language_correction
     context_types: ContextTypes        # Telegram context for sending replies
+    meme_request: bool                 # True when the filter accepted a meme request at the full tier
+    group_profile_request: bool        # True when the filter accepted a group-profile request at the full tier; see src/group_profile/README.md
 ```

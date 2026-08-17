@@ -33,10 +33,13 @@ Respond when:
     lightweight metadata-only summary (title/caption/selftext + top
     comments, no transcript or vision). The first handler in priority
     order whose regex matches wins the whole message; same per-item repost
-    dedup window and daily summary cap pattern as Shorts (see
-    ``src.pipeline.social_links``).
+    dedup window as Shorts (see ``src.pipeline.social_links``), but the
+    daily cap is now per-handler — only Instagram has one (its anonymous
+    fetch needs throttling against Instagram's anti-bot gate), and hitting
+    it gets a canned reply instead of silence (``__daily_cap_reply``).
 """
 
+import random
 import re
 from typing import Any
 
@@ -46,6 +49,15 @@ from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
+
+# Only Instagram's handler still has a daily_cap (see social_links/__init__.py) —
+# these acknowledge the limit instead of leaving a posted link answered with
+# silence, same tone as the honest-failure pools in filter_node.py.
+INSTAGRAM_REEL_DAILY_CAP_REPLIES = [
+    "На сегодня лимит рилсов исчерпан — эту ссылку не разбираю.",
+    "Дневной лимит рилсов выбран. Дальше сами, я на паузе до завтра.",
+    "Рилсы на сегодня закончились — лимит. Возвращайтесь завтра.",
+]
 
 
 def is_mentioned(text: str, bot_username: str) -> bool:
@@ -335,7 +347,8 @@ class MessageRouter:
         Returns:
             State update dict on a gate pass, or None on a gate rejection.
             The update also carries ``link_message_is_bare``, which decides
-            whether the events layer may delete the original message.
+            whether the events layer may delete the original message, and
+            ``social_link_cap_remaining`` (None for an uncapped handler).
         """
         if handler.dedup_gate.seen((msg["chat_id"], handler.name, item_id)):
             logger.info(
@@ -343,21 +356,47 @@ class MessageRouter:
                 handler.name, msg["chat_id"], item_id,
             )
             return None
-        used = handler.daily_cap_gate.hit(msg["chat_id"])
-        if used > handler.daily_cap:
-            logger.warning(
-                "%s daily cap reached for chat %s (%d/%d) — skipping summary",
-                handler.name, msg["chat_id"], used, handler.daily_cap,
-            )
-            return None
+        cap_remaining = None
+        if handler.daily_cap is not None:
+            used = handler.daily_cap_gate.hit(msg["chat_id"])
+            if used > handler.daily_cap:
+                return self.__daily_cap_reply(handler, msg["chat_id"], used)
+            cap_remaining = handler.daily_cap - used
         return {
             "should_respond": True,
             "response_trigger": "social_link",
             "social_link_handler": handler.name,
             "social_link_url": canonical_url,
+            "social_link_cap_remaining": cap_remaining,
             "link_message_is_bare": social_links.is_bare_link_message(
                 msg["raw_text"], handler.pattern
             ),
+        }
+
+    def __daily_cap_reply(self, handler, chat_id: int, used: int) -> dict:
+        """Log the cap rejection and answer with a canned limit notice.
+
+        Only Instagram's handler carries a daily_cap today, so
+        ``INSTAGRAM_REEL_DAILY_CAP_REPLIES`` is the only pool needed — a
+        capped ``handler`` other than Instagram would need its own pool
+        added here before this can serve it honestly.
+
+        Args:
+            handler: The matched ``LinkHandler`` whose cap was exceeded.
+            chat_id: Telegram chat id the link was posted in.
+            used: Hits recorded for this chat in the current window.
+
+        Returns:
+            State update dict: no fetch, but a visible reply instead of
+            the original silent drop.
+        """
+        logger.warning(
+            "%s daily cap reached for chat %s (%d/%d) — skipping summary",
+            handler.name, chat_id, used, handler.daily_cap,
+        )
+        return {
+            "should_respond": False,
+            "response": random.choice(INSTAGRAM_REEL_DAILY_CAP_REPLIES),
         }
 
     async def __is_link_repost_reply(self, chat_id: int, reply: Any) -> bool:

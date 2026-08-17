@@ -81,6 +81,8 @@ from src.config.prompts import (
     BOT_INSULT_EXAMPLES,
     CRUDE_PRAISE_EXAMPLES,
     FILTER_SYSTEM,
+    GROUP_PROFILE_COOLDOWN_REPLIES,
+    GROUP_PROFILE_COOLDOWN_SECONDS,
     OVERHEARD_SYSTEM,
 )
 from src.life import selfie
@@ -90,6 +92,7 @@ from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import is_explicitly_addressed, looks_like_request
 from src.pipeline.state import BotState
 from src.store import unified_messages
+from src.utils.ttl_gate import TtlGate
 
 logger = log.get_logger(__name__)
 
@@ -143,6 +146,24 @@ REPLIED_TO_CHAR_LIMIT = 500
 # classifier — showing the literal token invites a MEANINGLESS verdict on a
 # reply that engages with content the classifier cannot see.
 PLACEHOLDER_RE = re.compile(r"^\[\w+\]$")
+
+# Deterministic floor under GROUP_PROFILE_REQUEST: FILTER_SYSTEM is a
+# one-word classifier already carrying six labels, and this repo's own
+# history (config/models.py) documents that model confusing labels under
+# load. A GROUP_PROFILE_REQUEST verdict is trusted only when the raw text
+# also names the whole chat — same relationship looks_like_request already
+# has to MEANINGLESS/BANTER, a deterministic override on top of the
+# classifier rather than a replacement for it.
+GROUP_PROFILE_MARKER_RE = re.compile(
+    r"\b(?:вс[её]м|всех|каждому|каждог[ао]|нам\s+вс[её]м|everyone|everybody|"
+    r"each\s+of\s+(?:us|you)|all\s+of\s+(?:us|you))\b",
+    re.IGNORECASE,
+)
+
+# Per-chat cooldown between accepted group-profile requests (see
+# GROUP_PROFILE_COOLDOWN_SECONDS) — one run costs an LLM call plus a store
+# query per chat member, well above an ordinary reply.
+group_profile_cooldown_gate = TtlGate(GROUP_PROFILE_COOLDOWN_SECONDS)
 
 # Overheard bot-word checks see the last few chat messages so the classifier
 # can resolve which bot (or person playing «как бот») is being talked about.
@@ -379,11 +400,19 @@ class MeaninglessFilterNode:
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"`` or ``"MEANINGFUL"``.
+            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``
+            or ``"MEANINGFUL"``.
         """
         replied_to = await self.__fetch_replied_to(state["incoming"])
         replied_to = await self.__enrich_replied_media(replied_to, state)
         decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
+        if decision == "GROUP_PROFILE_REQUEST" and not GROUP_PROFILE_MARKER_RE.search(text):
+            logger.debug(
+                "Filter: message %s classified GROUP_PROFILE_REQUEST without a "
+                "whole-chat marker — downgrading to MEANINGFUL",
+                state["incoming"]["message_id"],
+            )
+            decision = "MEANINGFUL"
         if decision in ("MEANINGLESS", "BANTER") and looks_like_request(text):
             logger.debug(
                 "Filter: message %s is a question/request — overriding %s to MEANINGFUL",
@@ -632,6 +661,10 @@ class MeaninglessFilterNode:
         flows (``selfie.image_generation_in_flight``); at the brush-off tier
         it falls into the ``wind_down`` refusal. MEME_REQUEST behaves the same
         way via ``meme_request``, whose reply is the image alone.
+        GROUP_PROFILE_REQUEST behaves the same way via ``group_profile_request``,
+        except a request inside the per-chat cooldown window returns a canned
+        refusal with ``should_respond: False`` instead — skipping the LLM call
+        entirely rather than winding down the user's own attention budget.
 
         Args:
             state: Current pipeline state.
@@ -639,7 +672,7 @@ class MeaninglessFilterNode:
             tier: Wind-down tier returned by the engagement gate.
 
         Returns:
-            State update dict with ``should_respond: True``.
+            State update dict, normally with ``should_respond: True``.
         """
         update: dict = {"should_respond": True}
         if classification == "BOT_INSULT":
@@ -651,6 +684,14 @@ class MeaninglessFilterNode:
             update["photo_in_flight"] = selfie.image_generation_in_flight()
         elif classification == "MEME_REQUEST" and tier == engagement_gate.FULL_TIER:
             update["meme_request"] = True
+        elif classification == "GROUP_PROFILE_REQUEST" and tier == engagement_gate.FULL_TIER:
+            chat_id = state["incoming"]["chat_id"]
+            if group_profile_cooldown_gate.seen(chat_id):
+                return {
+                    "should_respond": False,
+                    "response": random.choice(GROUP_PROFILE_COOLDOWN_REPLIES),
+                }
+            update["group_profile_request"] = True
         elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:
             update["wind_down"] = True
         logger.debug(
@@ -747,8 +788,8 @@ class MeaninglessFilterNode:
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"`` or ``"MEANINGFUL"``.
-            Fails open to ``"MEANINGFUL"`` on any LLM error.
+            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``
+            or ``"MEANINGFUL"``. Fails open to ``"MEANINGFUL"`` on any LLM error.
         """
         try:
             response = await self.__llm.ainvoke([
@@ -760,6 +801,8 @@ class MeaninglessFilterNode:
                 return "PHOTO_REQUEST"
             if "MEME" in result:
                 return "MEME_REQUEST"
+            if "PROFILE" in result:
+                return "GROUP_PROFILE_REQUEST"
             if "INSULT" in result:
                 return "BOT_INSULT"
             if "BANTER" in result:

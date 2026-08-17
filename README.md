@@ -59,6 +59,7 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/commands/](src/commands/README.md) | Command handlers — /duel |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup, yt-dlp refresh |
 | [src/life/](src/life/README.md) | Chat-requested selfies — scene writing, best-of-N generation, vision judge |
+| [src/group_profile/](src/group_profile/README.md) | Chat-requested group profiling — one user-supplied rubric applied to every member via a single LLM call |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
 | [src/achievements/](src/achievements/README.md) | Duel achievements + stat counters (consumed by roast material) |
@@ -81,7 +82,7 @@ Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, loc
 LLM (response) Groq gpt-oss-120b → OpenRouter google/gemma-4-31b-it:free (cross-provider fallback; Llama was decommissioned by Groq and is no longer free anywhere)
 LLM (roast)  Groq openai/gpt-oss-120b → gpt-oss-20b → OpenRouter google/gemma-4-31b-it:free (cross-provider fallback)
 LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.6-27b (autonomous comedian; JSON decide-or-abstain)
-LLM (roles)  Groq openai/gpt-oss-120b
+LLM (roles)  Groq openai/gpt-oss-120b (also used for on-request group profiling, src/group_profile/)
 LLM (filter) Groq qwen/qwen3.6-27b (reasoning disabled) → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
 STT          Groq whisper-large-v3
 TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
@@ -157,6 +158,10 @@ Env knobs (set on the bot service in `docker-compose.yml`):
   embed a base64-encoded PNG — hundreds of KB of noise per call, which buries
   everything else at `LOG_LEVEL=DEBUG`. Raise it to `DEBUG` only when debugging
   the HTTP layer itself.
+- `OPENAI_LOG_LEVEL` — default `WARNING`, same reasoning as `GROQ_LOG_LEVEL`. The
+  vision fallback factory (`src/agent/vision.py`) and every other OpenAI-compatible
+  call site route through the `openai` SDK, whose DEBUG request-body logs embed the
+  same base64 image payloads.
 
 #### Reading back what the bot said
 

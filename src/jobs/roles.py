@@ -20,6 +20,7 @@ from src import achievements, config, log
 from src.config.prompts import ROLES_SYSTEM_PROMPT, TAG_MAX_CHARS
 from src.store import unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users
+from src.utils.anon_map import anonymise
 from src.utils.llm_json import load_json_object
 
 logger = log.get_logger(__name__)
@@ -60,20 +61,6 @@ async def call_role_model(system_prompt: str, user_content: str) -> str:
         HumanMessage(content=user_content),
     ])
     return response.content
-
-
-def anonymise(user_ids: list[int]) -> tuple[dict[int, str], dict[str, int]]:
-    """Map user_ids to opaque ``user_N`` keys so the LLM never sees real ids.
-
-    Args:
-        user_ids: User ids to anonymise, in iteration order.
-
-    Returns:
-        A ``(uid_to_anon, anon_to_uid)`` pair of inverse mappings.
-    """
-    uid_to_anon = {user_id: f"user_{index}" for index, user_id in enumerate(user_ids)}
-    anon_to_uid = {anon: user_id for user_id, anon in uid_to_anon.items()}
-    return uid_to_anon, anon_to_uid
 
 
 def build_fact_line(anon: str, facts: list[str]) -> str:

@@ -7,6 +7,7 @@ import pytest
 from src.events.link_repost import (
     CAPTION_LIMIT,
     TEXT_LIMIT,
+    build_cap_remaining_footer,
     build_caption,
     deliver_link_message,
     fit_caption,
@@ -29,6 +30,30 @@ class TestBuildCaption:
     def test_summary_alone_when_only_one_of_the_pair_is_given(self):
         assert build_caption("Про котиков.", "vasya", None) == "Про котиков."
         assert build_caption("Про котиков.", None, "https://youtu.be/abc") == "Про котиков."
+
+    def test_footer_trails_the_summary(self):
+        caption = build_caption("Про котиков.", None, None, footer="Осталось: 5")
+        assert caption == "Про котиков.\n\nОсталось: 5"
+
+    def test_footer_trails_credit_and_link_too(self):
+        caption = build_caption(
+            "Про котиков.", "vasya", "https://youtu.be/abc", footer="Осталось: 5",
+        )
+        assert caption == "Скинул @vasya\nhttps://youtu.be/abc\n\nПро котиков.\n\nОсталось: 5"
+
+    def test_no_footer_appended_when_none(self):
+        assert build_caption("Про котиков.", None, None, footer=None) == "Про котиков."
+
+
+class TestBuildCapRemainingFooter:
+    def test_none_remaining_yields_no_footer(self):
+        assert build_cap_remaining_footer(None) is None
+
+    def test_remaining_count_is_rendered(self):
+        assert build_cap_remaining_footer(5) == "Осталось рилсов сегодня: 5"
+
+    def test_zero_remaining_still_renders(self):
+        assert build_cap_remaining_footer(0) == "Осталось рилсов сегодня: 0"
 
 
 class TestTruncateAtSentence:
@@ -108,6 +133,25 @@ class TestFitCaption:
             caption = await fit_caption(long_summary, None, None, has_video=False)
         assert len(caption) <= TEXT_LIMIT
 
+    async def test_footer_survives_within_budget(self):
+        compress = AsyncMock()
+        with patch(COMPRESS_PATCH_TARGET, new=compress):
+            caption = await fit_caption(
+                "Коротко.", None, None, has_video=True, footer="Осталось: 5",
+            )
+        compress.assert_not_awaited()
+        assert caption == "Коротко.\n\nОсталось: 5"
+
+    async def test_footer_is_reserved_out_of_the_compression_budget(self):
+        compress = AsyncMock(return_value="Сжато.")
+        with patch(COMPRESS_PATCH_TARGET, new=compress):
+            caption = await fit_caption(
+                "а" * 1200, "vasya", "https://youtu.be/abc", has_video=True,
+                footer="Осталось: 5",
+            )
+        assert caption.endswith("Осталось: 5")
+        assert len(caption) <= CAPTION_LIMIT
+
 
 def make_msg() -> MagicMock:
     msg = MagicMock()
@@ -142,6 +186,18 @@ class TestDeliverLinkMessageBare:
         )
         caption = msg.chat.send_video.await_args.kwargs["caption"]
         assert "@vasya" in caption and "https://youtu.be/abc" in caption
+
+    async def test_cap_remaining_footer_is_included(self):
+        msg = make_msg()
+        await deliver_link_message(
+            msg, summary="Про котиков.", video=b"bytes", username="vasya",
+            url="https://youtu.be/abc", is_bare=True, cap_remaining=5,
+        )
+        caption = msg.chat.send_video.await_args.kwargs["caption"]
+        assert caption == (
+            "Скинул @vasya\nhttps://youtu.be/abc\n\nПро котиков.\n\n"
+            "Осталось рилсов сегодня: 5"
+        )
 
     async def test_no_video_sends_an_unanchored_text_message(self):
         msg = make_msg()
@@ -216,6 +272,15 @@ class TestDeliverLinkMessageNotBare:
             url="https://youtu.be/abc", is_bare=False,
         )
         assert msg.reply_video.await_args.kwargs["caption"] == "Про котиков."
+
+    async def test_cap_remaining_footer_shows_even_when_not_bare(self):
+        msg = make_msg()
+        await deliver_link_message(
+            msg, summary="Про котиков.", video=b"bytes", username="vasya",
+            url="https://youtu.be/abc", is_bare=False, cap_remaining=5,
+        )
+        caption = msg.reply_video.await_args.kwargs["caption"]
+        assert caption == "Про котиков.\n\nОсталось рилсов сегодня: 5"
 
     async def test_send_failure_keeps_the_original_and_replies_with_text(self):
         msg = make_msg()

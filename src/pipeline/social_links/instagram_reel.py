@@ -23,7 +23,6 @@ import yt_dlp
 from src import log
 from src.pipeline.social_links import (
     SOCIAL_LINK_COMMENT_CHAR_LIMIT,
-    SOCIAL_LINK_DAILY_CAP,
     SOCIAL_LINK_DEDUP_WINDOW_SECONDS,
     SOCIAL_LINK_MAX_COMMENTS,
     SocialLinkContent,
@@ -50,6 +49,10 @@ INSTAGRAM_ACCESS_GATE_SIGNAL = "Instagram sent an empty media response"
 INSTAGRAM_ACCESS_RETRY_ATTEMPTS = 3
 INSTAGRAM_ACCESS_RETRY_BACKOFF_SECONDS = 3
 
+# Own cap, not shared with youtube_video: only Instagram fetches hit
+# yt-dlp's flaky anonymous access gate, so only Instagram gets throttled.
+INSTAGRAM_REEL_DAILY_CAP = 30  # summaries per chat per sliding 24h window
+
 
 class InstagramReelHandler:
     """Downloads an Instagram Reel anonymously; caption + comments, best effort."""
@@ -61,7 +64,7 @@ class InstagramReelHandler:
         """Initialise this handler's own dedup and daily-cap gates."""
         self.dedup_gate = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
         self.daily_cap_gate = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
-        self.daily_cap = SOCIAL_LINK_DAILY_CAP
+        self.daily_cap = INSTAGRAM_REEL_DAILY_CAP
 
     def extract(self, text: str) -> tuple[str, str] | None:
         """Extract the Reel id and canonical URL from message text.

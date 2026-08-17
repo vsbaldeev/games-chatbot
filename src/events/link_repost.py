@@ -25,7 +25,26 @@ TEXT_LIMIT = 4096  # Telegram Bot API cap on a plain text message
 SENTENCE_END_RE = re.compile(r"[.!?…]")
 
 
-def build_caption(summary: str, username: str | None, url: str | None) -> str:
+def build_cap_remaining_footer(cap_remaining: int | None) -> str | None:
+    """Render the daily-cap remaining-count line, or None to omit it.
+
+    Args:
+        cap_remaining: Reels left in today's cap after this one, or None
+            when the matched handler has no cap (see
+            ``social_links.LinkHandler.daily_cap``) — only Instagram's
+            handler has one today.
+
+    Returns:
+        A one-line status string, or None when there is nothing to show.
+    """
+    if cap_remaining is None:
+        return None
+    return f"Осталось рилсов сегодня: {cap_remaining}"
+
+
+def build_caption(
+    summary: str, username: str | None, url: str | None, footer: str | None = None,
+) -> str:
     """Compose the caption for the bot's single message.
 
     Args:
@@ -33,10 +52,13 @@ def build_caption(summary: str, username: str | None, url: str | None) -> str:
         username: Sender to credit, or None when the original message is
             surviving and already shows who posted it.
         url: Canonical link to carry, or None for the same reason.
+        footer: Fixed trailer appended after the summary (e.g. the daily-cap
+            remaining-count line) — never compressed or truncated away, same
+            as the credit line.
 
     Returns:
         Credit line + link + summary when the original is being deleted, the
-        bare summary otherwise.
+        bare summary otherwise, plus ``footer`` when given.
     """
     if username is None or url is None:
         if username is not None or url is not None:
@@ -45,8 +67,10 @@ def build_caption(summary: str, username: str | None, url: str | None) -> str:
                 "falling back to the bare summary",
                 username, url,
             )
-        return summary
-    return f"Скинул @{username}\n{url}\n\n{summary}"
+        body = summary
+    else:
+        body = f"Скинул @{username}\n{url}\n\n{summary}"
+    return f"{body}\n\n{footer}" if footer else body
 
 
 def truncate_at_sentence(text: str, budget: int) -> str:
@@ -77,12 +101,13 @@ def truncate_at_sentence(text: str, budget: int) -> str:
 
 async def fit_caption(
     summary: str, username: str | None, url: str | None, has_video: bool,
+    footer: str | None = None,
 ) -> str:
     """Compose a caption guaranteed to fit Telegram's relevant length limit.
 
     Three rungs: send as composed when it already fits; otherwise compress the
-    summary against the budget left by the credit line and link; and only if
-    the compressor still overshoots, truncate at a sentence boundary.
+    summary against the budget left by the credit line, link and footer; and
+    only if the compressor still overshoots, truncate at a sentence boundary.
 
     Args:
         summary: The pipeline's summary text.
@@ -91,29 +116,31 @@ async def fit_caption(
         has_video: True when the message is sent as a video caption (capped
             at :data:`CAPTION_LIMIT`); False when it is a plain text message
             (capped at the much larger :data:`TEXT_LIMIT`).
+        footer: Fixed trailer — see :func:`build_caption`.
 
     Returns:
         A caption of at most :data:`CAPTION_LIMIT` characters when
         ``has_video`` is True, or :data:`TEXT_LIMIT` characters otherwise.
     """
     limit = CAPTION_LIMIT if has_video else TEXT_LIMIT
-    caption = build_caption(summary, username, url)
+    caption = build_caption(summary, username, url, footer)
     if len(caption) <= limit:
         return caption
     budget = limit - (len(caption) - len(summary))
     if budget <= 0:
-        # The credit line and URL alone overflow the cap. Canonical link URLs
-        # run about 50 characters, so this is unreachable in practice — but
-        # the return contract is absolute and the Bot API rejects anything
-        # longer, so hand back something it will accept.
+        # The credit line, URL and footer alone overflow the cap. Canonical
+        # link URLs run about 50 characters and the footer about 30, so this
+        # is unreachable in practice — but the return contract is absolute
+        # and the Bot API rejects anything longer, so hand back something it
+        # will accept.
         logger.warning("Link caption overhead alone exceeds the caption limit")
         return caption[:limit]
     compressed = await compress_to_budget(summary, budget)
-    caption = build_caption(compressed, username, url)
+    caption = build_caption(compressed, username, url, footer)
     if len(caption) <= limit:
         return caption
     logger.warning("Caption still over the limit after compression, truncating")
-    return build_caption(truncate_at_sentence(compressed, budget), username, url)
+    return build_caption(truncate_at_sentence(compressed, budget), username, url, footer)
 
 
 async def send_combined(msg, caption: str, video: bytes | None, anchored: bool):
@@ -194,7 +221,7 @@ def resolve_bare_deletion(is_bare: bool, url: str | None) -> bool:
 
 async def deliver_link_message(
     msg, *, summary: str, video: bytes | None, username: str,
-    url: str | None, is_bare: bool,
+    url: str | None, is_bare: bool, cap_remaining: int | None = None,
 ) -> tuple[int, int | None, str]:
     """Deliver a link summary as one message, deleting the original if bare.
 
@@ -205,6 +232,9 @@ async def deliver_link_message(
         username: Sender's display name, credited only when deleting.
         url: Canonical link, carried only when deleting; see :func:`resolve_bare_deletion`.
         is_bare: True when the message was the link and nothing else.
+        cap_remaining: Reels left in today's cap, or None — see
+            :func:`build_cap_remaining_footer`. Shown regardless of
+            ``is_bare``, unlike the credit line.
 
     Returns:
         On success: sent message id, anchor id (None when un-anchored), and media
@@ -217,7 +247,7 @@ async def deliver_link_message(
     is_bare = resolve_bare_deletion(is_bare, url)
     caption = await fit_caption(
         summary, username if is_bare else None, url if is_bare else None,
-        has_video=bool(video),
+        has_video=bool(video), footer=build_cap_remaining_footer(cap_remaining),
     )
     try:
         sent, media_type = await send_combined(msg, caption, video, anchored=not is_bare)

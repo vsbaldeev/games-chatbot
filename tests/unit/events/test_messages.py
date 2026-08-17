@@ -45,8 +45,22 @@ class TestLinkTriggerDelegatesToLinkRepost:
         assert deliver.await_args.kwargs == {
             "summary": "Про котиков.", "video": b"video bytes",
             "username": "vasya", "url": "https://youtu.be/abc", "is_bare": True,
+            "cap_remaining": None,
         }
         msg.reply_text.assert_not_awaited()
+
+    async def test_cap_remaining_is_forwarded_to_link_repost(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="text", username="vasya")
+        state = make_state(
+            incoming, response_trigger="social_link", social_link_content="блок",
+            social_link_video=b"video bytes", social_link_url="https://youtu.be/abc",
+            link_message_is_bare=True, social_link_cap_remaining=5,
+        )
+        deliver = AsyncMock(return_value=(903, None, "video"))
+        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver):
+            await deliver_response(state, msg, "Про котиков.")
+        assert deliver.await_args.kwargs["cap_remaining"] == 5
 
     async def test_non_bare_message_is_delegated_as_not_bare(self):
         msg = make_msg()

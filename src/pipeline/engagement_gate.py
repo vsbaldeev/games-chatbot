@@ -31,9 +31,13 @@ logger = log.get_logger(__name__)
 # to do, not a scarce favour, so ~7 land before wind-down. The accepted cost
 # is up to three vision calls per request against the shared daily budget —
 # raise this constant if bursts start starving photo_judge and memory
-# extraction.
+# extraction. GROUP_PROFILE_REQUEST costs one LLM call plus a store query per
+# chat member — real but not scarce like the single shared imagegen worker
+# PHOTO_REQUEST occupies, so it sits below that weight; the per-chat cooldown
+# in filter_node.py is the primary spam guard, this is the secondary one.
 SIGNAL_WEIGHTS = {
     "PHOTO_REQUEST": 4.5,
+    "GROUP_PROFILE_REQUEST": 3.0,
     "BOT_INSULT": 3.0,
     "BANTER": 2.0,
     "MEANINGLESS": 2.0,

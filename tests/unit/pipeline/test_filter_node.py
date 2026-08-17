@@ -14,13 +14,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram import ReactionTypeEmoji
 
+from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES
 from src.pipeline import engagement_gate
 from src.pipeline.filter_node import (
     FILTER_SYSTEM,
+    GROUP_PROFILE_MARKER_RE,
     REACTION_POOL,
     MeaninglessFilterNode,
     looks_like_request,
 )
+from src.utils.ttl_gate import TtlGate
 from tests.builders import make_incoming, make_state
 
 
@@ -72,6 +75,9 @@ class TestFilterSystemPrompt:
     def test_no_longer_routes_meme_requests_to_meaningful(self):
         """«скинь мем» used to be named as a MEANINGFUL example by the prompt."""
         assert "'скинь мем', 'кинь мемас'" in FILTER_SYSTEM
+
+    def test_mentions_group_profile_request_label(self):
+        assert "GROUP_PROFILE_REQUEST" in FILTER_SYSTEM
 
 
 class TestPassthroughWhenShouldRespondFalse:
@@ -295,6 +301,11 @@ class TestClassify:
         result = await node._MeaninglessFilterNode__classify("скинь мем", FILTER_SYSTEM)
         assert result == "MEME_REQUEST"
 
+    async def test_group_profile_request_response_returns_group_profile_request(self):
+        node, _ = make_node_with_mock_llm("GROUP_PROFILE_REQUEST")
+        result = await node._MeaninglessFilterNode__classify("оцени всем счастье", FILTER_SYSTEM)
+        assert result == "GROUP_PROFILE_REQUEST"
+
     @pytest.mark.parametrize(
         "llm_response, expected",
         [
@@ -335,6 +346,106 @@ class TestMemeRequestFlags:
 
     def test_meme_request_weight_is_an_ordinary_message(self):
         assert engagement_gate.SIGNAL_WEIGHTS["MEME_REQUEST"] == 1.0
+
+
+class TestGroupProfileMarkerRegex:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "оцени всем счастье от 1 до 10",
+            "раздай всех роли из людей икс",
+            "распредели каждому факультет",
+            "rate everyone's happiness",
+            "how does everybody rank",
+            "assign a role to each of us",
+        ],
+    )
+    def test_whole_chat_markers_match(self, text):
+        assert GROUP_PROFILE_MARKER_RE.search(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "оцени Васю по шкале от 1 до 10",
+            "кто из нас ты думаешь",
+            "rate my happiness",
+        ],
+    )
+    def test_single_person_requests_do_not_match(self, text):
+        assert not GROUP_PROFILE_MARKER_RE.search(text)
+
+
+class TestGroupProfileRequestDowngrade:
+    async def test_no_whole_chat_marker_downgrades_to_meaningful(self):
+        node, _ = make_node_with_mock_llm("GROUP_PROFILE_REQUEST")
+        text = "оцени Васю по шкале от 1 до 10"
+        state = make_state(make_incoming(raw_text=text))
+        result = await node._MeaninglessFilterNode__classify_addressed(state, text)
+        assert result == "MEANINGFUL"
+
+    async def test_whole_chat_marker_present_keeps_the_label(self):
+        node, _ = make_node_with_mock_llm("GROUP_PROFILE_REQUEST")
+        text = "оцени всем счастье от 1 до 10"
+        state = make_state(make_incoming(raw_text=text))
+        result = await node._MeaninglessFilterNode__classify_addressed(state, text)
+        assert result == "GROUP_PROFILE_REQUEST"
+
+
+class TestGroupProfileRequestFlags:
+    def test_full_tier_sets_group_profile_request(self):
+        node = MeaninglessFilterNode()
+        state = make_state(make_incoming(chat_id=2001))
+        with patch("src.pipeline.filter_node.group_profile_cooldown_gate", TtlGate(600)):
+            update = node._MeaninglessFilterNode__build_reply_flags(
+                state, "GROUP_PROFILE_REQUEST", engagement_gate.FULL_TIER
+            )
+        assert update["group_profile_request"] is True
+        assert not update.get("wind_down")
+
+    @pytest.mark.parametrize(
+        "tier",
+        [engagement_gate.BRUSH_OFF_TIER, engagement_gate.EMOJI_TIER],
+        ids=["brush-off", "emoji"],
+    )
+    def test_lower_tiers_wind_down_instead_of_sending(self, tier):
+        node = MeaninglessFilterNode()
+        state = make_state(make_incoming(chat_id=2002))
+        update = node._MeaninglessFilterNode__build_reply_flags(state, "GROUP_PROFILE_REQUEST", tier)
+        assert "group_profile_request" not in update
+        assert update["wind_down"] is True
+
+    def test_group_profile_request_weight_is_heavier_than_ordinary(self):
+        assert engagement_gate.SIGNAL_WEIGHTS["GROUP_PROFILE_REQUEST"] > engagement_gate.SIGNAL_WEIGHTS["MEANINGFUL"]
+
+    def test_second_request_within_cooldown_gets_canned_refusal(self):
+        node = MeaninglessFilterNode()
+        with patch("src.pipeline.filter_node.group_profile_cooldown_gate", TtlGate(600)):
+            first_state = make_state(make_incoming(chat_id=2003))
+            first = node._MeaninglessFilterNode__build_reply_flags(
+                first_state, "GROUP_PROFILE_REQUEST", engagement_gate.FULL_TIER
+            )
+            assert first["group_profile_request"] is True
+
+            second_state = make_state(make_incoming(chat_id=2003))
+            second = node._MeaninglessFilterNode__build_reply_flags(
+                second_state, "GROUP_PROFILE_REQUEST", engagement_gate.FULL_TIER
+            )
+        assert second["should_respond"] is False
+        assert second["response"] in GROUP_PROFILE_COOLDOWN_REPLIES
+        assert "group_profile_request" not in second
+
+    def test_different_chats_do_not_share_the_cooldown(self):
+        node = MeaninglessFilterNode()
+        with patch("src.pipeline.filter_node.group_profile_cooldown_gate", TtlGate(600)):
+            first_state = make_state(make_incoming(chat_id=2004))
+            node._MeaninglessFilterNode__build_reply_flags(
+                first_state, "GROUP_PROFILE_REQUEST", engagement_gate.FULL_TIER
+            )
+            other_state = make_state(make_incoming(chat_id=2005))
+            other = node._MeaninglessFilterNode__build_reply_flags(
+                other_state, "GROUP_PROFILE_REQUEST", engagement_gate.FULL_TIER
+            )
+        assert other["group_profile_request"] is True
 
 
 class TestSendReaction:

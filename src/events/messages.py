@@ -27,9 +27,10 @@ from src.events.link_repost import deliver_link_message, resolve_link_delivery
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
-from src.config.prompts import MEME_FAILED_REPLIES
+from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES
 from src.events.sending import send_and_store
 from src.events.voice_reply import try_send_voice_reply
+from src.group_profile.profile import run_group_profile
 from src.life import selfie
 from src.memes.sender import send_meme
 from src.pipeline.router import is_explicitly_addressed
@@ -246,6 +247,7 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
             username=final_state["incoming"]["username"],
             url=url,
             is_bare=bool(final_state.get("link_message_is_bare")),
+            cap_remaining=final_state.get("social_link_cap_remaining"),
         )
     if final_state["incoming"]["media_type"] in VOICE_REPLY_TRIGGER_MEDIA_TYPES:
         voice_message = await try_send_voice_reply(msg, clean)
@@ -385,6 +387,54 @@ def launch_meme_task(bot, chat_id: int, reply_to_msg_id: int) -> None:
     asyncio.create_task(deliver_meme(bot, chat_id, reply_to_msg_id))
 
 
+async def deliver_group_profile(bot, chat_id: int, reply_to_msg_id: int, rubric: str) -> None:
+    """Generate and send the group-profile message, or say honestly that it failed.
+
+    An accepted group-profile request has no text reply from the response
+    node — the generated profile is the whole answer — so the typing
+    indicator is the only sign of life while the per-member dossiers are
+    gathered and the LLM call runs.
+
+    Args:
+        bot: Telegram Bot instance to send with.
+        chat_id: Chat the request came from.
+        reply_to_msg_id: The requesting message the profile replies to.
+        rubric: The user's own request text, applied verbatim as the theme.
+    """
+    try:
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception as error:
+        logger.warning("Failed to send group-profile typing action to chat %s: %s", chat_id, error)
+    try:
+        text = await run_group_profile(chat_id, rubric)
+    except Exception as error:
+        logger.warning("Group profile generation failed for chat %s: %s", chat_id, error)
+        text = None
+    if text:
+        await send_and_store(bot, chat_id, text, reply_to=reply_to_msg_id)
+        return
+    await send_and_store(
+        bot, chat_id, random.choice(GROUP_PROFILE_FAILED_REPLIES), reply_to=reply_to_msg_id
+    )
+
+
+def launch_group_profile_task(bot, chat_id: int, reply_to_msg_id: int, rubric: str) -> None:
+    """Fire-and-forget the group-profile generation for an accepted request.
+
+    Fire-and-forget like the meme and selfie paths, so the handler is not
+    held open for the per-member dossier gathering and the LLM call. Same
+    trade-off those paths already make: the canonical log line emits before
+    the profile message actually lands.
+
+    Args:
+        bot: Telegram Bot instance to send with.
+        chat_id: Chat the request came from.
+        reply_to_msg_id: The requesting message the profile replies to.
+        rubric: The user's own request text, applied verbatim as the theme.
+    """
+    asyncio.create_task(deliver_group_profile(bot, chat_id, reply_to_msg_id, rubric))
+
+
 async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed: bool) -> str:
     """Log a pipeline failure, notify the chat when addressed, name the kind.
 
@@ -462,12 +512,17 @@ async def run_pipeline(
                 action = "replied+photo"
             canonical.emit(final_state, action, time.monotonic() - started_at)
             return True
-        # An accepted meme request answers with the image alone, so it reaches
-        # here with an empty response — the only path that delivers media
-        # without any text.
+        # An accepted meme or group-profile request answers with media/a
+        # generated message and no response-node text, so it reaches here
+        # with an empty response.
         if final_state.get("meme_request"):
             launch_meme_task(context.bot, chat.id, msg.message_id)
             canonical.emit(final_state, "meme", time.monotonic() - started_at)
+            return True
+        if final_state.get("group_profile_request"):
+            rubric = final_state["incoming"]["raw_text"] or ""
+            launch_group_profile_task(context.bot, chat.id, msg.message_id, rubric)
+            canonical.emit(final_state, "profile", time.monotonic() - started_at)
             return True
     except Exception as error:
         error_kind = await notify_pipeline_failure(error, msg, chat.id, addressed)

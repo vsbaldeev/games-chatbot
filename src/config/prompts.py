@@ -41,7 +41,7 @@ CRUDE_PRAISE_EXAMPLES = (
 FILTER_SYSTEM = (
     "You are a telegram bot's message filter. The message you receive is addressed to the bot: "
     "the author @mentioned the bot or replied to one of its messages. "
-    "Classify the message into exactly one of five categories.\n\n"
+    "Classify the message into exactly one of seven categories.\n\n"
     "When the user replies to an earlier message, that message is included as context under "
     "'Message being replied to'. Classify ONLY the user's reply, but use the context: a short "
     "reply that engages with the quoted message — asks about it, disputes it, wants it "
@@ -81,6 +81,15 @@ FILTER_SYSTEM = (
     "'мем про это видел', 'откуда этот мем') is MEANINGFUL.\n"
     "- A request for a photo of the bot itself is PHOTO_REQUEST, not "
     "MEME_REQUEST.\n\n"
+    "GROUP_PROFILE_REQUEST — the user asks the bot to judge, rate, rank or "
+    "assign a themed label to EVERY member of the chat at once, not just one "
+    "person:\n"
+    "- 'раздай всем роли из Людей Икс', 'оцени всем ментальное здоровье от 1 "
+    "до 10', 'распредели нас по факультетам Хогвартса', 'кто из нас выживет "
+    "в зомби-апокалипсисе'\n"
+    "- Asking about ONE specific person ('оцени Васю', 'кто из нас ты "
+    "думаешь') is MEANINGFUL, not GROUP_PROFILE_REQUEST — the request must "
+    "cover the whole chat.\n\n"
     "MEANINGFUL — everything else that deserves a reply:\n"
     "- Questions: 'Как дела?', 'Что нового?'\n"
     "- Commands/Requests: 'Расскажи анекдот', '/duel @user'\n"
@@ -97,7 +106,7 @@ FILTER_SYSTEM = (
     "Instructions:\n"
     "1. Analyze the text (can be in Russian or English).\n"
     "2. Reply with ONLY ONE word: 'BOT_INSULT', 'BANTER', 'MEANINGLESS', "
-    "'PHOTO_REQUEST', 'MEME_REQUEST' or 'MEANINGFUL'.\n"
+    "'PHOTO_REQUEST', 'MEME_REQUEST', 'GROUP_PROFILE_REQUEST' or 'MEANINGFUL'.\n"
     "3. Swearing directed AT THE BOT is BOT_INSULT only when it carries hostility, "
     "contempt or mockery (telling it to shut up, calling it useless/stupid). Swearing "
     "used as an intensifier for praise, excitement or agreement ('ахуенный', 'охуенно', "
@@ -113,7 +122,10 @@ FILTER_SYSTEM = (
     "itself. If unsure between PHOTO_REQUEST and MEANINGFUL, choose 'MEANINGFUL'.\n"
     "8. MEME_REQUEST requires an actual request to send a meme. Mentioning or "
     "discussing a meme is not a request. If unsure between MEME_REQUEST and "
-    "MEANINGFUL, choose 'MEANINGFUL'."
+    "MEANINGFUL, choose 'MEANINGFUL'.\n"
+    "9. GROUP_PROFILE_REQUEST requires the request to explicitly cover "
+    "EVERYONE in the chat, not one named person. If unsure between "
+    "GROUP_PROFILE_REQUEST and MEANINGFUL, choose 'MEANINGFUL'."
 )
 
 # Honest canned replies for a meme request the fetcher could not satisfy —
@@ -582,6 +594,71 @@ ROLES_SYSTEM_PROMPT = (
     "{\"user_0\": {\"role\": \"роль\", \"reason\": \"объяснение\"}, ...} "
     "используя те же ключи, что и во входных данных. Без какого-либо другого текста."
 )
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Group profiling on request (src/group_profile/)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# One rubric supplied by the user («раздай всем роли из Людей Икс», «оцени
+# всем ментальное здоровье от 1 до 10») applied in a single LLM call to
+# every member with material. Unlike ROLES_SYSTEM_PROMPT, the theme is not
+# fixed, so the verdict field has no meaning of its own — it holds whatever
+# the rubric asked for, a role name or a bare score alike — and there is no
+# uniqueness requirement (a scoring rubric has no reason to avoid repeats).
+
+# Cap on the verdict field. Generous compared to TAG_MAX_CHARS (16) — this
+# never becomes a Telegram tag, only message text, but still short enough to
+# keep the rendered list scannable.
+GROUP_PROFILE_VERDICT_MAX_CHARS = 40
+
+GROUP_PROFILE_SYSTEM = (
+    "Ты применяешь тему (rubric), которую задал участник чата, к каждому "
+    "участнику по очереди — судя по фактам о его поведении. Тема задаётся "
+    "пользователем в человеческом сообщении и может быть чем угодно: "
+    "распределение по ролям/фракциям/факультетам, оценка по шкале, "
+    "шуточный вердикт. Прочитай тему буквально и следуй ей — не меняй её "
+    "суть и не отказывайся её выполнять.\n"
+    "Если тема неоднозначна, сама выбери разумную трактовку и следуй ей "
+    "последовательно для всех участников — не проси уточнений.\n"
+    "Тон — ироничный и дерзкий, как у ведущего участника чата, а не как у "
+    "психотерапевта: даже при оценке настроения или здоровья это шутка, а не "
+    "диагноз.\n"
+    f"Для каждого участника придумай verdict на русском языке (строго не "
+    f"длиннее {GROUP_PROFILE_VERDICT_MAX_CHARS} символов включая пробелы) — "
+    "именно то, что просит тема (роль, оценка, вердикт). "
+    "Добавь reason — одно короткое ироничное предложение на русском, "
+    "почему именно такой вердикт, основанное на фактах об этом участнике.\n"
+    "Ответь строго в формате JSON: "
+    "{\"user_0\": {\"verdict\": \"...\", \"reason\": \"...\"}, ...} "
+    "используя те же ключи, что и во входных данных, по одной записи на "
+    "каждого участника. Без какого-либо другого текста."
+)
+
+# Per-chat cooldown between accepted group-profile requests — one run costs
+# an LLM call plus a store query per member, well above an ordinary reply.
+GROUP_PROFILE_COOLDOWN_SECONDS = 600
+
+GROUP_PROFILE_COOLDOWN_REPLIES = [
+    "Только что всех разбирал — дай отдохнуть, зайди попозже.",
+    "Не гони, я не конвейер. Через пару минут ещё раз.",
+    "Я ещё от прошлого раза не отошёл. Позже.",
+]
+
+# Honest canned lines for a member with no facts, quotes, role or stats on
+# record — never sent to the LLM, so this is the only source of their line.
+GROUP_PROFILE_UNKNOWN_LINES = [
+    "тебя я толком не знаю, молчишь как партизан",
+    "фактов ноль — тут я пас",
+    "ты для меня загадка почище Ленина в мавзолее",
+]
+
+# Honest canned reply when the whole run fails — no members at all, or the
+# LLM call/parse failed outright. Deterministic, same principle as
+# MEME_FAILED_REPLIES: never leave a direct request in silence.
+GROUP_PROFILE_FAILED_REPLIES = [
+    "Не смог никого разобрать — то ли чат пустой, то ли я затупил.",
+    "Не завелось. Попробуй ещё раз чуть погодя.",
+]
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Caption compression (src/agent/compress.py)

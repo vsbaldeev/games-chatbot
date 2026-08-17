@@ -14,6 +14,11 @@ def handler() -> YoutubeVideoHandler:
     return YoutubeVideoHandler()
 
 
+class TestDailyCap:
+    def test_has_no_daily_cap(self, handler):
+        assert handler.daily_cap is None
+
+
 class TestExtract:
     def test_no_link_returns_none(self, handler):
         assert handler.extract("no links here") is None

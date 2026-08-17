@@ -1,12 +1,17 @@
 """Shared handler abstraction for lightweight social-link summaries.
 
 Instagram Reel and long-form YouTube video links both follow the same
-shape: regex-detect a link in chat, gate it (repost dedup + daily cap, same
-TtlGate pattern as src.pipeline.shorts), fetch metadata + top comments (no
+shape: regex-detect a link in chat, gate it (repost dedup, same TtlGate
+pattern as src.pipeline.shorts), fetch metadata + top comments (no
 transcript/audio/vision analysis — that stays exclusive to shorts.py, kept
 deliberately separate; see the design doc), and inject a labelled text
 block into the pipeline. Instagram alone may also attach downloaded video
 bytes for Telegram to repost.
+
+Each handler owns its own ``daily_cap`` (None means uncapped) — they are no
+longer forced to share one number. Instagram's anonymous yt-dlp fetch hits a
+flaky Instagram-side anti-bot gate worth throttling around; the YouTube
+handler is a single free metadata request with nothing to throttle.
 
 The router consults HANDLERS in priority order: the first handler whose
 regex matches anything in the message wins the whole message — every other
@@ -23,7 +28,6 @@ SOCIAL_LINK_MAX_COMMENTS = 10                  # top-level comments surfaced per
 SOCIAL_LINK_COMMENT_CHAR_LIMIT = 200           # truncate each comment before prompting
 SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT = 2000      # caps YouTube description length
 SOCIAL_LINK_DEDUP_WINDOW_SECONDS = 24 * 3600   # same item in the same chat -> one summary
-SOCIAL_LINK_DAILY_CAP = 15                     # summaries per chat per sliding 24h window
 
 
 class SocialLinkContent(TypedDict):
@@ -46,7 +50,7 @@ class LinkHandler(Protocol):
     pattern: re.Pattern           # used by is_bare_link_message
     dedup_gate: TtlGate
     daily_cap_gate: TtlGate
-    daily_cap: int
+    daily_cap: int | None  # None disables the cap check entirely
 
     def extract(self, text: str) -> tuple[str, str] | None:
         """Return ``(item_id, canonical_url)`` for the first match in ``text``, or None."""

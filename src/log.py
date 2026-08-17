@@ -36,6 +36,11 @@ MUTED_LOGGERS = ("httpx", "httpcore", "telegram.ext.ExtBot", "apscheduler")
 # actually said is logged by the bot itself (see log_outgoing_text).
 GROQ_LOGGER = "groq"
 
+# Same problem, same fix, for the OpenAI SDK — the vision fallback factory
+# (src/agent/vision.py) routes through it, and its request bodies embed the
+# same base64 image payloads at DEBUG.
+OPENAI_LOGGER = "openai"
+
 # Every outgoing bot text shares this logger name, so one grep reads back as
 # a transcript of what the bot said. Its limit is generous enough to hold a
 # full reply, including a long voice-in-kind script, without truncation.
@@ -220,6 +225,8 @@ def setup() -> None:
     logging.getLogger("telegram.ext.Updater").setLevel(tg_updater_level)
     groq_level = logging.getLevelName(os.getenv("GROQ_LOG_LEVEL", "WARNING").upper())
     logging.getLogger(GROQ_LOGGER).setLevel(groq_level)
+    openai_level = logging.getLevelName(os.getenv("OPENAI_LOG_LEVEL", "WARNING").upper())
+    logging.getLogger(OPENAI_LOGGER).setLevel(openai_level)
 
 
 def get_logger(name: str) -> logging.Logger:

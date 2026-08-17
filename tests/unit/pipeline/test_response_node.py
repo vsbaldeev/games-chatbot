@@ -26,6 +26,7 @@ from src.pipeline.response_node import (
     build_recent_history_lines,
     build_response_input,
     build_trigger_line,
+    resolve_group_profile_directive,
     resolve_meme_directive,
 )
 from tests.builders import make_incoming, make_state
@@ -475,6 +476,16 @@ class TestMemeRequestSkipsGeneration:
         assert result["response"] == "обычный ответ"
 
 
+class TestGroupProfileRequestSkipsGeneration:
+    async def test_accepted_group_profile_request_returns_an_empty_response(self):
+        """The generated profile is the whole reply — no LLM call, no text to stack on it."""
+        agent = make_mock_agent("этого не должно быть")
+        state = make_state(make_incoming(), group_profile_request=True)
+        result = await ResponseNode(agent)(state)
+        assert result == {"response": "", "response_messages": []}
+        agent.invoke_response.assert_not_called()
+
+
 class TestResolveMemeDirective:
     def test_wound_down_meme_request_is_refused(self):
         state = make_state(make_incoming(), wind_down=True, filter_verdict="MEME_REQUEST")
@@ -487,6 +498,20 @@ class TestResolveMemeDirective:
     def test_wound_down_other_verdict_has_no_meme_directive(self):
         state = make_state(make_incoming(), wind_down=True, filter_verdict="BANTER")
         assert resolve_meme_directive(state) is None
+
+
+class TestResolveGroupProfileDirective:
+    def test_wound_down_group_profile_request_is_refused(self):
+        state = make_state(make_incoming(), wind_down=True, filter_verdict="GROUP_PROFILE_REQUEST")
+        assert resolve_group_profile_directive(state) == "refused"
+
+    def test_accepted_group_profile_request_has_no_directive(self):
+        state = make_state(make_incoming(), group_profile_request=True)
+        assert resolve_group_profile_directive(state) is None
+
+    def test_wound_down_other_verdict_has_no_group_profile_directive(self):
+        state = make_state(make_incoming(), wind_down=True, filter_verdict="BANTER")
+        assert resolve_group_profile_directive(state) is None
 
 
 class TestBuildDirectiveLinesMemeRefusal:
@@ -504,6 +529,24 @@ class TestBuildDirectiveLinesMemeRefusal:
             is_bot_insult=False, wind_down=False, photo_directive=None, meme_directive=None,
         )
         assert "мем" not in "\n".join(lines)
+
+
+class TestBuildDirectiveLinesGroupProfileRefusal:
+    def test_refusal_line_forbids_inventing_verdicts(self):
+        lines = build_directive_lines(
+            is_bot_insult=False, wind_down=True, photo_directive=None,
+            group_profile_directive="refused",
+        )
+        joined = "\n".join(lines)
+        assert "роле" in joined or "вердикт" in joined
+        assert "не придумывай" in joined.lower()
+
+    def test_no_group_profile_directive_adds_no_group_profile_line(self):
+        lines = build_directive_lines(
+            is_bot_insult=False, wind_down=False, photo_directive=None,
+            group_profile_directive=None,
+        )
+        assert "вердикт" not in "\n".join(lines)
 
 
 class TestLinkReplyGrounding:

@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.pipeline.router import MessageRouter
+from src.pipeline.router import INSTAGRAM_REEL_DAILY_CAP_REPLIES, MessageRouter
+from src.pipeline.social_links.instagram_reel import INSTAGRAM_REEL_DAILY_CAP
 from tests.builders import make_incoming, make_telegram_message
 
 BOT_USERNAME = "testbot"
@@ -180,6 +181,12 @@ class TestSocialLinkDetection:
     def test_instagram_reel_link_triggers_social_link(self, router):
         msg = make_incoming(raw_text="https://www.instagram.com/reel/RouterTest01/")
         result = router._MessageRouter__detect_social_link(msg)
+        # social_link_cap_remaining depends on how many prior Instagram hits
+        # this session's shared daily_cap_gate has already recorded for
+        # chat_id=1000 — asserted precisely (from a clean chat) in
+        # TestSocialLinkDailyCap below; here just check the shape.
+        cap_remaining = result.pop("social_link_cap_remaining")
+        assert isinstance(cap_remaining, int)
         assert result == {
             "should_respond": True,
             "response_trigger": "social_link",
@@ -227,6 +234,55 @@ class TestSocialLinkDetection:
             )
         )
         assert router._MessageRouter__detect_social_link(combined_msg) is None
+
+
+class TestSocialLinkDailyCap:
+    """Instagram alone is throttled; YouTube's handler has no cap at all.
+
+    Distinct chat ids per test, same reason as TestSocialLinkDetection: the
+    handlers' daily_cap_gate TtlGate singletons are module-level and shared
+    across the whole test session.
+    """
+
+    def test_instagram_cap_exceeded_replies_instead_of_silence(self, router):
+        chat_id = 90001
+        for index in range(INSTAGRAM_REEL_DAILY_CAP):
+            msg = make_incoming(
+                chat_id=chat_id,
+                raw_text=f"https://www.instagram.com/reel/DailyCapA{index:03d}/",
+            )
+            assert router._MessageRouter__detect_social_link(msg) is not None
+
+        over_cap_msg = make_incoming(
+            chat_id=chat_id, raw_text="https://www.instagram.com/reel/DailyCapOver/",
+        )
+        result = router._MessageRouter__detect_social_link(over_cap_msg)
+        assert result["should_respond"] is False
+        assert result["response"] in INSTAGRAM_REEL_DAILY_CAP_REPLIES
+
+    def test_cap_remaining_counts_down_from_a_clean_chat(self, router):
+        chat_id = 90003
+        first = router._MessageRouter__detect_social_link(
+            make_incoming(chat_id=chat_id, raw_text="https://www.instagram.com/reel/DailyCapB000/")
+        )
+        assert first["social_link_cap_remaining"] == INSTAGRAM_REEL_DAILY_CAP - 1
+
+        second = router._MessageRouter__detect_social_link(
+            make_incoming(chat_id=chat_id, raw_text="https://www.instagram.com/reel/DailyCapB001/")
+        )
+        assert second["social_link_cap_remaining"] == INSTAGRAM_REEL_DAILY_CAP - 2
+
+    def test_youtube_video_handler_is_never_capped(self, router):
+        chat_id = 90002
+        for index in range(INSTAGRAM_REEL_DAILY_CAP + 5):
+            msg = make_incoming(
+                chat_id=chat_id,
+                raw_text=f"https://www.youtube.com/watch?v=DailyCapY{index:03d}",
+            )
+            result = router._MessageRouter__detect_social_link(msg)
+            assert result["social_link_handler"] == "youtube_video"
+            assert result["should_respond"] is True
+            assert result["social_link_cap_remaining"] is None
 
 
 class TestLinkMessageIsBare:

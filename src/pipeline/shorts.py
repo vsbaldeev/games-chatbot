@@ -50,7 +50,7 @@ MAX_COMMENTS = 10             # top-level comments fetched for audience reaction
 COMMENT_CHAR_LIMIT = 200      # truncate each comment before prompting
 TRANSCRIPT_CHAR_LIMIT = 2000  # cap speech-dense 3-min shorts before prompting
 
-SHORTS_DAILY_CAP = 15               # summaries per chat per sliding 24 h window
+SHORTS_DAILY_CAP = 50               # summaries per chat per sliding 24 h window
 DEDUP_WINDOW_SECONDS = 24 * 3600    # same video id in the same chat → one summary
 
 # The bgutil PO-token provider sidecar on the docker-compose network.

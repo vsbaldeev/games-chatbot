@@ -22,7 +22,8 @@ members who share a name can never collapse into one entry.
 1. Fetch all chat members (chat_members table); keep names_by_uid for rendering
 2. Load user_memories facts for each member; eligible = members that have facts
    (factless members are left untagged)
-3. generate_roles: anonymise to user_0, user_1, … (real ids never sent to LLM);
+3. generate_roles: anonymise to user_0, user_1, … via src/utils/anon_map.py
+   (shared with src/group_profile/, real ids never sent to LLM);
    LLM (openai/gpt-oss-120b) returns {role, reason} per anon key; remap back
 4. fill_missing_roles: members the LLM omitted are re-asked once, then any still
    missing get the neutral FALLBACK_ROLE + reason — every eligible member ends up tagged

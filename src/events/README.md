@@ -43,7 +43,8 @@ messages.py (deliver_response)
                                       everything else is a plain text reply
 
 link_repost.py
-    deliver_link_message(msg, summary, video, username, url, is_bare) —
+    deliver_link_message(msg, summary, video, username, url, is_bare,
+                          cap_remaining) —
                                       sends the bot's ONE combined message
                                       for a link trigger: the downloaded
                                       video with the summary as its caption
@@ -90,6 +91,16 @@ there is one, 4096 (the plain text-message cap) when there isn't — long-form
 YouTube links and any download failure that falls back to a text-only send
 are not bound by the tighter caption limit.
 
+When the router (`src/pipeline/router.py`) computed a `social_link_cap_remaining`
+for the matched handler (Instagram only today — see `src.pipeline.social_links`),
+`build_cap_remaining_footer` renders it as a trailing "Осталось рилсов сегодня: N"
+line, reserved out of the compression budget the same way the credit line is —
+it is never compressed or truncated away. Unlike the credit line, it is shown
+regardless of `is_bare`: it survives even when the original message is kept and
+the summary replies to it directly. A handler with no daily cap
+(`daily_cap is None`, e.g. the long-form YouTube handler) never sets this field,
+so no footer is shown for it.
+
 The content block computed for the caption (transcript/frame
 descriptions/comments for a Short, description/comments for a Reel or
 long-form YouTube link) is also persisted on the bot's own message row
@@ -130,6 +141,25 @@ a direct request unanswered with no other way to ask.
 
 Like the selfie path, this is fire-and-forget, so the canonical log line emits
 before the meme actually lands.
+
+## Chat-requested group profiling
+
+When the pipeline accepted a group-profile request (`group_profile_request`
+state flag set by the filter — see `src/group_profile/README.md`), the
+response node returns an **empty** reply, so `run_pipeline` falls into the
+same media-only dispatch branch the meme path established, checked right
+after it. It fire-and-forgets `deliver_group_profile`, and the canonical log
+line records `action=profile`.
+
+`deliver_group_profile` sends a `typing` chat action first — the only sign of
+life while every chat member's dossier is gathered and the LLM call against
+the user's own rubric runs — then calls `src.group_profile.profile.run_group_profile`.
+If that returns `None` (no members at all) or raises, an honest canned line
+from `GROUP_PROFILE_FAILED_REPLIES` goes out instead, same principle as the
+meme path's fallback: a direct request must never end in silence.
+
+Like the meme and selfie paths, this is fire-and-forget, so the canonical log
+line emits before the profile message actually lands.
 
 ## Pipeline error handling
 

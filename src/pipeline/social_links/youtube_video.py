@@ -16,7 +16,6 @@ from src import log
 from src.pipeline.shorts import POT_PROVIDER_URL
 from src.pipeline.social_links import (
     SOCIAL_LINK_COMMENT_CHAR_LIMIT,
-    SOCIAL_LINK_DAILY_CAP,
     SOCIAL_LINK_DEDUP_WINDOW_SECONDS,
     SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT,
     SOCIAL_LINK_MAX_COMMENTS,
@@ -44,10 +43,15 @@ class YoutubeVideoHandler:
     pattern = YOUTUBE_VIDEO_URL_RE
 
     def __init__(self) -> None:
-        """Initialise this handler's own dedup and daily-cap gates."""
+        """Initialise this handler's own repost-dedup gate; no daily cap.
+
+        Unlike Instagram, this fetch never hits a flaky anti-bot gate that
+        needs throttling — it's a single free metadata request, so there is
+        nothing here worth capping per day.
+        """
         self.dedup_gate = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
         self.daily_cap_gate = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
-        self.daily_cap = SOCIAL_LINK_DAILY_CAP
+        self.daily_cap = None
 
     def extract(self, text: str) -> tuple[str, str] | None:
         """Extract the video id and canonical watch URL from message text.
