@@ -23,7 +23,7 @@ members who share a name can never collapse into one entry.
 2. Load user_memories facts for each member; eligible = members that have facts
    (factless members are left untagged)
 3. generate_roles: anonymise to user_0, user_1, … (real ids never sent to LLM);
-   LLM (llama-3.3-70b-versatile) returns {role, reason} per anon key; remap back
+   LLM (openai/gpt-oss-120b) returns {role, reason} per anon key; remap back
 4. fill_missing_roles: members the LLM omitted are re-asked once, then any still
    missing get the neutral FALLBACK_ROLE + reason — every eligible member ends up tagged
 5. enforce_unique_roles: case-insensitive duplicate roles trigger one re-ask for

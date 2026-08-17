@@ -41,10 +41,15 @@ commands, jobs or engagement features.
        fact that makes the joke land. The mode instruction tells the model which angle to take.
 
 4. LLM call
-       model:       openai/gpt-oss-120b  → llama-3.3-70b-versatile → gpt-oss-20b (fallback chain)
-                    gpt-oss-120b is primary: better world-knowledge/fact-comprehension, and it draws
-                    on a SEPARATE Groq token budget from llama-3.3 (the main agent model), so heavy
-                    roasting does not starve the bot's regular replies.
+       model:       openai/gpt-oss-120b → gpt-oss-20b → OpenRouter google/gemma-4-31b-it:free (fallback chain)
+                    gpt-oss-120b is primary: better world-knowledge/fact-comprehension.
+                    NOTE: the middle Groq leg used to be llama-3.3-70b-versatile
+                    (decommissioned 2026-08-16, no free-tier replacement); the main
+                    agent/response model was also moved to gpt-oss-120b for the same
+                    reason, so roast and response calls now share ONE Groq token
+                    budget instead of two separate ones — heavy roasting can starve
+                    the bot's regular replies. Re-split onto different models if this
+                    becomes a real quota contention in production.
        temperature: 0.5
        top_p:       0.9
        max_tokens:  1024  (gpt-oss is a reasoning model — hidden reasoning eats output tokens before

@@ -3,6 +3,7 @@
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelFallbackMiddleware, ModelRetryMiddleware
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from src import config, log
 from src.agent.middleware import (
@@ -73,6 +74,13 @@ class ResponseAgent:
     def __build_executor():
         """Build a response executor with retry/fallback middleware.
 
+        The fallback chain always tries any remaining Groq models first, then
+        falls over to RESPONSE_FALLBACK_MODEL on OpenRouter — a real
+        cross-provider leg, so a Groq-wide outage degrades to a paid call
+        instead of taking chat replies down entirely. Skipped when
+        OPENROUTER_API_KEY is unset, same fail-open contract as
+        filter_node.make_filter_llm.
+
         Returns:
             Configured LangChain agent executor.
         """
@@ -80,6 +88,20 @@ class ResponseAgent:
             ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.7, max_tokens=1024, max_retries=0)
             for model in config.RESPONSE_MODEL_FALLBACKS[1:]
         ]
+        if config.OPENROUTER_API_KEY:
+            fallback_llms.append(ChatOpenAI(
+                model=config.RESPONSE_FALLBACK_MODEL,
+                api_key=config.OPENROUTER_API_KEY,
+                base_url=config.OPENROUTER_BASE_URL,
+                temperature=0.7,
+                max_tokens=1024,
+                max_retries=0,
+            ))
+        else:
+            logger.warning(
+                "Response: OPENROUTER_API_KEY unset — no cross-provider fallback for %s",
+                config.RESPONSE_MODEL_FALLBACKS[0],
+            )
         primary_llm = ChatGroq(
             model=config.RESPONSE_MODEL_FALLBACKS[0],
             api_key=config.GROQ_API_KEY,
@@ -87,16 +109,18 @@ class ResponseAgent:
             max_tokens=1024,
             max_retries=0,
         )
+        middleware = [
+            ModelRetryMiddleware(retry_on=should_retry, on_failure="error", max_retries=3),
+            GroqContextGuard(),
+            ThinkingStripper(),
+        ]
+        if fallback_llms:
+            middleware.insert(0, ModelFallbackMiddleware(*fallback_llms))
         executor = create_agent(
             primary_llm,
             [],
             system_prompt=RESPONSE_PROMPT,
-            middleware=[
-                ModelFallbackMiddleware(*fallback_llms),
-                ModelRetryMiddleware(retry_on=should_retry, on_failure="error", max_retries=3),
-                GroqContextGuard(),
-                ThinkingStripper(),
-            ],
+            middleware=middleware,
         )
         logger.info("Response executor built with model: %s", config.RESPONSE_MODEL_FALLBACKS[0])
         return executor

@@ -36,43 +36,67 @@ VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
 # and each mislabel costs a member an emoji instead of an answer. The 70B model
 # scored 8/8 on the same set. Volume makes the RPD argument moot: this chat
 # sees ~11 addressed messages a day, nowhere near the smaller 1K RPD budget.
-FILTER_MODEL = "llama-3.3-70b-versatile"
+#
+# llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16 with no
+# same-family replacement on any free tier (Groq's own migration notice
+# points at GPT-OSS/Qwen, not another Llama size). qwen/qwen3.6-27b is the
+# replacement — the same reasoning-model family already proven in this
+# codebase under a tight token budget via reasoning_effort="none" (see
+# VISION_MODEL, MEME_JUDGE_MAX_TOKENS=50, and make_filter_llm below), which is
+# why it was picked over openai/gpt-oss-120b: gpt-oss has no proven
+# "no thinking" mode here, and FILTER_MAX_TOKENS=10 leaves no room to find out.
+# Its classification accuracy on this chat's real messages is UNVALIDATED —
+# the 8/8-vs-3/8 comparison above no longer reflects the model in use, and it
+# now shares a Groq daily quota bucket with VISION_MODEL and
+# MEMORY_MODEL_FALLBACKS[0], undoing the original point of picking a
+# different model family for this call site. Re-split if quota exhaustion
+# starts correlating across the three.
+FILTER_MODEL = "qwen/qwen3.6-27b"
 
 # Cross-provider fallback for the filter, used when Groq is out of quota or
 # unreachable (see filter_node.make_filter_llm). Same weights, different
 # vendor, so a Groq outage degrades to a paid call instead of to silence.
-# Requires OPENROUTER_API_KEY; without it the filter is Groq-only.
+# Requires OPENROUTER_API_KEY; without it the filter is Groq-only. Unaffected
+# by the Groq decommission — this is an OpenRouter-hosted model, not Groq's.
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 FILTER_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 # Second opinion before acting on an overheard bot-word insult. The comeback
 # payload is aggressive, so the cheap filter's positives are confirmed by a
 # stronger model before the bot claps back.
-# NOTE: now identical to FILTER_MODEL, which makes the confirmation a
+# llama-3.3-70b-versatile decommissioned 2026-08-16 — see FILTER_MODEL.
+# NOTE: still identical to FILTER_MODEL, which makes the confirmation a
 # same-model re-ask at temperature 0 — it will nearly always agree, so the
 # overheard gate is effectively open. Needs a decision: point this at a
 # genuinely different model (openai/gpt-oss-120b) or drop the second call.
-INSULT_CONFIRM_MODEL = "llama-3.3-70b-versatile"
+INSULT_CONFIRM_MODEL = "qwen/qwen3.6-27b"
 
 # Memory fact extraction fallback chain (chat facts and posted-episode
 # canon-fact distillation both use this — see memory_writer.make_extraction_llm).
 # Primary is a reasoning model: callers must pass reasoning_effort="none" or
 # the whole max_tokens budget is burned inside a <think> block and no JSON is
-# produced. llama-3.1-8b-instant is the fallback for Groq daily-quota (TPD)
-# exhaustion on the primary — same model FILTER_MODEL uses for its far larger
-# free-tier RPD/TPD budget, so the two rarely run out on the same day.
+# produced. openai/gpt-oss-20b is the fallback for Groq daily-quota (TPD)
+# exhaustion on the primary — a different model family, so its own quota
+# bucket, and it's Groq's own recommended replacement for the model this slot
+# used before. (Was llama-3.1-8b-instant, decommissioned by Groq 2026-08-16.)
 MEMORY_MODEL_FALLBACKS: list[str] = [
-    "qwen/qwen3.6-27b",       # primary
-    "llama-3.1-8b-instant",   # fallback: separate, larger daily quota
+    "qwen/qwen3.6-27b",     # primary
+    "openai/gpt-oss-20b",   # fallback: separate, larger daily quota
 ]
 
-# Weekly member-role assignment
-TAG_MODEL = "llama-3.3-70b-versatile"
+# Weekly member-role assignment. Was llama-3.3-70b-versatile, decommissioned
+# by Groq on 2026-08-16 with no free-tier same-family replacement.
+TAG_MODEL = "openai/gpt-oss-120b"
 
 # Tool-calling worker fallback chain. No 8B floor: at that size the worker
 # skips tools and fabricates facts from parametric memory — for a
 # fact-gatherer, no data beats fake data; exhaustion raises an honest
-# quota error instead.
+# quota error instead. All three legs are Groq — unaffected by the Llama
+# decommission (none of them are Llama) but still a single-provider chain,
+# same gap as RESPONSE/ROAST had. Left Groq-only deliberately for now: an
+# OpenRouter free-tier fallback here needs its tool-calling reliability
+# checked first, or a weak fallback reintroduces the exact fabrication risk
+# this comment warns against.
 WORKER_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-120b",   # primary:    120B, best tool-call quality
     "qwen/qwen3.6-27b",      # fallback-1: 27B,  parallel tools
@@ -80,18 +104,39 @@ WORKER_MODEL_FALLBACKS: list[str] = [
 ]
 
 # Personality / response fallback chain.
-# Meta/llama only — qwen and gpt-oss drift from the Russian casual style.
+# Meta/llama was the only family that held the Russian casual style — qwen
+# and gpt-oss both drifted from it in earlier testing. Groq decommissioned
+# every Llama chat model on 2026-08-16, and no provider offers Llama for free
+# anymore (checked OpenRouter's live free-tier catalog 2026-08-17: no Llama,
+# Qwen or DeepSeek), so that constraint can no longer be met without paying
+# per call. openai/gpt-oss-120b is the new Groq-side primary — UNVALIDATED
+# for Russian casual style, re-check output quality against the old Llama
+# voice. This chain also gained a cross-provider leg it never had before
+# (RESPONSE_FALLBACK_MODEL, below) — until now a Groq-only outage took chat
+# replies down entirely (see ResponseAgent.__build_executor).
 RESPONSE_MODEL_FALLBACKS: list[str] = [
-    "llama-3.3-70b-versatile",  # primary
-    "llama-3.1-8b-instant",     # fallback-1: no Meta/llama intermediate on free tier
+    "openai/gpt-oss-120b",
 ]
 
-# Roast generation fallback chain
+# Cross-provider (OpenRouter) fallback for the response chain. Free-tier
+# Gemma — picked for Russian/Cyrillic quality among currently-free OpenRouter
+# models now that Llama/Qwen/DeepSeek are gone from that tier too. Requires
+# OPENROUTER_API_KEY; without it ResponseAgent stays Groq-only, same
+# fail-open contract as make_filter_llm.
+RESPONSE_FALLBACK_MODEL = "google/gemma-4-31b-it:free"
+
+# Roast generation fallback chain. Middle leg was llama-3.3-70b-versatile,
+# decommissioned by Groq 2026-08-16 with no free-tier same-family
+# replacement — dropped rather than replaced, since the chain already had
+# two working Groq models either side of it.
 ROAST_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-120b",
-    "llama-3.3-70b-versatile",
     "openai/gpt-oss-20b",
 ]
+
+# Cross-provider (OpenRouter) fallback for the roast chain — see
+# RESPONSE_FALLBACK_MODEL, same model and same reasoning.
+ROAST_FALLBACK_MODEL = "google/gemma-4-31b-it:free"
 
 # Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
 # Karras). Standard multi-step sampling, not an LCM speed hack: low-step/
@@ -129,19 +174,26 @@ MEME_JUDGE_ATTEMPTS = 3
 
 # Chat-requested selfie scene writer (src/life/selfie.py). One small call
 # turning a member's Russian photo request into an English scene line. No
-# fallback chain: a failure degrades to a canned in-character excuse. llama
-# for reliable bare-string output.
-SELFIE_SCENE_MODEL = "llama-3.3-70b-versatile"
-SELFIE_SCENE_MAX_TOKENS = 200
+# fallback chain: a failure degrades to a canned in-character excuse.
+# Was llama-3.3-70b-versatile (decommissioned by Groq 2026-08-16, no
+# free-tier Llama replacement anywhere); openai/gpt-oss-120b is the
+# replacement. It's a reasoning model with no proven "no thinking" mode in
+# this codebase, so SELFIE_SCENE_MAX_TOKENS is raised to the same headroom
+# ROAST_MODEL_FALLBACKS' gpt-oss-120b primary needs, rather than risk the
+# whole budget disappearing into a hidden <think> block before strip_thinking
+# ever sees an answer.
+SELFIE_SCENE_MODEL = "openai/gpt-oss-120b"
+SELFIE_SCENE_MAX_TOKENS = 1024
 
 # Caption compressor (src/agent/compress.py). One small call that rewrites an
 # over-budget video caption shorter without dropping meaning — cutting mid-
-# sentence is the thing this exists to avoid. Same llama the other bare-string
-# callers use, for the same reason: reliable plain-text output, no <think>
-# block to strip. No fallback chain: a failure degrades to the deterministic
-# sentence-boundary truncation in src/events/link_repost.py.
-CAPTION_COMPRESS_MODEL = "llama-3.3-70b-versatile"
-CAPTION_COMPRESS_MAX_TOKENS = 400
+# sentence is the thing this exists to avoid. Was llama-3.3-70b-versatile
+# (decommissioned by Groq 2026-08-16); openai/gpt-oss-120b is the
+# replacement, same reasoning-headroom caveat as SELFIE_SCENE_MODEL above.
+# No fallback chain: a failure degrades to the deterministic sentence-
+# boundary truncation in src/events/link_repost.py.
+CAPTION_COMPRESS_MODEL = "openai/gpt-oss-120b"
+CAPTION_COMPRESS_MAX_TOKENS = 1024
 
 # Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
 # Chosen for automatic stress placement and homograph resolution: wrongly

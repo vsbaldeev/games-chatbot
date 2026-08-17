@@ -286,6 +286,11 @@ def make_filter_llm(model: str) -> Runnable:
     5xx alike. A request the fallback also rejects raises, and the caller's
     fail-open handles it.
 
+    ``reasoning_effort="none"`` disables the primary's hidden reasoning —
+    both FILTER_MODEL and INSULT_CONFIRM_MODEL are qwen/qwen3.6-27b, a
+    reasoning model, and FILTER_MAX_TOKENS=10 leaves no room for a <think>
+    block before the one-word label.
+
     Args:
         model: Groq model identifier for the primary client.
 
@@ -298,6 +303,7 @@ def make_filter_llm(model: str) -> Runnable:
         temperature=0.0,
         max_tokens=FILTER_MAX_TOKENS,
         max_retries=0,
+        reasoning_effort="none",
     )
     if not config.OPENROUTER_API_KEY:
         logger.warning("Filter: OPENROUTER_API_KEY unset — no fallback for %s", model)

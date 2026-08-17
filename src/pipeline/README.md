@@ -33,7 +33,7 @@ incoming message
     │     │        the dominant way links arrive, and summarizing a video does
     │     │        not put words in the sender's mouth; gated by shorts.py:
     │     │        same video id in the same chat once per 24h (dedup_gate),
-    │     │        SHORTS_DAILY_CAP=15 summaries per chat per sliding 24h
+    │     │        SHORTS_DAILY_CAP=50 summaries per chat per sliding 24h
     │     │        window — a gated link falls through to the rules below,
     │     │        costing zero downloads and zero LLM tokens; on success the
     │     │        response is delivered as a single message — the downloaded
@@ -44,8 +44,12 @@ incoming message
     │     │        social_links.HANDLERS in priority order [instagram_reel,
     │     │        youtube_video], first regex match wins the
     │     │        whole message, every other link is ignored; same per-item
-    │     │        24h dedup_gate + daily cap=15 pattern as Shorts, gated
-    │     │        entirely by src.pipeline.social_links)
+    │     │        24h dedup_gate as Shorts, gated entirely by
+    │     │        src.pipeline.social_links; the daily cap is per-handler now —
+    │     │        only Instagram has one (INSTAGRAM_REEL_DAILY_CAP=30, its
+    │     │        anonymous fetch needs throttling against Instagram's
+    │     │        anti-bot gate), YouTube's handler is uncapped, and hitting
+    │     │        Instagram's cap gets a canned reply instead of silence)
     │     ├─ @bot_username in text    → should_respond=True,  trigger="explicit"
     │     │       (word-boundary regex via is_explicitly_addressed — URLs and
     │     │        longer words containing the username do not count)
@@ -268,10 +272,13 @@ filter  (runs after ingester)
     │       │   the override is a free deterministic floor, not the primary
     │       │   defence: FILTER_MODEL was llama-3.1-8b-instant, which labelled
     │       │   plain questions MEANINGLESS (3/8 on 30 days of this chat's real
-    │       │   drops) and cost members an emoji instead of an answer; it is
-    │       │   now llama-3.3-70b-versatile, which scored 8/8 on the same set,
+    │       │   drops) and cost members an emoji instead of an answer; it was
+    │       │   then llama-3.3-70b-versatile, which scored 8/8 on the same set,
     │       │   with an OpenRouter fallback so a Groq outage cannot turn an
-    │       │   addressed question into silence (make_filter_llm)
+    │       │   addressed question into silence (make_filter_llm). Groq
+    │       │   decommissioned every Llama chat model on 2026-08-16 with no
+    │       │   free-tier replacement, so FILTER_MODEL is now qwen/qwen3.6-27b
+    │       │   (reasoning disabled) — accuracy against real messages unverified
     │       └─ otherwise → engagement gate (see wind-down engine below)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
     ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —
@@ -288,8 +295,10 @@ filter  (runs after ingester)
     ├─ classifier input includes the last 5 chat messages (fails soft to bare
     │    text) so «бот» resolves to the right referent — game bots, other
     │    Telegram bots and people playing «как бот» classify as OTHER
-    ├─ LLM → BOT_INSULT → confirmed by the stronger INSULT_CONFIRM_MODEL
-    │    (llama-3.3-70b-versatile) on the same input; only agreement acts —
+    ├─ LLM → BOT_INSULT → confirmed by INSULT_CONFIRM_MODEL
+    │    (qwen/qwen3.6-27b — currently identical to FILTER_MODEL, so this is a
+    │    same-model re-ask, not a genuine second opinion) on the same input;
+    │    only agreement acts —
     │    disagreement or a confirmation error resolves to silence
     │       → engagement gate (as BOT_INSULT)
     └─ anything else / LLM error → should_respond=False, silent drop
@@ -599,6 +608,7 @@ BotState:
     social_link_url: str | None        # canonical URL, set by router
     social_link_content: str | None    # labelled content block, set by ingester
     social_link_video: bytes | None    # downloaded video bytes (Instagram only), set by ingester
+    social_link_cap_remaining: int | None  # daily_cap - used for this chat, set by router; None when the matched handler has no cap (only Instagram has one today)
     link_message_is_bare: bool | None  # True when the triggering message was the link and nothing else, set by router; only then may the events layer delete the original (src/events/link_repost.py)
     media_is_real_person: bool | None  # vision classification for photo/video_note/video, set by ingester; None = text/voice/unclassified
     context: AssembledContext | None

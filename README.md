@@ -75,13 +75,14 @@ Language     Python 3.13
 Telegram     python-telegram-bot v22 (JobQueue, native async)
 Pipeline     LangGraph StateGraph
 Tools        MCP (stdio) via langchain-mcp-adapters
-LLM (agent)  Groq gpt-oss-120b → qwen3.6-27b → gpt-oss-20b (fallback chain; no 8B floor — it fabricates instead of calling tools)
-LLM (memory) Groq qwen/qwen3.6-27b (reasoning disabled — thinking would eat the whole token budget)
+LLM (agent)  Groq gpt-oss-120b → qwen3.6-27b → gpt-oss-20b (fallback chain; no 8B floor — it fabricates instead of calling tools; Groq-only, no cross-provider leg yet)
+LLM (memory) Groq qwen/qwen3.6-27b → gpt-oss-20b (reasoning disabled on primary — thinking would eat the whole token budget)
 Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, local)
-LLM (roast)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → gpt-oss-20b (fallback chain)
+LLM (response) Groq gpt-oss-120b → OpenRouter google/gemma-4-31b-it:free (cross-provider fallback; Llama was decommissioned by Groq and is no longer free anywhere)
+LLM (roast)  Groq openai/gpt-oss-120b → gpt-oss-20b → OpenRouter google/gemma-4-31b-it:free (cross-provider fallback)
 LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.6-27b (autonomous comedian; JSON decide-or-abstain)
-LLM (roles)  Groq llama-3.3-70b-versatile
-LLM (filter) Groq llama-3.3-70b-versatile → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
+LLM (roles)  Groq openai/gpt-oss-120b
+LLM (filter) Groq qwen/qwen3.6-27b (reasoning disabled) → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
 STT          Groq whisper-large-v3
 TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
 Image gen    Stable Diffusion 1.5 (DreamShaper 8), DPM++ 2M Karras 20 steps, self-hosted CPU service (diffusers/FastAPI, async job API); best-of-3 candidates ranked by the vision judge

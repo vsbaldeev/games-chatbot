@@ -6,6 +6,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelFallbackMiddleware, ModelRetryMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from src import config, log
 from src.agent.language import (
@@ -141,6 +142,10 @@ class RoastAgent:
     def __build_executor():
         """Build the roast executor with retry/fallback middleware.
 
+        Falls over to ROAST_FALLBACK_MODEL on OpenRouter after the Groq legs
+        are exhausted — a real cross-provider leg, same pattern as
+        ResponseAgent. Skipped when OPENROUTER_API_KEY is unset.
+
         Returns:
             Configured LangChain agent executor.
         """
@@ -152,6 +157,21 @@ class RoastAgent:
             ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.5, top_p=0.9, max_tokens=1024, max_retries=0)
             for model in config.ROAST_MODEL_FALLBACKS[1:]
         ]
+        if config.OPENROUTER_API_KEY:
+            fallback_llms.append(ChatOpenAI(
+                model=config.ROAST_FALLBACK_MODEL,
+                api_key=config.OPENROUTER_API_KEY,
+                base_url=config.OPENROUTER_BASE_URL,
+                temperature=0.5,
+                top_p=0.9,
+                max_tokens=1024,
+                max_retries=0,
+            ))
+        else:
+            logger.warning(
+                "Roast: OPENROUTER_API_KEY unset — no cross-provider fallback for %s",
+                config.ROAST_MODEL_FALLBACKS[0],
+            )
         primary_llm = ChatGroq(
             model=config.ROAST_MODEL_FALLBACKS[0],
             api_key=config.GROQ_API_KEY,
@@ -160,16 +180,18 @@ class RoastAgent:
             max_tokens=1024,
             max_retries=0,
         )
+        middleware = [
+            ModelRetryMiddleware(retry_on=should_retry, on_failure="error", max_retries=3),
+            GroqContextGuard(),
+            ThinkingStripper(),
+        ]
+        if fallback_llms:
+            middleware.insert(0, ModelFallbackMiddleware(*fallback_llms))
         return create_agent(
             primary_llm,
             [],
             system_prompt=ROAST_SYSTEM_PROMPT,
-            middleware=[
-                ModelFallbackMiddleware(*fallback_llms),
-                ModelRetryMiddleware(retry_on=should_retry, on_failure="error", max_retries=3),
-                GroqContextGuard(),
-                ThinkingStripper(),
-            ],
+            middleware=middleware,
         )
 
 
