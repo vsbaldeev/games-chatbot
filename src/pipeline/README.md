@@ -585,6 +585,15 @@ memory_writer
             reply is context, never a fact source; voice transcripts are
             framed as spoken words; photo/video descriptions are marked as
             NOT the user's words (source_kind: text | voice | media_description)
+          → faithfulness rule: extract only what is stated or directly entailed.
+            Conditionals/hypotheticals about the future ("if I don't, I'll
+            regret it") must not be recorded as already-happened facts, and
+            sentiment (likes / is annoyed by) is never inferred when the text
+            does not state it. Two worked examples are in the prompt: small
+            models were collapsing modality ("хочу мир посмотреть … пожалею" →
+            "жалеет, что не посмотрел") and inventing sentiment ("соулс-лайки
+            слились в один" → "любит Souls-like"). Trades recall for precision:
+            borderline phrasings now yield no fact rather than a wrong one
           → dedup via cosine similarity (fastembed MiniLM-L12, threshold 0.85)
             duplicate → refresh updated_at; new → insert with embedding
           → cap: 30 facts per user per chat, oldest pruned on overflow
