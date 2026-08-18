@@ -30,6 +30,12 @@ def make_vision_llm(max_tokens: int) -> Runnable:
     bare and callers degrade on their own, the same fail-open contract
     make_filter_llm uses for the text filter.
 
+    Unlike the Groq leg, the fallback carries max_retries=2: its 429s come
+    from OpenRouter's shared (non-BYOK) pool for that model throttling
+    short-term, not from an exhausted daily quota, so a couple of backoff
+    retries (handled by the underlying OpenAI SDK client) can clear it
+    instead of dropping the call outright.
+
     Args:
         max_tokens: Response token budget of the calling site.
 
@@ -53,6 +59,6 @@ def make_vision_llm(max_tokens: int) -> Runnable:
         base_url=config.OPENROUTER_BASE_URL,
         temperature=0.1,
         max_tokens=max_tokens,
-        max_retries=0,
+        max_retries=2,
     )
     return primary_llm.with_fallbacks([fallback_llm], exceptions_to_handle=(APIError,))
