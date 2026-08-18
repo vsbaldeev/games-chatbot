@@ -14,9 +14,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram import ReactionTypeEmoji
 
-from src.config.prompts import FILTER_SYSTEM, GROUP_PROFILE_COOLDOWN_REPLIES
+from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES
 from src.pipeline import engagement_gate
 from src.pipeline.filter_node import (
+    FILTER_SYSTEM,
     GROUP_PROFILE_MARKER_RE,
     REACTION_POOL,
     MeaninglessFilterNode,
