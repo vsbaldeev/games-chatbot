@@ -18,6 +18,11 @@ Respond when:
     src.events.link_repost), which needs a mention or a genuine
     question/request — reposted third-party content invites chat among
     members discussing it, not necessarily talk to the bot.
+  - A reply to one of the bot's group-wide announcements (weekly roles,
+    group profile — rows marked ``is_broadcast``) still routes as
+    "explicit", but carries ``broadcast_reply`` so the filter node may
+    judge whether the author addressed the bot at all. An @mention clears
+    the flag: explicit mentions are never second-guessed.
   - The text mentions the bot by word («бот» / "bot") without addressing it —
     routed with response_trigger="insult_check"; the filter node replies only
     if it confirms the message insults the bot.
@@ -74,6 +79,38 @@ def is_mentioned(text: str, bot_username: str) -> bool:
     """
     mention_pattern = rf"@{re.escape(bot_username.lstrip('@'))}\b"
     return bool(re.search(mention_pattern, text, re.IGNORECASE))
+
+
+def is_link_repost_row(row: dict | None) -> bool:
+    """Check whether a stored bot row is one of the bot's link-repost messages.
+
+    Uses the ``link_material`` column, set only by
+    ``src.events.messages.deliver_and_record`` for link reposts; every other
+    bot message (jokes, roasts, voice replies) has it NULL.
+
+    Args:
+        row: Stored row of the replied-to bot message, or None.
+
+    Returns:
+        True only for a row carrying persisted link material.
+    """
+    return bool(row and row.get("link_material"))
+
+
+def is_broadcast_row(row: dict | None) -> bool:
+    """Check whether a stored bot row is a group-wide announcement.
+
+    Uses the ``is_broadcast`` column, set by the weekly-roles job and the
+    group-profile dispatcher. A missing or purged row is not a broadcast —
+    never gate more aggressively on missing data.
+
+    Args:
+        row: Stored row of the replied-to bot message, or None.
+
+    Returns:
+        True only for a row explicitly marked as a broadcast.
+    """
+    return bool(row and row.get("is_broadcast"))
 
 
 def is_reply_to_bot(telegram_message: Any, bot_id: int) -> bool:
@@ -230,9 +267,7 @@ class MessageRouter:
             if social_link_update is not None:
                 return social_link_update
 
-        should_respond, response_trigger = await self.__decide(msg, message)
-
-        return {"should_respond": should_respond, "response_trigger": response_trigger}
+        return await self.__decide(msg, message)
 
     async def __store_message(self, msg: IncomingMessage) -> None:
         media_type = msg["media_type"]
@@ -399,13 +434,11 @@ class MessageRouter:
             "response": random.choice(INSTAGRAM_REEL_DAILY_CAP_REPLIES),
         }
 
-    async def __is_link_repost_reply(self, chat_id: int, reply: Any) -> bool:
-        """Check whether a replied-to bot message is a link-repost row.
+    async def __load_replied_bot_row(self, chat_id: int, reply: Any) -> dict | None:
+        """Load the stored row of the bot message being replied to.
 
-        Reuses the ``link_material`` column (set only for the bot's own
-        link-repost messages — see src.events.messages.deliver_and_record)
-        as the marker: any other bot message (jokes, roasts, voice replies)
-        has it ``NULL``.
+        One lookup serves both addressing checks below, so a reply costs a
+        single query no matter how many markers the gate consults.
 
         Args:
             chat_id: Chat the reply belongs to.
@@ -413,67 +446,80 @@ class MessageRouter:
                 confirmed sent by the bot).
 
         Returns:
-            ``True`` when the stored row carries persisted link material. A
-            missing or purged row degrades to ``False`` — never gate more
-            aggressively on missing data than on a confirmed non-link-repost
-            row.
+            The stored row, or None when it was never stored or has been
+            purged — callers must degrade to the permissive blanket rule
+            rather than gating on missing data.
         """
-        row = await unified_messages.get_by_id(chat_id=chat_id, message_id=reply.message_id)
-        return bool(row and row.get("link_material"))
+        return await unified_messages.get_by_id(
+            chat_id=chat_id, message_id=reply.message_id
+        )
 
-    async def __decide(self, msg: IncomingMessage, telegram_message: Any) -> tuple[bool, str]:
-        """Pick the routing decision for one incoming message.
+    async def __resolve_addressing(
+        self, msg: IncomingMessage, telegram_message: Any, text: str
+    ) -> tuple[bool, bool]:
+        """Decide whether the bot is addressed, and whether this is a broadcast reply.
 
-        A reply to the bot's link-repost message (see
-        src.events.link_repost) needs a mention or request-like phrasing to
-        count as addressing the bot — replying to reposted third-party
-        content is often chat among members discussing the video, not
-        talking to the bot, unlike a reply to the bot's own conversational
-        output. Every other bot message keeps the blanket rule: any reply
-        counts as addressing it. The router runs before transcription, so a
-        non-text reply has no content for looks_like_request to judge —
-        only an explicit mention can satisfy the gate for those.
+        A reply to the bot's link-repost message needs a mention or
+        request-like phrasing to count as addressing the bot — replying to
+        reposted third-party content is often chat among members discussing
+        the video. A reply to a broadcast (weekly roles, group profile) still
+        counts as addressed here, but is flagged so the filter node may
+        return NOT_ADDRESSED for it; an @mention clears the flag, because an
+        explicit mention is unambiguous addressing.
+
+        Args:
+            msg: Normalised incoming-message dict.
+            telegram_message: The underlying ``telegram.Message`` object.
+            text: The message's text or caption, as read from Telegram.
+
+        Returns:
+            Tuple of ``(addressed, broadcast_reply)``.
+        """
+        mentioned = is_mentioned(text, self.__bot_username)
+        reply_to_bot = is_reply_to_bot(telegram_message, self.__bot_id)
+        addressed = mentioned or reply_to_bot
+        if not reply_to_bot or mentioned:
+            return addressed, False
+        row = await self.__load_replied_bot_row(
+            msg["chat_id"], telegram_message.reply_to_message
+        )
+        if is_link_repost_row(row):
+            return looks_like_request(text), False
+        return addressed, is_broadcast_row(row)
+
+    async def __decide(self, msg: IncomingMessage, telegram_message: Any) -> dict:
+        """Pick the routing state update for one incoming message.
 
         Args:
             msg: Normalised incoming-message dict from the pipeline state.
             telegram_message: The underlying ``telegram.Message`` object.
 
         Returns:
-            Tuple of ``(should_respond, response_trigger)``.
+            State update dict with ``should_respond`` and ``response_trigger``,
+            plus ``broadcast_reply`` when the message replies to one of the
+            bot's group-wide announcements without mentioning it.
         """
         if msg["is_forwarded"]:
-            return False, "random"
+            return {"should_respond": False, "response_trigger": "random"}
 
-        media_type = msg["media_type"]
         # Matches is_explicitly_addressed's original derivation exactly: text
         # OR caption, read from the Telegram object itself, not msg["raw_text"]
-        # — a photo/voice message's @mention lives in its caption, and
-        # msg["raw_text"] is not guaranteed to carry it (it does in
-        # production, via build_pipeline_state, but nothing here should rely
-        # on that indirection when the source object is right here).
+        # — a photo/voice message's @mention lives in its caption.
         text = (
             getattr(telegram_message, "text", None)
             or getattr(telegram_message, "caption", None)
             or ""
         )
-        mentioned = is_mentioned(text, self.__bot_username)
-        reply_to_bot = is_reply_to_bot(telegram_message, self.__bot_id)
-        addressed = mentioned or reply_to_bot
-        if reply_to_bot and not mentioned:
-            reply = telegram_message.reply_to_message
-            if await self.__is_link_repost_reply(msg["chat_id"], reply):
-                addressed = looks_like_request(text)
-
-        if media_type == "text":
-            if addressed:
-                return True, "explicit"
-            if BOT_WORD_RE.search(msg["raw_text"] or ""):
-                return True, "insult_check"
-            return False, "random"
-
-        if media_type in ("voice", "video_note", "video", "photo"):
-            if addressed:
-                return True, "explicit"
-            return False, "random"
-
-        return False, "random"
+        addressed, broadcast_reply = await self.__resolve_addressing(
+            msg, telegram_message, text
+        )
+        media_type = msg["media_type"]
+        if addressed and media_type in ("text", "voice", "video_note", "video", "photo"):
+            return {
+                "should_respond": True,
+                "response_trigger": "explicit",
+                "broadcast_reply": broadcast_reply,
+            }
+        if media_type == "text" and BOT_WORD_RE.search(msg["raw_text"] or ""):
+            return {"should_respond": True, "response_trigger": "insult_check"}
+        return {"should_respond": False, "response_trigger": "random"}

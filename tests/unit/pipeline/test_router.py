@@ -43,7 +43,14 @@ def mock_link_repost_lookup():
 
 
 async def call_decide(router: MessageRouter, incoming: dict) -> tuple[bool, str]:
-    """Invoke the private routing decision method."""
+    """Invoke the private routing decision method, returning its two headline fields."""
+    telegram_message = incoming["update"].message
+    update = await router._MessageRouter__decide(incoming, telegram_message)
+    return update["should_respond"], update["response_trigger"]
+
+
+async def call_decide_full(router: MessageRouter, incoming: dict) -> dict:
+    """Invoke the private routing decision method, returning the whole state update."""
     telegram_message = incoming["update"].message
     return await router._MessageRouter__decide(incoming, telegram_message)
 
@@ -399,3 +406,57 @@ class TestLinkRepostReplyGate:
         incoming = make_incoming(raw_text="обычное сообщение ни о чём")
         await call_decide(router, incoming)
         mock_link_repost_lookup.assert_not_called()
+
+
+class TestBroadcastReplyFlag:
+    """A reply to a group-wide announcement is flagged so the filter may judge
+    whether it addresses the bot at all (2026-08-18 addressee gate). The flag
+    only marks the message — the router still routes it as 'explicit'.
+    """
+
+    async def test_bare_reply_to_broadcast_is_flagged(
+        self, router, mock_link_repost_lookup
+    ):
+        mock_link_repost_lookup.return_value = {"is_broadcast": True}
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text="Гениально)")
+        incoming = make_incoming(raw_text="Гениально)", telegram_message=telegram_message)
+        update = await call_decide_full(router, incoming)
+        assert update["broadcast_reply"] is True
+        assert update["should_respond"] is True
+        assert update["response_trigger"] == "explicit"
+
+    async def test_mentioning_reply_to_broadcast_is_not_flagged(
+        self, router, mock_link_repost_lookup
+    ):
+        """An explicit @mention is unambiguous addressing — never second-guess it."""
+        mock_link_repost_lookup.return_value = {"is_broadcast": True}
+        text = f"@{BOT_USERNAME} почему мне 2 из 10?"
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text=text)
+        incoming = make_incoming(raw_text=text, telegram_message=telegram_message)
+        update = await call_decide_full(router, incoming)
+        assert update.get("broadcast_reply", False) is False
+
+    async def test_reply_to_ordinary_bot_message_is_not_flagged(
+        self, router, mock_link_repost_lookup
+    ):
+        mock_link_repost_lookup.return_value = {"is_broadcast": False}
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text="ору")
+        incoming = make_incoming(raw_text="ору", telegram_message=telegram_message)
+        update = await call_decide_full(router, incoming)
+        assert update.get("broadcast_reply", False) is False
+
+    async def test_missing_row_is_not_flagged(self, router, mock_link_repost_lookup):
+        """A purged row must never gate more aggressively than a confirmed one."""
+        mock_link_repost_lookup.return_value = None
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text="ору")
+        incoming = make_incoming(raw_text="ору", telegram_message=telegram_message)
+        update = await call_decide_full(router, incoming)
+        assert update.get("broadcast_reply", False) is False
+
+    async def test_broadcast_lookup_happens_once(self, router, mock_link_repost_lookup):
+        """One row serves both the link-repost gate and the broadcast flag."""
+        mock_link_repost_lookup.return_value = {"is_broadcast": True}
+        telegram_message = make_telegram_message(reply_to_user_id=BOT_ID, text="Гениально)")
+        incoming = make_incoming(raw_text="Гениально)", telegram_message=telegram_message)
+        await call_decide_full(router, incoming)
+        assert mock_link_repost_lookup.await_count == 1
