@@ -574,3 +574,71 @@ class TestSocialLinkDispatch:
         result = await node(state)
         assert result["should_respond"] is False
         assert result["response"]  # one of SOCIAL_LINK_FAILED_REPLIES
+
+
+class TestNotAddressedVerdict:
+    """A NOT_ADDRESSED verdict silences the bot, but only for un-mentioned
+    replies to a broadcast. 2026-08-18 incident: members replied to a
+    group-wide ratings post to argue with each other and got answered.
+    """
+
+    async def test_broadcast_reply_is_dropped_silently(self):
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        state = make_state(
+            make_incoming(raw_text="Пиздешь чисты воды, а он говорит ленюсь в игре"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch("src.pipeline.filter_node.asyncio.create_task") as mock_task:
+            result = await node(state)
+        assert result["should_respond"] is False
+        assert result["drop_reason"] == "not_addressed"
+        mock_task.assert_not_called()
+
+    async def test_not_addressed_charges_no_attention_budget(self):
+        """The bot was never addressed — charging the user would wind them
+        down for talking to their friends."""
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        state = make_state(
+            make_incoming(raw_text="Гениально)"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch(
+            "src.pipeline.filter_node.engagement_gate.register_signal",
+            new_callable=AsyncMock,
+        ) as mock_register, patch("src.pipeline.filter_node.asyncio.create_task"):
+            await node(state)
+        mock_register.assert_not_called()
+
+    async def test_not_addressed_outside_a_broadcast_reply_is_downgraded(self):
+        """Ordinary conversation can never be silenced by this verdict."""
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        state = make_state(
+            make_incoming(raw_text="ну он такое себе"),
+            should_respond=True, response_trigger="explicit",
+        )
+        with patch(
+            "src.pipeline.filter_node.engagement_gate.register_signal",
+            new_callable=AsyncMock, return_value=engagement_gate.FULL_TIER,
+        ):
+            result = await node(state)
+        assert result["should_respond"] is True
+        assert result["filter_verdict"] == "MEANINGFUL"
+
+    async def test_question_on_a_broadcast_reply_still_answers(self):
+        """The classifier's own MEANINGFUL verdict is untouched by the gate."""
+        node, _ = make_node_with_mock_llm("MEANINGFUL")
+        state = make_state(
+            make_incoming(raw_text="а почему мне 2 из 10?"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch(
+            "src.pipeline.filter_node.engagement_gate.register_signal",
+            new_callable=AsyncMock, return_value=engagement_gate.FULL_TIER,
+        ):
+            result = await node(state)
+        assert result["should_respond"] is True
+
+    async def test_classify_recognises_the_label(self):
+        node, _ = make_node_with_mock_llm("not_addressed")
+        verdict = await node._MeaninglessFilterNode__classify("текст", "system")
+        assert verdict == "NOT_ADDRESSED"

@@ -30,6 +30,13 @@ how it entered the pipeline:
     The override is a free deterministic floor, not the primary defence:
     that is FILTER_MODEL itself, moved off the 8B model for dropping real
     questions and given a cross-provider fallback (make_filter_llm).
+    A NOT_ADDRESSED verdict means the author replied to the bot but is
+    talking about it to the chat (third person, venting, remarks to other
+    members). It is honoured only when the router set ``broadcast_reply``
+    — an un-mentioned reply to one of the bot's group-wide announcements
+    — and resolves to full silence: no reply, no emoji, no attention-budget
+    charge, because the bot was never addressed. Everywhere else the verdict
+    is downgraded to MEANINGFUL, preserving this node's fail-open bias.
   - Overheard messages routed by the router's bot-word check
     (response_trigger="insult_check") are classified with the last few chat
     messages as context, so the model can tell this bot from game bots,
@@ -380,6 +387,8 @@ class MeaninglessFilterNode:
             return await self.__resolve_overheard(state, decision, overheard_input)
 
         decision = await self.__classify_addressed(state, text)
+        if decision == "NOT_ADDRESSED":
+            return self.__resolve_not_addressed(state)
         return await self.__resolve_with_budget(state, decision)
 
     async def __classify_addressed(self, state: BotState, text: str) -> str:
@@ -393,25 +402,25 @@ class MeaninglessFilterNode:
         BANTER verdict on a text that looks like one is overridden to
         MEANINGFUL, keeping BOT_INSULT verdicts intact.
 
+        A NOT_ADDRESSED verdict is honoured only when the router flagged the
+        message as an un-mentioned reply to a broadcast; anywhere else it is
+        downgraded to MEANINGFUL, so ordinary conversation can never be
+        silenced by a classifier slip.
+
         Args:
             state: Current pipeline state.
             text: Raw message text.
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``
-            or ``"MEANINGFUL"``.
+            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``,
+            ``"NOT_ADDRESSED"`` or ``"MEANINGFUL"``.
         """
         replied_to = await self.__fetch_replied_to(state["incoming"])
         replied_to = await self.__enrich_replied_media(replied_to, state)
         decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
-        if decision == "GROUP_PROFILE_REQUEST" and not GROUP_PROFILE_MARKER_RE.search(text):
-            logger.debug(
-                "Filter: message %s classified GROUP_PROFILE_REQUEST without a "
-                "whole-chat marker — downgrading to MEANINGFUL",
-                state["incoming"]["message_id"],
-            )
-            decision = "MEANINGFUL"
+        decision = self.__downgrade_group_profile_request(state, text, decision)
+        decision = self.__downgrade_not_addressed(state, decision)
         if decision in ("MEANINGLESS", "BANTER") and looks_like_request(text):
             logger.debug(
                 "Filter: message %s is a question/request — overriding %s to MEANINGFUL",
@@ -419,6 +428,51 @@ class MeaninglessFilterNode:
             )
             return "MEANINGFUL"
         return decision
+
+    def __downgrade_group_profile_request(self, state: BotState, text: str, decision: str) -> str:
+        """Downgrade a GROUP_PROFILE_REQUEST verdict lacking a whole-chat marker.
+
+        Args:
+            state: Current pipeline state.
+            text: Raw message text.
+            decision: Verdict returned by ``__classify``.
+
+        Returns:
+            ``"MEANINGFUL"`` when ``decision`` is GROUP_PROFILE_REQUEST but the
+            text names no whole-chat marker; ``decision`` unchanged otherwise.
+        """
+        if decision != "GROUP_PROFILE_REQUEST" or GROUP_PROFILE_MARKER_RE.search(text):
+            return decision
+        logger.debug(
+            "Filter: message %s classified GROUP_PROFILE_REQUEST without a "
+            "whole-chat marker — downgrading to MEANINGFUL",
+            state["incoming"]["message_id"],
+        )
+        return "MEANINGFUL"
+
+    def __downgrade_not_addressed(self, state: BotState, decision: str) -> str:
+        """Downgrade a NOT_ADDRESSED verdict outside a broadcast reply.
+
+        Ordinary conversation can never be silenced by this verdict: it is
+        honoured only when the router flagged the message as an un-mentioned
+        reply to a broadcast (see ``__resolve_not_addressed``).
+
+        Args:
+            state: Current pipeline state.
+            decision: Verdict returned by ``__classify``.
+
+        Returns:
+            ``"MEANINGFUL"`` when ``decision`` is NOT_ADDRESSED but the
+            message is not a broadcast reply; ``decision`` unchanged otherwise.
+        """
+        if decision != "NOT_ADDRESSED" or state.get("broadcast_reply"):
+            return decision
+        logger.debug(
+            "Filter: message %s classified NOT_ADDRESSED outside a broadcast "
+            "reply — downgrading to MEANINGFUL",
+            state["incoming"]["message_id"],
+        )
+        return "MEANINGFUL"
 
     async def __enrich_replied_media(self, replied_to: dict | None, state: BotState) -> dict | None:
         """Vision-enrich an unenriched replied-to photo or sticker for the classifier.
@@ -613,6 +667,30 @@ class MeaninglessFilterNode:
         update = self.__apply_tier(state, classification, tier)
         return {"filter_verdict": classification, "engagement_tier": tier, **update}
 
+    def __resolve_not_addressed(self, state: BotState) -> dict:
+        """Drop a message whose author was talking about the bot, not to it.
+
+        No attention budget is charged and no emoji reaction is sent: the bot
+        was never addressed, so both would be the bot inserting itself into a
+        conversation between members — the same reasoning the overheard-drop
+        path already follows.
+
+        Args:
+            state: Current pipeline state.
+
+        Returns:
+            State update dict ending the run without a reply.
+        """
+        logger.info(
+            "Filter: message %s replies to a broadcast without addressing the bot — silence",
+            state["incoming"]["message_id"],
+        )
+        return {
+            "should_respond": False,
+            "filter_verdict": "NOT_ADDRESSED",
+            "drop_reason": "not_addressed",
+        }
+
     def __apply_tier(self, state: BotState, classification: str, tier: int) -> dict:
         """Map (classification, tier) onto a reply, an emoji reaction or silence.
 
@@ -788,8 +866,9 @@ class MeaninglessFilterNode:
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``
-            or ``"MEANINGFUL"``. Fails open to ``"MEANINGFUL"`` on any LLM error.
+            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``,
+            ``"NOT_ADDRESSED"`` or ``"MEANINGFUL"``. Fails open to
+            ``"MEANINGFUL"`` on any LLM error.
         """
         try:
             response = await self.__llm.ainvoke([
@@ -803,6 +882,8 @@ class MeaninglessFilterNode:
                 return "MEME_REQUEST"
             if "PROFILE" in result:
                 return "GROUP_PROFILE_REQUEST"
+            if "NOT_ADDRESSED" in result:
+                return "NOT_ADDRESSED"
             if "INSULT" in result:
                 return "BOT_INSULT"
             if "BANTER" in result:
