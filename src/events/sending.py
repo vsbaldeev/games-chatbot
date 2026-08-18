@@ -14,6 +14,20 @@ from src.store import unified_messages
 logger = log.get_logger(__name__)
 
 
+def build_reply_parameters(reply_to: int | None) -> ReplyParameters | None:
+    """Build reply parameters for an anchored send, or None for an un-anchored one.
+
+    Args:
+        reply_to: Message id to anchor the send to, or None for an un-anchored message.
+
+    Returns:
+        ReplyParameters with allow_sending_without_reply=True, or None if reply_to is None.
+    """
+    if reply_to is None:
+        return None
+    return ReplyParameters(message_id=reply_to, allow_sending_without_reply=True)
+
+
 async def send_and_store(
     bot, chat_id: int, text: str, *, reply_to: int | None = None, is_broadcast: bool = False
 ):
@@ -34,11 +48,7 @@ async def send_and_store(
     Returns:
         The sent ``telegram.Message``.
     """
-    reply_parameters = None
-    if reply_to is not None:
-        reply_parameters = ReplyParameters(
-            message_id=reply_to, allow_sending_without_reply=True
-        )
+    reply_parameters = build_reply_parameters(reply_to)
     sent = await bot.send_message(
         chat_id=chat_id, text=text, reply_parameters=reply_parameters
     )

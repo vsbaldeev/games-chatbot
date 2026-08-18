@@ -22,6 +22,15 @@ AUDIO_PLACEHOLDER = "[audio]"
 
 CHAIN_DEPTH_LIMIT = 10
 
+INSERT_MESSAGE_SQL = """
+INSERT INTO unified_messages
+    (message_id, chat_id, user_id, username, content,
+     media_type, reply_to_msg_id, file_id, media_group_id,
+     is_forwarded, created_at, link_material, is_broadcast)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (chat_id, message_id) DO NOTHING
+"""
+
 
 def format_photo_content(caption: str | None) -> str:
     """Initial content for a photo: placeholder alone, or placeholder + caption on the next line.
@@ -113,14 +122,7 @@ async def insert(
     """
     async with database.acquire() as conn:
         await conn.execute(
-            """
-            INSERT INTO unified_messages
-                (message_id, chat_id, user_id, username, content,
-                 media_type, reply_to_msg_id, file_id, media_group_id,
-                 is_forwarded, created_at, link_material, is_broadcast)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            ON CONFLICT (chat_id, message_id) DO NOTHING
-            """,
+            INSERT_MESSAGE_SQL,
             message_id, chat_id, user_id, username, content,
             media_type, reply_to_msg_id, file_id, media_group_id,
             is_forwarded, time.time(), link_material, is_broadcast,
