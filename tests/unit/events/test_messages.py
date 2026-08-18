@@ -9,6 +9,7 @@ re-tested here.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.events.messages import deliver_and_record, deliver_response, passive_voice_extract
+from src.events.sending import send_and_store
 from tests.builders import make_incoming, make_state
 
 REPLY_VOICE_PATCH_TARGET = "src.events.messages.try_send_voice_reply"
@@ -169,3 +170,25 @@ class TestDeliverAndRecordPersistsLinkMaterial:
              patch(INSERT_PATCH_TARGET, new=AsyncMock()) as mock_insert:
             await deliver_and_record(state, msg, bot_id=42, response_text="Ответ.")
         assert mock_insert.await_args.kwargs["link_material"] is None
+
+
+class TestSendAndStoreBroadcastFlag:
+    """send_and_store must forward is_broadcast to the store (2026-08-18 addressee gate)."""
+
+    async def test_broadcast_flag_is_forwarded_to_insert(self):
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=777))
+        with patch(
+            "src.events.sending.unified_messages.insert", new_callable=AsyncMock
+        ) as mock_insert:
+            await send_and_store(bot, 1000, "🏷 Роли недели:", is_broadcast=True)
+        assert mock_insert.await_args.kwargs["is_broadcast"] is True
+
+    async def test_ordinary_send_defaults_to_not_broadcast(self):
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=778))
+        with patch(
+            "src.events.sending.unified_messages.insert", new_callable=AsyncMock
+        ) as mock_insert:
+            await send_and_store(bot, 1000, "обычный ответ")
+        assert mock_insert.await_args.kwargs["is_broadcast"] is False

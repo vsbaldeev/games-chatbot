@@ -97,6 +97,7 @@ async def insert(
     media_group_id: str | None = None,
     is_forwarded: bool = False,
     link_material: str | None = None,
+    is_broadcast: bool = False,
 ) -> None:
     """Insert a new message row. Silently ignores duplicate (chat_id, message_id) pairs.
 
@@ -105,6 +106,10 @@ async def insert(
             descriptions, comments) for the bot's own link-repost messages
             only — set by ``deliver_and_record`` when the pipeline run
             fetched link content. ``None`` for every other message.
+        is_broadcast: True for the bot's own group-wide announcements
+            (weekly roles, group profiles). Read by the router's addressing
+            gate, which lets replies to a broadcast be judged for whether
+            they address the bot at all. ``False`` for every other message.
     """
     async with database.acquire() as conn:
         await conn.execute(
@@ -112,13 +117,13 @@ async def insert(
             INSERT INTO unified_messages
                 (message_id, chat_id, user_id, username, content,
                  media_type, reply_to_msg_id, file_id, media_group_id,
-                 is_forwarded, created_at, link_material)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 is_forwarded, created_at, link_material, is_broadcast)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (chat_id, message_id) DO NOTHING
             """,
             message_id, chat_id, user_id, username, content,
             media_type, reply_to_msg_id, file_id, media_group_id,
-            is_forwarded, time.time(), link_material,
+            is_forwarded, time.time(), link_material, is_broadcast,
         )
 
 
@@ -216,7 +221,7 @@ async def get_by_id(*, chat_id: int, message_id: int) -> dict | None:
             """
             SELECT message_id, user_id, username, content, media_type,
                    reply_to_msg_id, file_id, media_group_id, is_forwarded,
-                   link_material
+                   link_material, is_broadcast
             FROM unified_messages
             WHERE chat_id = $1 AND message_id = $2
             """,
@@ -231,7 +236,7 @@ async def get_recent(*, chat_id: int, limit: int = 20) -> list[dict]:
         rows = await conn.fetch(
             """
             SELECT message_id, user_id, username, content, media_type,
-                   is_forwarded, created_at, link_material
+                   is_forwarded, created_at, link_material, is_broadcast
             FROM unified_messages
             WHERE chat_id = $1
             ORDER BY created_at DESC
