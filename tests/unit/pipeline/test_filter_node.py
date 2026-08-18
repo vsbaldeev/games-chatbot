@@ -14,10 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram import ReactionTypeEmoji
 
-from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES
+from src.config.prompts import FILTER_SYSTEM, GROUP_PROFILE_COOLDOWN_REPLIES
 from src.pipeline import engagement_gate
 from src.pipeline.filter_node import (
-    FILTER_SYSTEM,
     GROUP_PROFILE_MARKER_RE,
     REACTION_POOL,
     MeaninglessFilterNode,
@@ -78,6 +77,20 @@ class TestFilterSystemPrompt:
 
     def test_mentions_group_profile_request_label(self):
         assert "GROUP_PROFILE_REQUEST" in FILTER_SYSTEM
+
+    def test_mentions_not_addressed_label(self):
+        assert "NOT_ADDRESSED" in FILTER_SYSTEM
+
+    def test_no_longer_asserts_the_message_is_addressed(self):
+        """The premise made the addressee question unaskable (2026-08-18 incident)."""
+        assert "is addressed to the bot" not in FILTER_SYSTEM
+
+    def test_third_person_talk_is_named_as_not_addressed(self):
+        assert "он говорит" in FILTER_SYSTEM
+
+    def test_defaults_away_from_not_addressed_when_unsure(self):
+        """Fail-open is preserved: silence is the riskier failure."""
+        assert "never 'NOT_ADDRESSED'" in FILTER_SYSTEM
 
 
 class TestPassthroughWhenShouldRespondFalse:

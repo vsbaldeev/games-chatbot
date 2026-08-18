@@ -85,7 +85,6 @@ from src.config.prompts import (
     GROUP_PROFILE_COOLDOWN_SECONDS,
     OVERHEARD_SYSTEM,
 )
-from src.life import selfie
 from src.pipeline import engagement_gate
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
@@ -680,6 +679,7 @@ class MeaninglessFilterNode:
             if tier != engagement_gate.FULL_TIER or replies_to_bot(state["incoming"]):
                 update["wind_down"] = True
         elif classification == "PHOTO_REQUEST" and tier == engagement_gate.FULL_TIER:
+            from src.life import selfie
             update["photo_request"] = True
             update["photo_in_flight"] = selfie.image_generation_in_flight()
         elif classification == "MEME_REQUEST" and tier == engagement_gate.FULL_TIER:

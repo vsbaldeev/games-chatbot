@@ -23,6 +23,12 @@ from src.config.credentials import BOT_USERNAME
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Message classification (src/pipeline/filter_node.py)
+#
+# NOT_ADDRESSED is the addressee-detection verdict: the author replied to
+# the bot but is talking about it to the chat. The filter node honours it
+# only for replies to the bot's group-wide broadcasts (state flag
+# broadcast_reply, set by the router) — everywhere else it is downgraded to
+# MEANINGFUL, keeping this pipeline's fail-open bias toward answering.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 BOT_INSULT_EXAMPLES = (
@@ -39,13 +45,27 @@ CRUDE_PRAISE_EXAMPLES = (
 )
 
 FILTER_SYSTEM = (
-    "You are a telegram bot's message filter. The message you receive is addressed to the bot: "
-    "the author @mentioned the bot or replied to one of its messages. "
-    "Classify the message into exactly one of seven categories.\n\n"
+    "You are a telegram bot's message filter. The message you receive either "
+    "@mentioned the bot or replied to one of its messages. First decide "
+    "whether the author is talking TO the bot or merely ABOUT it, then "
+    "classify the message into exactly one of eight categories.\n\n"
     "When the user replies to an earlier message, that message is included as context under "
     "'Message being replied to'. Classify ONLY the user's reply, but use the context: a short "
     "reply that engages with the quoted message — asks about it, disputes it, wants it "
     "explained — is MEANINGFUL, not MEANINGLESS.\n\n"
+    "NOT_ADDRESSED — the author is talking to the CHAT about what the bot "
+    "posted, not to the bot. Typical when the bot posted something about the "
+    "members (weekly roles, ratings, a group verdict) and people react to it "
+    "among themselves:\n"
+    "- Third-person talk about the bot: 'а он говорит ленюсь в игре', "
+    "'бот опять выдумал', 'он мне 2 из 10 поставил'\n"
+    "- Venting or disputing the content while asking the bot nothing: "
+    "'пиздёж чистой воды, я стараюсь', 'ну это вообще неправда'\n"
+    "- Remarks aimed at other members: 'гениально)', 'максимс тут в точку', "
+    "'вот это он про тебя жёстко'\n"
+    "- Second person ('ты', 'бот, объясни'), any question, or any request "
+    "aimed at the bot means it IS addressed — classify it normally, never "
+    "NOT_ADDRESSED.\n\n"
     "BOT_INSULT — an insult, mockery or provocation aimed at the bot itself:\n"
     + BOT_INSULT_EXAMPLES
     + "\n"
@@ -105,8 +125,9 @@ FILTER_SYSTEM = (
     + "- Starting or continuing a discussion.\n\n"
     "Instructions:\n"
     "1. Analyze the text (can be in Russian or English).\n"
-    "2. Reply with ONLY ONE word: 'BOT_INSULT', 'BANTER', 'MEANINGLESS', "
-    "'PHOTO_REQUEST', 'MEME_REQUEST', 'GROUP_PROFILE_REQUEST' or 'MEANINGFUL'.\n"
+    "2. Reply with ONLY ONE word: 'NOT_ADDRESSED', 'BOT_INSULT', 'BANTER', "
+    "'MEANINGLESS', 'PHOTO_REQUEST', 'MEME_REQUEST', 'GROUP_PROFILE_REQUEST' "
+    "or 'MEANINGFUL'.\n"
     "3. Swearing directed AT THE BOT is BOT_INSULT only when it carries hostility, "
     "contempt or mockery (telling it to shut up, calling it useless/stupid). Swearing "
     "used as an intensifier for praise, excitement or agreement ('ахуенный', 'охуенно', "
@@ -125,7 +146,11 @@ FILTER_SYSTEM = (
     "MEANINGFUL, choose 'MEANINGFUL'.\n"
     "9. GROUP_PROFILE_REQUEST requires the request to explicitly cover "
     "EVERYONE in the chat, not one named person. If unsure between "
-    "GROUP_PROFILE_REQUEST and MEANINGFUL, choose 'MEANINGFUL'."
+    "GROUP_PROFILE_REQUEST and MEANINGFUL, choose 'MEANINGFUL'.\n"
+    "10. NOT_ADDRESSED is only for a message with no question, no request "
+    "and no second-person address to the bot. If unsure whether the author "
+    "is talking to the bot or about it, choose the normal classification, "
+    "never 'NOT_ADDRESSED'."
 )
 
 # Honest canned replies for a meme request the fetcher could not satisfy —
