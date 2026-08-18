@@ -395,6 +395,10 @@ async def deliver_group_profile(bot, chat_id: int, reply_to_msg_id: int, rubric:
     indicator is the only sign of life while the per-member dossiers are
     gathered and the LLM call runs.
 
+    The generated profile is marked ``is_broadcast``: it judges every member
+    at once, so replies to it are usually members reacting among themselves.
+    The canned failure line is not — it answers the asker directly.
+
     Args:
         bot: Telegram Bot instance to send with.
         chat_id: Chat the request came from.
@@ -411,7 +415,7 @@ async def deliver_group_profile(bot, chat_id: int, reply_to_msg_id: int, rubric:
         logger.warning("Group profile generation failed for chat %s: %s", chat_id, error)
         text = None
     if text:
-        await send_and_store(bot, chat_id, text, reply_to=reply_to_msg_id)
+        await send_and_store(bot, chat_id, text, reply_to=reply_to_msg_id, is_broadcast=True)
         return
     await send_and_store(
         bot, chat_id, random.choice(GROUP_PROFILE_FAILED_REPLIES), reply_to=reply_to_msg_id

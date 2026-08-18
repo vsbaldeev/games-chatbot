@@ -277,6 +277,10 @@ async def announce_roles(
     one-sentence profile. The sent message is recorded in ``unified_messages`` so
     that when a member replies to the announcement to ask about a role, the chat
     pipeline can load the announcement text as the replied-to context.
+
+    The row is marked ``is_broadcast`` so the router's addressing gate can
+    treat replies to it as members talking to each other about the roles,
+    unless they mention the bot or ask it something.
     """
     if not roles:
         return
@@ -299,6 +303,7 @@ async def announce_roles(
             content=text,
             media_type="text",
             reply_to_msg_id=None,
+            is_broadcast=True,
         )
     except Exception as error:
         logger.warning("Failed to record roles announcement for chat %s: %s", chat_id, error)

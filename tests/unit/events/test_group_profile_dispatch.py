@@ -42,7 +42,7 @@ class TestDeliverGroupProfile:
              patch(SEND_AND_STORE, AsyncMock()) as send:
             await messages.deliver_group_profile(bot, CHAT_ID, REQUEST_MSG_ID, RUBRIC)
         run.assert_awaited_once_with(CHAT_ID, RUBRIC)
-        send.assert_awaited_once_with(bot, CHAT_ID, "@alice — Циклоп", reply_to=REQUEST_MSG_ID)
+        send.assert_awaited_once_with(bot, CHAT_ID, "@alice — Циклоп", reply_to=REQUEST_MSG_ID, is_broadcast=True)
 
     async def test_shows_typing_indicator_before_generating(self):
         bot = make_bot()
@@ -160,3 +160,30 @@ class TestMediaOnlyDispatch:
         launch_meme.assert_called_once()
         launch_profile.assert_not_called()
         assert emit.call_args.args[1] == "meme"
+
+
+class TestGroupProfileIsBroadcast:
+    """The group profile judges every member at once — replies to it are chat among members."""
+
+    async def test_successful_profile_is_marked_broadcast(self):
+        bot = make_bot()
+        with patch(
+            RUN_GROUP_PROFILE,
+            new_callable=AsyncMock, return_value="@a — 5/10\n@b — 7/10",
+        ), patch(
+            SEND_AND_STORE, new_callable=AsyncMock
+        ) as mock_send:
+            await messages.deliver_group_profile(bot, CHAT_ID, REQUEST_MSG_ID, RUBRIC)
+        assert mock_send.await_args.kwargs["is_broadcast"] is True
+
+    async def test_failure_reply_is_not_a_broadcast(self):
+        """The canned «не смог» line is an ordinary reply to the asker."""
+        bot = make_bot()
+        with patch(
+            RUN_GROUP_PROFILE,
+            new_callable=AsyncMock, return_value=None,
+        ), patch(
+            SEND_AND_STORE, new_callable=AsyncMock
+        ) as mock_send:
+            await messages.deliver_group_profile(bot, CHAT_ID, REQUEST_MSG_ID, RUBRIC)
+        assert mock_send.await_args.kwargs.get("is_broadcast", False) is False

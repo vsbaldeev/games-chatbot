@@ -232,3 +232,18 @@ class TestAssignRolesForChat:
             await roles.assign_roles_for_chat(context, CHAT_ID)
         mock_upsert.assert_not_awaited()
         context.bot.send_message.assert_not_awaited()
+
+
+class TestRolesAnnouncementIsBroadcast:
+    """The weekly roles post is a group-wide announcement, not a message to one member."""
+
+    async def test_announcement_row_is_marked_broadcast(self):
+        context = MagicMock()
+        context.bot.send_message = AsyncMock(return_value=MagicMock(message_id=555))
+        context.bot.id = 999
+        roles_map = {1: {"role": "Геймер", "reason": "тащит ноутбук и геймпад"}}
+        with patch(
+            "src.jobs.roles.unified_messages.insert", new_callable=AsyncMock
+        ) as mock_insert:
+            await roles.announce_roles(context, CHAT_ID, roles_map, {1: "tmaxims"})
+        assert mock_insert.await_args.kwargs["is_broadcast"] is True
