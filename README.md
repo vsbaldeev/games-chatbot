@@ -232,7 +232,10 @@ maintenance is automated: the `pot-provider` sidecar generates the PO tokens
 YouTube demands from datacenter IPs, `entrypoint.sh` upgrades yt-dlp into
 `/app/runtime-deps` on every container start, and a daily 03:30 UTC job installs
 newer yt-dlp releases and restarts the bot gracefully. Nothing to configure — no
-cookies, no extra env vars. If Shorts summaries ever go silent anyway,
+cookies, no extra env vars. A single Short occasionally hits YouTube's
+intermittent CDN 403 (a signed download URL that fails once and succeeds on
+re-resolve) — `shorts.py` retries that specific signal a few times before
+giving up. If Shorts summaries ever go silent anyway,
 `docker compose logs bot | grep -i shorts` shows which stage is failing.
 
 ## BotFather commands
