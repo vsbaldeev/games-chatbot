@@ -91,10 +91,13 @@ score) regardless of what the rubric asks for.
 
 Ephemeral only. No Telegram tags, no `user_tags` writes, no dedicated table —
 this does not touch the weekly-roles machinery in `src/jobs/roles.py` at all.
-The sent message is recorded in `unified_messages` (via
-`src.events.sending.send_and_store`), so a reply to it — «почему я Циклоп?» —
-resolves through the ordinary reply-chain context path like any other bot
-message.
+The generated profile is sent as a broadcast (`is_broadcast=True` via
+`src.events.sending.send_and_store`), so replies can be treated as chat among
+members. The canned failure line (when `run_group_profile` returns `None` or
+raises) is sent anchored to the request but NOT marked as a broadcast — it
+answers the asker directly, not the whole chat. In both cases the message is
+recorded in `unified_messages`, so a reply — «почему я Циклоп?» — resolves
+through the ordinary reply-chain context path.
 
 ## Failure
 

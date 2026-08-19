@@ -29,6 +29,7 @@ unified_messages (
     file_id         TEXT,           -- Telegram file_id; permanent; used for lazy photo/sticker description
     media_group_id  TEXT,           -- Telegram album id; groups items of one album
     is_forwarded    BOOLEAN,        -- forwarded channel content, not the sender's own words; rendered as [переслал] in prompts
+    is_broadcast    BOOLEAN NOT NULL DEFAULT FALSE,  -- bot's group-wide announcements (weekly roles, group profile); marks rows for the router's addressing gate
     created_at      DOUBLE PRECISION,
     PRIMARY KEY (chat_id, message_id)
 )
@@ -134,7 +135,7 @@ User replies to game messages and the bot's own out-of-pipeline sends
 
 ```
 db.py               asyncpg Pool; acquire() context manager; init() / close() lifecycle
-unified_messages.py insert (ON CONFLICT DO NOTHING), update_content, get_by_id, get_chain (max 10 hops), get_recent (last N), get_media_group, get_user_messages, cleanup_old
+unified_messages.py insert (ON CONFLICT DO NOTHING, keyword-only: is_broadcast), update_content, get_by_id, get_chain (max 10 hops), get_recent (last N), get_media_group, get_user_messages, cleanup_old
 user_memories.py    upsert_facts (cap 30 per user), upsert_hack_attempt, upsert_insult_attempt, is_counter_fact (counter tallies — filtered out of reply prompts), get_facts, get_facts_for_users (whole fact list — weekly roles/engagement), find_relevant_facts_for_users (similarity-gated per-user top-K, used by both context_builder's reply prompts and memory_writer's extraction "existing facts"; ranking, threshold and truncation all in SQL via ROW_NUMBER), get_facts_with_embeddings, find_similar_fact (threshold applied in SQL), refresh_updated_at, cleanup_stale (90-day retention)
 engagement.py       add_signal (atomic decay-and-charge, returns new score), peek_score (read-only decayed score, 0.0 when absent)
 thread_history.py   append_turn, get_history (thread-scoped, oldest-first), cleanup_old (60-day retention)

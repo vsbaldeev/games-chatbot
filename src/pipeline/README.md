@@ -56,7 +56,12 @@ incoming message
     │     ├─ reply to bot message     → should_respond=True,  trigger="explicit"
     │     │       (a reply to the bot's link-repost message is the one
     │     │        exception — needs a mention or a genuine question/request,
-    │     │        see src.events.link_repost and MessageRouter.__decide)
+    │     │        see src.events.link_repost and MessageRouter.__decide; a
+    │     │        reply to a group-wide announcement (is_broadcast row) also
+    │     │        routes as explicit but carries broadcast_reply=True so the
+    │     │        filter node may judge whether the author addressed the bot
+    │     │        at all — an @mention clears the flag, since mentions are
+    │     │        never second-guessed)
     │     ├─ word «бот»/"bot" in text → should_respond=True,  trigger="insult_check"
     │     │       (BOT_WORD_RE, cheap regex precondition; the filter node then
     │     │        decides whether the message actually insults the bot)
@@ -280,6 +285,14 @@ filter  (runs after ingester)
     │       │   free-tier replacement, so FILTER_MODEL is now qwen/qwen3.6-27b
     │       │   (reasoning disabled) — accuracy against real messages unverified
     │       └─ otherwise → engagement gate (see wind-down engine below)
+    ├─ text, LLM → NOT_ADDRESSED (author replied to the bot but is talking to
+    │       the chat about it, not to the bot; third-person talk, venting,
+    │       remarks to other members — never when there is a question or
+    │       request) — honoured ONLY when state.broadcast_reply is True (an
+    │       un-mentioned reply to an is_broadcast row); everywhere else
+    │       downgraded to MEANINGFUL, preserving the pipeline's fail-open bias
+    │       → should_respond=False, filter_verdict="NOT_ADDRESSED", no emoji,
+    │         no attention-budget charge (the bot was never addressed in the first place)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
     ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —
     │       «сфоткай себя», «покажи свой огород»; pictures of anything else
@@ -646,6 +659,7 @@ BotState:
     social_link_video: bytes | None    # downloaded video bytes (Instagram only), set by ingester
     social_link_cap_remaining: int | None  # daily_cap - used for this chat, set by router; None when the matched handler has no cap (only Instagram has one today)
     link_message_is_bare: bool | None  # True when the triggering message was the link and nothing else, set by router; only then may the events layer delete the original (src/events/link_repost.py)
+    broadcast_reply: bool | None       # True when the message replies to one of the bot's group-wide announcements (is_broadcast row) without @mentioning it; only then may the filter return NOT_ADDRESSED
     media_is_real_person: bool | None  # vision classification for photo/video_note/video, set by ingester; None = text/voice/unclassified
     context: AssembledContext | None
     thread_id: str | None              # {chat_id}_{root_message_id} for replies, chat_id for flat; scopes LLM history

@@ -109,10 +109,17 @@ long-form YouTube link) is also persisted on the bot's own message row
 `response_node.py` injects it back into the prompt with a no-fabrication
 instruction, so the reply can be as specific as the original caption was —
 see `docs/superpowers/specs/2026-08-12-link-reply-grounding-design.md`. The
-same column also marks the row for `MessageRouter`'s addressing gate: a
-reply to a link-repost message only counts as addressing the bot when it
+`link_material` column marks the row for `MessageRouter`'s addressing gate:
+a reply to a link-repost message only counts as addressing the bot when it
 also mentions the bot or reads as a genuine question or request, unlike
 every other bot message.
+
+The bot's group-wide announcements (weekly roles and group profiles) are
+similarly marked with `is_broadcast=True` (set by `send_and_store` when the
+message is a broadcast), so replies to them can be treated as chat among
+members rather than necessarily as messages to the bot. A reply to a
+broadcast is gated the same way: an @mention clears the addressing gate, as
+does any question or request addressed to the bot.
 
 ## Chat-requested selfies
 

@@ -42,8 +42,9 @@ members who share a name can never collapse into one entry.
 7. announce_roles: message is built from the decided role map (NOT from API success),
    so a member is never dropped from the list. Each member's role is shown together
    with its LLM-generated reason as a one-sentence profile line (render_member_block).
-   The sent announcement is recorded in unified_messages so a reply to it carries the
-   role list as replied-to context
+   The sent announcement is recorded in unified_messages marked ``is_broadcast=True``
+   so a reply to it carries the role list as replied-to context, and replies can be
+   gated as chat among members rather than necessarily as messages to the bot
 8. apply_telegram_tags: best-effort bot.set_chat_member_tag per member — failures
    (e.g. Chat_creator_required) are swallowed and do not affect the announcement
 ```
