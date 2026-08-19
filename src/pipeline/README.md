@@ -102,7 +102,12 @@ ingester (current message, should_respond=True only)
     │     reaction; transcript capped at 2000 chars
     │     processed_text = user text + "\n\n[YouTube Shorts «title», канал X,
     │     N сек]\n[Аудио]: …\n[Видео 1/3]: …\n[Топ-комментарии зрителей]: …"
-    │     and unified_messages is updated so reply chains show the content;
+    │     the stored unified_messages row keeps the bare user text: the
+    │     material belongs to this run's prompt, and writing it into chat
+    │     content made it resurface as recent history in the *next* link's
+    │     prompt, where the model could not tell it from the current
+    │     material and retold both. Reply grounding uses the link_material
+    │     column on the bot's own reply row instead (see src/events/README.md)
     │     youtube_short_content is set as the success flag (None on failure —
     │     no transcript AND no frames counts as failure; title/comments alone
     │     are not enough to react honestly); on success the downloaded video
@@ -118,7 +123,8 @@ ingester (current message, should_respond=True only)
     │     via yt-dlp info-extraction; description capped at 2000 chars
     │     processed_text = user text + the handler's labelled block
     │     ("[Instagram Reel]…" / "[YouTube «title»]…")
-    │     and unified_messages is updated so reply chains show the content;
+    │     the stored unified_messages row keeps the bare user text, same as
+    │     Shorts above and for the same reason
     │     social_link_content is set as the success flag (None on failure —
     │     an unrecognized handler, an empty payload, or the handler's fetch
     │     raising all degrade to silence, never an unhandled exception);
@@ -481,9 +487,16 @@ response   personality LLM (ReAct executor, no tools)
     ├─ prompt: thread_history (last 10 turns, thread-scoped, reply chains only)
     │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
     │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
-    │            + recent history (last 10; random, youtube_short and social_link
-    │              triggers get only the newest 3, RANDOM_TRIGGER_CONTEXT_LIMIT) +
+    │            + recent history (last 10; random triggers get only the newest 3,
+    │              RANDOM_TRIGGER_CONTEXT_LIMIT) +
     │              replied_to + worker findings + current message
+    │          the link retell triggers (youtube_short, social_link —
+    │            LINK_RETELL_TRIGGERS) get no recent history at all: the reply is
+    │            a pure function of the fetched material and the retell
+    │            instruction says to lean only on the material below it, so an
+    │            earlier link's block in the window is not context but a second,
+    │            indistinguishable candidate to retell. Two Reels posted back to
+    │            back used to make the bot describe both in the second caption
     │          recent history is dropped entirely when thread history is present —
     │            the thread turns already carry the conversation. The replied_to
     │            block («Сообщение, на которое отвечают») is then always rendered:

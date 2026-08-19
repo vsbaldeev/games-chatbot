@@ -334,16 +334,55 @@ class TestErrorPropagation:
                 await ResponseNode(agent)(self.make_state_for_error())
 
 
-class TestSocialLinkRecentHistoryTrim:
-    def test_social_link_trims_to_thin_slice_like_random_and_shorts(self):
-        recent = [
-            {"message_id": index, "username": "u", "content": f"msg{index}", "media_type": "text"}
-            for index in range(10)
-        ]
-        context = {"recent_history": recent}
-        lines, _ = build_recent_history_lines(context, "social_link", has_thread_history=False)
-        rendered_messages = [line for line in lines if line.startswith("@u:")]
-        assert len(rendered_messages) <= 3
+class TestLinkRetellRecentHistory:
+    """A link retell must see no prior chat history at all.
+
+    Observed in production: two Reels posted back to back made the bot
+    describe both in the second caption («Reel 1 – …, Reel 2 – …»). The
+    first Reel's ingested material sat in recent history under the same
+    ``[Instagram Reel]`` label as the current one, and the retell
+    instruction («опирайся только на материалы ниже») gave the model no way
+    to tell the two blocks apart.
+    """
+
+    PREVIOUS_REEL_ROW = {
+        "message_id": 1,
+        "username": "tmaxims",
+        "user_id": 2,
+        "media_type": "text",
+        "content": (
+            "https://www.instagram.com/reel/Db28QVvuzLC/\n\n"
+            "[Instagram Reel]\nэпичный кадр из «Ведьмака» на PS5\n"
+            "[Топ-комментарии]:\n- (12 лайков) музыка божественна"
+        ),
+    }
+
+    @pytest.mark.parametrize("response_trigger", ["social_link", "youtube_short"])
+    def test_link_retell_renders_no_recent_history(self, response_trigger):
+        context = {"recent_history": [self.PREVIOUS_REEL_ROW]}
+        lines, _ = build_recent_history_lines(
+            context, response_trigger, has_thread_history=False
+        )
+        assert lines == []
+
+    def test_link_retell_still_renders_replied_to_material(self):
+        """Suppressing history must not take the grounded replied-to block
+        with it — that block is about the message being answered, not noise
+        from an unrelated earlier link."""
+        replied_to = {
+            "message_id": 7,
+            "username": "bot",
+            "user_id": 1,
+            "media_type": "video",
+            "content": "пересказ прошлого ролика",
+            "link_material": "[Instagram Reel]\nматериал прошлого ролика",
+        }
+        context = {"recent_history": [self.PREVIOUS_REEL_ROW], "replied_to": replied_to}
+        lines, returned_replied_to = build_recent_history_lines(
+            context, "social_link", has_thread_history=False
+        )
+        assert returned_replied_to is replied_to
+        assert "материал прошлого ролика" in "\n".join(lines)
 
 
 class TestSocialLinkTriggerFraming:

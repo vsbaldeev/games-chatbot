@@ -118,6 +118,54 @@ class TestSocialLinkIngestion:
         assert result.get("social_link_video") is None
 
 
+class TestLinkMaterialIsNotPersistedAsChatContent:
+    """Fetched link material must stay out of the stored chat row.
+
+    Observed in production: two Reels posted back to back made the bot
+    describe both. The first Reel's row had been rewritten to
+    ``link + [Instagram Reel] block``, so the second Reel's prompt carried
+    two indistinguishable material blocks in its recent-history window. The
+    material belongs to this run's prompt and to the ``link_material``
+    column, never to the message's chat content.
+    """
+
+    @pytest.mark.parametrize(
+        "trigger_fields, summarize_target, content_block",
+        [
+            (
+                {
+                    "response_trigger": "social_link",
+                    "social_link_handler": "instagram_reel",
+                    "social_link_url": "https://www.instagram.com/reel/abc123/",
+                },
+                SUMMARIZE_SOCIAL_LINK_TARGET,
+                "[Instagram Reel]\ncaption here",
+            ),
+            (
+                {
+                    "response_trigger": "youtube_short",
+                    "youtube_short_url": "https://www.youtube.com/shorts/abc123",
+                },
+                SUMMARIZE_SHORT_TARGET,
+                "[YouTube Shorts]\nsome content",
+            ),
+        ],
+        ids=["social-link", "youtube-short"],
+    )
+    async def test_successful_fetch_leaves_stored_row_untouched(
+        self, ingester, trigger_fields, summarize_target, content_block
+    ):
+        incoming = make_incoming(raw_text="look https://example.com/link")
+        state = make_state(incoming, should_respond=True, **trigger_fields)
+        with (
+            patch(summarize_target, new=AsyncMock(return_value=(content_block, b"video bytes"))),
+            patch(UPDATE_CONTENT_TARGET, new=AsyncMock()) as update_content,
+        ):
+            result = await ingester(state)
+        assert content_block in result["incoming"]["processed_text"]
+        update_content.assert_not_awaited()
+
+
 class TestSummarizeSocialLink:
     """Exercises summarize_social_link itself (not mocked out), per handler."""
 

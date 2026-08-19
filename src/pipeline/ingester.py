@@ -742,7 +742,15 @@ class MessageIngester:
         else:
             processed = msg["raw_text"] or ""
 
-        if (media_type != "text" or extra_fields) and processed:
+        # Media rows are stored as placeholders by the router and only become
+        # readable once transcribed/described here. Text rows are already
+        # stored verbatim, and a link trigger's processed text additionally
+        # carries the fetched material block — which must stay out of chat
+        # history, or the next link's prompt shows two identically labelled
+        # material blocks and the model retells both. The material is still
+        # persisted for reply grounding, in the ``link_material`` column of
+        # the bot's own reply row (see ``src.events.messages``).
+        if media_type != "text" and processed:
             await self.__update_stored_content(msg, processed)
 
         incoming_update = dict(state["incoming"])

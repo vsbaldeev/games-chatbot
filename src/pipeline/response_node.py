@@ -30,6 +30,10 @@ RECENT_FILL_LIMIT = 10
 # reaction in chat noise.
 RANDOM_TRIGGER_CONTEXT_LIMIT = 3
 
+# Triggers whose reply is a retell of fetched link material. They get no
+# recent history at all — see :func:`build_recent_history_lines`.
+LINK_RETELL_TRIGGERS = ("youtube_short", "social_link")
+
 TABLE_SEP_RE = re.compile(r"^\s*\|[\s\-:|]+\|\s*$")
 
 # Russian labels for the kind of media the triggering message carried. Used to
@@ -307,11 +311,18 @@ def build_recent_history_lines(
     recent-history may already have shown, but the material is never
     rendered by anything else, so it must still appear.
 
+    A link retell (:data:`LINK_RETELL_TRIGGERS`) gets no recent history at
+    all. The reply is a pure function of the fetched material, and the
+    retell instruction tells the model to lean only on the material below
+    it — so any earlier link's material block in the window is not context
+    but a second, indistinguishable candidate to retell. Two Reels posted
+    back to back used to make the bot describe both.
+
     Args:
         context: AssembledContext dict or None.
-        response_trigger: Routing trigger; ``"random"``/``"youtube_short"``/
-            ``"social_link"`` trim the recent-history slice further (see
-            :func:`build_response_input`).
+        response_trigger: Routing trigger; ``"random"`` trims the
+            recent-history slice (see :func:`build_response_input`), and the
+            link retell triggers drop it entirely.
         has_thread_history: ``True`` when per-thread turn history is available;
             suppresses recent chat history to avoid double-context.
 
@@ -321,9 +332,10 @@ def build_recent_history_lines(
         without recomputing it.
     """
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
-    if response_trigger in ("random", "youtube_short", "social_link"):
+    if response_trigger == "random":
         recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
-    rendered = [] if has_thread_history else recent
+    suppressed = has_thread_history or response_trigger in LINK_RETELL_TRIGGERS
+    rendered = [] if suppressed else recent
 
     parts: list[str] = []
     if rendered:
@@ -486,10 +498,11 @@ def build_response_input(
         parts += role_lines
 
     # Skip recent history when thread history is present (thread turns already
-    # provide conversational context, group chat would just confuse the model).
-    # Random and Shorts triggers keep a thin slice — enough to catch topic
-    # mismatch without turning a spontaneous reaction into a reply to the
-    # discussion.
+    # provide conversational context, group chat would just confuse the model),
+    # and for link retells (the material is the whole input — see
+    # build_recent_history_lines). Random triggers keep a thin slice — enough
+    # to catch topic mismatch without turning a spontaneous reaction into a
+    # reply to the discussion.
     history_lines, replied_to = build_recent_history_lines(
         context, response_trigger, has_thread_history
     )
