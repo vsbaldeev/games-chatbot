@@ -58,7 +58,14 @@ def main() -> None:
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
         manager.add_handlers(app)
 
-    for job_manager in [RolesJobManager(), ResetModelJobManager(), MessageCleanupJobManager(), MemeJobManager(), YtdlpUpdateJobManager()]:
+    job_managers = (
+        RolesJobManager(),
+        ResetModelJobManager(),
+        MessageCleanupJobManager(),
+        MemeJobManager(),
+        YtdlpUpdateJobManager(),
+    )
+    for job_manager in job_managers:
         job_manager.add_jobs(app)
 
     logger.info("Starting polling...")

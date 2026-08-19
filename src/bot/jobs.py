@@ -26,18 +26,12 @@ class RolesJobManager(JobManagerInterface):
 
 class MemeJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
-        app.job_queue.run_daily(
-            daily_meme_job,
-            time=datetime.time(hour=15, minute=0, tzinfo=datetime.timezone.utc),
-        )
+        app.job_queue.run_daily(daily_meme_job, time=datetime.time(hour=15, minute=0, tzinfo=datetime.timezone.utc))
 
 
 class ResetModelJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
-        app.job_queue.run_daily(
-            reset_model_job,
-            time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc),
-        )
+        app.job_queue.run_daily(reset_model_job, time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc))
 
 
 class MessageCleanupJobManager(JobManagerInterface):
@@ -53,7 +47,4 @@ class YtdlpUpdateJobManager(JobManagerInterface):
 
     def add_jobs(self, app: Application) -> None:
         # 03:30 UTC: dead hours for the chat, after the cleanup job.
-        app.job_queue.run_daily(
-            ytdlp_update_job,
-            time=datetime.time(hour=3, minute=30, tzinfo=datetime.timezone.utc),
-        )
+        app.job_queue.run_daily(ytdlp_update_job, time=datetime.time(hour=3, minute=30, tzinfo=datetime.timezone.utc))

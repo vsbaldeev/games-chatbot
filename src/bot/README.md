@@ -6,6 +6,10 @@ application.run_polling(). The database schema is provisioned separately by Alem
 migrations (`alembic upgrade head`) before the process starts — the bot no longer
 creates tables.
 
+`python -m src.bot` runs bot/__main__.py, which calls app.main(). bot/__init__.py
+stays empty, per convention: importing src.bot elsewhere in the codebase must not
+have the side effect of running startup logic.
+
 ## Handler managers
 
 ```
