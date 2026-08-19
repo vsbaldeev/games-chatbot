@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram import ReactionTypeEmoji
 
+from src import config
 from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES
 from src.pipeline import engagement_gate
 from src.pipeline.filter_node import (
@@ -23,8 +24,9 @@ from src.pipeline.filter_node import (
     MeaninglessFilterNode,
     looks_like_request,
 )
+from src.pipeline.router import MessageRouter
 from src.utils.ttl_gate import TtlGate
-from tests.builders import make_incoming, make_state
+from tests.builders import make_incoming, make_state, make_telegram_message
 
 
 def close_coroutine(coro):
@@ -584,15 +586,23 @@ class TestNotAddressedVerdict:
 
     async def test_broadcast_reply_is_dropped_silently(self):
         node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        # Under SUBSTANTIVE_WORD_COUNT and not a question/imperative, so the
+        # looks_like_request floor (Finding 1) does not itself downgrade it —
+        # this test is about the silent-drop shape, not the floor.
+        text = "да ладно тебе, отстань уже"
         state = make_state(
-            make_incoming(raw_text="Пиздешь чисты воды, а он говорит ленюсь в игре"),
+            make_incoming(raw_text=text),
             should_respond=True, response_trigger="explicit", broadcast_reply=True,
         )
-        with patch("src.pipeline.filter_node.asyncio.create_task") as mock_task:
+        with patch(
+            "src.pipeline.filter_node.asyncio.create_task", side_effect=close_coroutine
+        ) as mock_task, patch("src.pipeline.filter_node.extract_and_save", new=AsyncMock()):
             result = await node(state)
         assert result["should_respond"] is False
-        assert result["drop_reason"] == "not_addressed"
-        mock_task.assert_not_called()
+        assert result["drop_reason"] == "broadcast_not_addressed"
+        # Only the passive-extraction task fires (the text is long enough) —
+        # no emoji reaction, no reply.
+        mock_task.assert_called_once()
 
     async def test_not_addressed_charges_no_attention_budget(self):
         """The bot was never addressed — charging the user would wind them
@@ -638,7 +648,114 @@ class TestNotAddressedVerdict:
             result = await node(state)
         assert result["should_respond"] is True
 
+    async def test_not_addressed_question_on_broadcast_reply_is_downgraded(self):
+        """Finding 1: a NOT_ADDRESSED misfire on a real question is never
+        silenced — looks_like_request is the same deterministic floor
+        MEANINGLESS/BANTER already get, applied to the one verdict that
+        produces total silence."""
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        state = make_state(
+            make_incoming(raw_text="а почему мне 2 из 10?"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch(
+            "src.pipeline.filter_node.engagement_gate.register_signal",
+            new_callable=AsyncMock, return_value=engagement_gate.FULL_TIER,
+        ):
+            result = await node(state)
+        assert result["should_respond"] is True
+        assert result["filter_verdict"] == "MEANINGFUL"
+
+    async def test_not_addressed_imperative_request_on_broadcast_reply_is_downgraded(self):
+        """The floor covers imperative requests too, not just question marks."""
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        state = make_state(
+            make_incoming(raw_text="объясни за что мне такая оценка"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch(
+            "src.pipeline.filter_node.engagement_gate.register_signal",
+            new_callable=AsyncMock, return_value=engagement_gate.FULL_TIER,
+        ):
+            result = await node(state)
+        assert result["should_respond"] is True
+        assert result["filter_verdict"] == "MEANINGFUL"
+
     async def test_classify_recognises_the_label(self):
         node, _ = make_node_with_mock_llm("not_addressed")
         verdict = await node._MeaninglessFilterNode__classify("текст", "system")
         assert verdict == "NOT_ADDRESSED"
+
+
+class TestNotAddressedPassiveExtraction:
+    """Finding 2: a message silently dropped as NOT_ADDRESSED must still run
+    passive fact extraction, same as the overheard-drop path — otherwise
+    substantive self-description (the incident's own example: a member
+    describing their own effort while venting about the bot's post) is lost.
+    """
+
+    async def test_long_text_schedules_extraction_with_the_sender_identity(self):
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        # At MIN_PASSIVE_LENGTH but at/under SUBSTANTIVE_WORD_COUNT and not a
+        # question/imperative, so it stays NOT_ADDRESSED (Finding 1's floor
+        # does not fire) and reaches the extraction call under test.
+        text = "он мне вообще не пишет никогда"
+        state = make_state(
+            make_incoming(raw_text=text, chat_id=4242, user_id=77, username="vasya"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch(
+            "src.pipeline.filter_node.asyncio.create_task", side_effect=close_coroutine
+        ), patch("src.pipeline.filter_node.extract_and_save", new=AsyncMock()) as mock_extract:
+            await node(state)
+        mock_extract.assert_called_once_with(
+            chat_id=4242, user_id=77, username="vasya", user_message=text,
+        )
+
+    async def test_short_text_does_not_schedule_extraction(self):
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        state = make_state(
+            make_incoming(raw_text="Гениально)"),
+            should_respond=True, response_trigger="explicit", broadcast_reply=True,
+        )
+        with patch("src.pipeline.filter_node.asyncio.create_task") as mock_task:
+            await node(state)
+        mock_task.assert_not_called()
+
+
+class TestRouterToFilterNodeWiring:
+    """Finding 3: ``broadcast_reply`` is produced by ``MessageRouter.__decide``
+    and consumed by ``MeaninglessFilterNode`` purely through an untyped
+    ``NotRequired`` state key — a typo on either side would fail open
+    silently (the bot would answer as if this whole gate did not exist) and
+    every other test would stay green, because each layer's tests mock the
+    other layer's output instead of actually connecting them. This test
+    flows the router's real return value into the filter node's real input,
+    with no hand-built intermediate state.
+    """
+
+    async def test_broadcast_reply_flows_from_router_into_a_silent_drop(self):
+        router = MessageRouter(bot_username=config.BOT_USERNAME, bot_id=config.BOT_ID)
+        text = "Гениально)"
+        telegram_message = make_telegram_message(reply_to_user_id=config.BOT_ID, text=text)
+        incoming = make_incoming(raw_text=text, telegram_message=telegram_message)
+
+        with patch(
+            "src.pipeline.router.unified_messages.get_by_id",
+            new_callable=AsyncMock, return_value={"is_broadcast": True},
+        ):
+            router_update = await router._MessageRouter__decide(incoming, telegram_message)
+
+        assert router_update == {
+            "should_respond": True,
+            "response_trigger": "explicit",
+            "broadcast_reply": True,
+        }
+
+        state = make_state(incoming, **router_update)
+        node, _ = make_node_with_mock_llm("NOT_ADDRESSED")
+        with patch("src.pipeline.filter_node.asyncio.create_task", side_effect=close_coroutine):
+            result = await node(state)
+
+        assert result["should_respond"] is False
+        assert result["drop_reason"] == "broadcast_not_addressed"

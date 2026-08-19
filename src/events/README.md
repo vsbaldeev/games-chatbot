@@ -117,9 +117,15 @@ every other bot message.
 The bot's group-wide announcements (weekly roles and group profiles) are
 similarly marked with `is_broadcast=True` (set by `send_and_store` when the
 message is a broadcast), so replies to them can be treated as chat among
-members rather than necessarily as messages to the bot. A reply to a
-broadcast is gated the same way: an @mention clears the addressing gate, as
-does any question or request addressed to the bot.
+members rather than necessarily as messages to the bot. Unlike the
+link-repost gate, this one is not decided in the router: a bare reply
+(no @mention) still routes as "explicit" but carries `broadcast_reply`, and
+`MeaninglessFilterNode` (`src/pipeline/filter_node.py`) is the one that may
+silence it — an LLM `NOT_ADDRESSED` verdict, itself overridden back to a
+reply whenever the text looks like a genuine question or request (the same
+deterministic floor MEANINGLESS/BANTER get). An @mention skips this whole
+path: it clears `broadcast_reply` at the router, so the bot is always
+addressed unambiguously.
 
 ## Chat-requested selfies
 

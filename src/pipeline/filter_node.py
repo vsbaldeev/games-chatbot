@@ -35,7 +35,13 @@ how it entered the pipeline:
     members). It is honoured only when the router set ``broadcast_reply``
     — an un-mentioned reply to one of the bot's group-wide announcements
     — and resolves to full silence: no reply, no emoji, no attention-budget
-    charge, because the bot was never addressed. Everywhere else the verdict
+    charge, because the bot was never addressed; a passive fact extraction
+    still runs first, so substantive self-description in the message is not
+    lost. Even inside a broadcast reply, a text that looks like a genuine
+    question or request (the same deterministic floor MEANINGLESS/BANTER
+    get from looks_like_request) is never silenced this way — NOT_ADDRESSED
+    is the one verdict that produces total silence, so a classifier misfire
+    on it is the costliest to leave unguarded. Everywhere else the verdict
     is downgraded to MEANINGFUL, preserving this node's fail-open bias.
   - Overheard messages routed by the router's bot-word check
     (response_trigger="insult_check") are classified with the last few chat
@@ -403,9 +409,10 @@ class MeaninglessFilterNode:
         MEANINGFUL, keeping BOT_INSULT verdicts intact.
 
         A NOT_ADDRESSED verdict is honoured only when the router flagged the
-        message as an un-mentioned reply to a broadcast; anywhere else it is
-        downgraded to MEANINGFUL, so ordinary conversation can never be
-        silenced by a classifier slip.
+        message as an un-mentioned reply to a broadcast, and only when the
+        text does not itself look like a question or request; anywhere else
+        it is downgraded to MEANINGFUL, so ordinary conversation — or a real
+        question a classifier misjudged — can never be silenced.
 
         Args:
             state: Current pipeline state.
@@ -420,7 +427,7 @@ class MeaninglessFilterNode:
         replied_to = await self.__enrich_replied_media(replied_to, state)
         decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
         decision = self.__downgrade_group_profile_request(state, text, decision)
-        decision = self.__downgrade_not_addressed(state, decision)
+        decision = self.__downgrade_not_addressed(state, text, decision)
         if decision in ("MEANINGLESS", "BANTER") and looks_like_request(text):
             logger.debug(
                 "Filter: message %s is a question/request — overriding %s to MEANINGFUL",
@@ -450,26 +457,35 @@ class MeaninglessFilterNode:
         )
         return "MEANINGFUL"
 
-    def __downgrade_not_addressed(self, state: BotState, decision: str) -> str:
-        """Downgrade a NOT_ADDRESSED verdict outside a broadcast reply.
+    def __downgrade_not_addressed(self, state: BotState, text: str, decision: str) -> str:
+        """Downgrade a NOT_ADDRESSED verdict outside a broadcast reply, or on a real request.
 
         Ordinary conversation can never be silenced by this verdict: it is
         honoured only when the router flagged the message as an un-mentioned
-        reply to a broadcast (see ``__resolve_not_addressed``).
+        reply to a broadcast (see ``__resolve_not_addressed``) — and even
+        then only when the text does not look like a genuine question or
+        imperative request. This mirrors the MEANINGLESS/BANTER override
+        below, applied here as well because NOT_ADDRESSED is the only verdict
+        that produces total silence, so a classifier misfire on it deserves
+        the same deterministic floor.
 
         Args:
             state: Current pipeline state.
+            text: Raw message text.
             decision: Verdict returned by ``__classify``.
 
         Returns:
             ``"MEANINGFUL"`` when ``decision`` is NOT_ADDRESSED but the
-            message is not a broadcast reply; ``decision`` unchanged otherwise.
+            message is not a broadcast reply, or looks like a question or
+            request; ``decision`` unchanged otherwise.
         """
-        if decision != "NOT_ADDRESSED" or state.get("broadcast_reply"):
+        if decision != "NOT_ADDRESSED":
+            return decision
+        if state.get("broadcast_reply") and not looks_like_request(text):
             return decision
         logger.debug(
-            "Filter: message %s classified NOT_ADDRESSED outside a broadcast "
-            "reply — downgrading to MEANINGFUL",
+            "Filter: message %s classified NOT_ADDRESSED — downgrading to "
+            "MEANINGFUL (not a broadcast reply, or looks like a request)",
             state["incoming"]["message_id"],
         )
         return "MEANINGFUL"
@@ -673,7 +689,9 @@ class MeaninglessFilterNode:
         No attention budget is charged and no emoji reaction is sent: the bot
         was never addressed, so both would be the bot inserting itself into a
         conversation between members — the same reasoning the overheard-drop
-        path already follows.
+        path already follows. Passive fact extraction still runs before the
+        drop (see ``__extract_passive_facts``), so substantive
+        self-description in the message is not silently lost.
 
         Args:
             state: Current pipeline state.
@@ -685,11 +703,31 @@ class MeaninglessFilterNode:
             "Filter: message %s replies to a broadcast without addressing the bot — silence",
             state["incoming"]["message_id"],
         )
+        self.__extract_passive_facts(state["incoming"])
         return {
             "should_respond": False,
             "filter_verdict": "NOT_ADDRESSED",
-            "drop_reason": "not_addressed",
+            "drop_reason": "broadcast_not_addressed",
         }
+
+    def __extract_passive_facts(self, msg: dict) -> None:
+        """Fire-and-forget passive fact extraction before a message is dropped silently.
+
+        Shared by the overheard-drop and NOT_ADDRESSED-drop paths, both of
+        which end the run without a reply but must not lose substantive
+        self-description the sender typed along the way.
+
+        Args:
+            msg: IncomingMessage dict of the message being dropped.
+        """
+        text = msg["raw_text"] or ""
+        if len(text.strip()) >= MIN_PASSIVE_LENGTH:
+            asyncio.create_task(extract_and_save(
+                chat_id=msg["chat_id"],
+                user_id=msg["user_id"],
+                username=msg["username"],
+                user_message=text,
+            ))
 
     def __apply_tier(self, state: BotState, classification: str, tier: int) -> dict:
         """Map (classification, tier) onto a reply, an emoji reaction or silence.
@@ -757,6 +795,7 @@ class MeaninglessFilterNode:
             if tier != engagement_gate.FULL_TIER or replies_to_bot(state["incoming"]):
                 update["wind_down"] = True
         elif classification == "PHOTO_REQUEST" and tier == engagement_gate.FULL_TIER:
+            # deferred: src.life.selfie -> src.events.sending -> src.events -> src.pipeline.filter_node cycle
             from src.life import selfie
             update["photo_request"] = True
             update["photo_in_flight"] = selfie.image_generation_in_flight()
@@ -845,14 +884,7 @@ class MeaninglessFilterNode:
         msg = state["incoming"]
         if decision == "BOT_INSULT" and await self.__confirm_insult(overheard_input):
             return await self.__resolve_with_budget(state, "BOT_INSULT")
-        text = msg["raw_text"] or ""
-        if len(text.strip()) >= MIN_PASSIVE_LENGTH:
-            asyncio.create_task(extract_and_save(
-                chat_id=msg["chat_id"],
-                user_id=msg["user_id"],
-                username=msg["username"],
-                user_message=text,
-            ))
+        self.__extract_passive_facts(msg)
         return {"should_respond": False, "drop_reason": "overheard_dropped"}
 
     async def __classify(self, text: str, system_prompt: str) -> str:

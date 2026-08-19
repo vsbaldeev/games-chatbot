@@ -29,6 +29,7 @@ unified_messages (
     file_id         TEXT,           -- Telegram file_id; permanent; used for lazy photo/sticker description
     media_group_id  TEXT,           -- Telegram album id; groups items of one album
     is_forwarded    BOOLEAN,        -- forwarded channel content, not the sender's own words; rendered as [переслал] in prompts
+    link_material   TEXT,           -- persisted ingestion content block for the bot's own link-repost messages (Shorts/Reel/YouTube); marks rows for the router's addressing gate, re-injected into replies for grounding
     is_broadcast    BOOLEAN NOT NULL DEFAULT FALSE,  -- bot's group-wide announcements (weekly roles, group profile); marks rows for the router's addressing gate
     created_at      DOUBLE PRECISION,
     PRIMARY KEY (chat_id, message_id)
