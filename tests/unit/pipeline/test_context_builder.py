@@ -304,3 +304,45 @@ class TestChainTruncation:
 
         for chain_row in result["context"]["reply_chain"]:
             assert chain_row["content"] == "x" * CHAIN_MSG_CHAR_LIMIT + "…"
+
+
+class TestMentionedTagsIgnoreRepliedToText:
+    """Replying to a message that lists members must not load all their roles.
+
+    2026-08-18 incident: a reply to a ratings post naming eight members
+    pulled every one of their weekly roles into the prompt, and the response
+    model volunteered role trivia nobody had asked about.
+    """
+
+    async def test_mentions_in_the_replied_to_message_are_ignored(self):
+        builder = ContextBuilder()
+        msg = make_incoming(raw_text="Гениально)", username="thechillyv")
+        replied_to = {
+            "content": "@Konyaeff — Счастье 2/10\n@tmaxims — Счастье 7/10",
+            "user_id": 1,
+        }
+        with patch(
+            "src.pipeline.context_builder.achievements.get_chat_members",
+            new_callable=AsyncMock,
+        ) as mock_members:
+            result = await builder._ContextBuilder__collect_mentioned_tags(
+                1000, msg, asker_username="thechillyv"
+            )
+        assert result == {}
+        mock_members.assert_not_called()
+
+    async def test_mentions_the_user_typed_are_still_resolved(self):
+        builder = ContextBuilder()
+        msg = make_incoming(raw_text="@tmaxims почему такая роль?", username="thechillyv")
+        with patch(
+            "src.pipeline.context_builder.achievements.get_chat_members",
+            new_callable=AsyncMock, return_value=[(7, "tmaxims")],
+        ), patch(
+            "src.pipeline.context_builder.user_tags.get_tags_for_users",
+            new_callable=AsyncMock,
+            return_value={7: {"tag": "Геймер", "reason": "тащит ноутбук и геймпад"}},
+        ):
+            result = await builder._ContextBuilder__collect_mentioned_tags(
+                1000, msg, asker_username="thechillyv"
+            )
+        assert result == {"tmaxims": {"tag": "Геймер", "reason": "тащит ноутбук и геймпад"}}

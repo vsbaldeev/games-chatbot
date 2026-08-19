@@ -43,6 +43,10 @@ MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 # context to be misused. Facts are ranked by cosine similarity to the incoming
 # message; anything below the threshold is simply not recalled, even if it was
 # learned minutes ago.
+#
+# The same rule now applies to weekly-role lookups: only usernames the asker
+# typed themselves are resolved, never those merely present in the message
+# being replied to.
 USER_FACTS_SIMILAR_LIMIT = 5
 USER_FACTS_SIMILARITY_THRESHOLD = 0.85
 
@@ -105,7 +109,7 @@ class ContextBuilder:
         )
         asking_user_tag = await user_tags.get_tag(chat_id=chat_id, user_id=msg["user_id"])
         mentioned_tags = await self.__collect_mentioned_tags(
-            chat_id, msg, replied_to, asker_username=msg["username"]
+            chat_id, msg, asker_username=msg["username"]
         )
 
         assembled: AssembledContext = {
@@ -143,18 +147,27 @@ class ContextBuilder:
             return None
 
     async def __collect_mentioned_tags(
-        self, chat_id: int, msg: dict, replied_to: dict | None, asker_username: str
+        self, chat_id: int, msg: dict, asker_username: str
     ) -> dict[str, dict]:
-        """Load weekly roles for members @mentioned in the question or replied to.
+        """Load weekly roles for members the asker @mentioned themselves.
 
-        Lets the bot explain another member's role (e.g. "why does @x have this
-        tag") by resolving the mentioned usernames to their stored tag + reason.
-        The asker's own role is excluded — it is carried separately.
+        Lets the bot explain another member's role (e.g. "why does @x have
+        this tag") by resolving the mentioned usernames to their stored tag
+        + reason. The asker's own role is excluded — it is carried
+        separately.
+
+        Only the incoming message's own text is scanned. The replied-to
+        message used to be scanned too, which meant replying to anything
+        listing several members (a roles announcement, a group profile)
+        loaded every one of their roles into the prompt, and the response
+        model volunteered role trivia nobody asked for — the same failure
+        mode documented for user facts above, and fixed the same way: decide
+        relevance before the prompt is built, not with a prompt rule
+        afterwards.
 
         Args:
             chat_id: Group chat the message belongs to.
             msg: The incoming message dict.
-            replied_to: The message being replied to, if any.
             asker_username: Sender's username, excluded from the result.
 
         Returns:
@@ -162,7 +175,6 @@ class ContextBuilder:
         """
         text = " ".join(filter(None, [
             msg.get("processed_text"), msg.get("raw_text"),
-            (replied_to or {}).get("content"),
         ]))
         mentioned = {mention.lower() for mention in MENTION_RE.findall(text)}
         mentioned.discard(asker_username.lower())
