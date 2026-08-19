@@ -1,6 +1,6 @@
 Telegram Application wiring: handler registration, scheduled job setup, and startup lifecycle.
 
-bot/__init__.py builds the Application, registers all HandlerManagers and JobManagers,
+bot/app.py builds the Application, registers all HandlerManagers and JobManagers,
 opens the DB connection pool and initialises the LLM agents, and calls
 application.run_polling(). The database schema is provisioned separately by Alembic
 migrations (`alembic upgrade head`) before the process starts — the bot no longer
