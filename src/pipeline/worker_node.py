@@ -8,7 +8,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 
 from src import log
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
-from src.pipeline.response_node import row_speaker
+from src.pipeline.response_node import neutralize_speaker_lines, row_speaker
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -184,7 +184,7 @@ class WorkerNode:
                 for row in reversed(recent):
                     parts.append(self.__render_row(row))
                 parts.append("")
-        parts.append(f"Question from @{username}: {user_input}")
+        parts.append(f"Question from @{username}: {neutralize_speaker_lines(user_input)}")
         return "\n".join(parts)
 
     @staticmethod
@@ -193,6 +193,10 @@ class WorkerNode:
 
         The bot's own past messages are labelled ``Ты (бот)`` rather than
         ``@username`` so the worker never treats them as another participant.
+        Content is neutralized against forged speaker lines, the same as
+        the response prompt's rows — this prompt is flattened the same
+        way and carries the same risk (see
+        :func:`src.pipeline.response_node.neutralize_speaker_lines`).
 
         Args:
             row: Message row dict with ``user_id``, ``username``, ``content``,
@@ -202,4 +206,5 @@ class WorkerNode:
             Formatted string representation of the message.
         """
         content = unified_messages.display_media_content(row["media_type"], row["content"])
+        content = neutralize_speaker_lines(content)
         return f"{row_speaker(row)}: {content}"
