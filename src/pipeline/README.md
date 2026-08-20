@@ -678,8 +678,8 @@ memory_writer
           → dedup via cosine similarity (fastembed MiniLM-L12, threshold 0.85)
             duplicate → refresh updated_at; new → insert with embedding
           → cap: 30 facts per user per chat, oldest pruned on overflow
-          → 90-day expiry: facts (counters included) untouched for 90 days
-            are deleted by the nightly cleanup job
+          → 14-day expiry (FACT_RETENTION_DAYS): facts (counters included)
+            untouched for 14 days are deleted by the nightly cleanup job
           → facts written in Russian
           → cross-user extraction for any @mentioned users (if stripped message ≥ 20 chars):
             sincerity rule (banter/insults are not facts) + facts stored with
