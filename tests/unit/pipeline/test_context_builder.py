@@ -29,6 +29,7 @@ STORE_FIND_RELEVANT_FACTS = (
 STORE_GET_TAG = "src.pipeline.context_builder.user_tags.get_tag"
 STORE_GET_TAGS_FOR_USERS = "src.pipeline.context_builder.user_tags.get_tags_for_users"
 ACHIEVEMENTS_GET_MEMBERS = "src.pipeline.context_builder.achievements.get_chat_members"
+EMBED = "src.pipeline.context_builder.embedder.embed"
 DESCRIBE_PHOTO = "src.pipeline.ingester.describe_photo"
 
 
@@ -349,6 +350,50 @@ class TestRolesGate:
             result = await context_builder(state)
 
         assert result["context"]["asking_user_tag"] == self.ROLE
+
+
+class TestLinkRetellSkipsSimilarityRetrieval:
+    """A link retell must not embed its own fetched material.
+
+    For youtube_short/social_link the incoming processed_text is the whole
+    material block — transcript, frame descriptions, strangers' comments — so
+    the query vector describes a video, not anything a member said. Ranking
+    members' stored facts against it costs an embedding call and recalls
+    unrelated things. The response prompt already drops recent history for
+    these triggers for the same reason.
+    """
+
+    MATERIAL = "смотри\n\n[YouTube Shorts «Обзор», канал X, 42 сек]\n[Аудио]: про сборку пк"
+
+    @pytest.mark.parametrize("trigger", ["youtube_short", "social_link"])
+    async def test_link_retell_skips_embedding_and_facts(self, context_builder, trigger):
+        incoming = make_incoming(processed_text=self.MATERIAL)
+        state = make_state(incoming, response_trigger=trigger)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack)
+            mock_embed = stack.enter_context(patch(EMBED, new_callable=AsyncMock))
+            mock_facts = stack.enter_context(
+                patch(STORE_FIND_RELEVANT_FACTS, new_callable=AsyncMock, return_value={})
+            )
+            result = await context_builder(state)
+
+        mock_embed.assert_not_called()
+        mock_facts.assert_not_called()
+        assert result["context"]["user_facts"] == {}
+
+    async def test_ordinary_trigger_still_embeds(self, context_builder):
+        incoming = make_incoming(raw_text="во что поиграть на выходных?")
+        state = make_state(incoming, response_trigger="explicit")
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack)
+            mock_embed = stack.enter_context(
+                patch(EMBED, new_callable=AsyncMock, return_value=[0.1] * 384)
+            )
+            await context_builder(state)
+
+        mock_embed.assert_called_once()
 
 
 class TestChainTruncation:

@@ -23,6 +23,7 @@ import re
 
 from src import achievements, log
 from src.pipeline.ingester import enrich_media_row
+from src.pipeline.response_node import LINK_RETELL_TRIGGERS
 from src.pipeline.state import AssembledContext, BotState
 from src.store import embedder, unified_messages, user_memories, user_tags
 
@@ -141,7 +142,7 @@ class ContextBuilder:
 
         bot = state["context_types"].bot
         fallback = msg.get("replied_to_fallback")
-        query_embedding = await self.__embed_message(msg)
+        query_embedding = await self.__embed_message(msg, state.get("response_trigger"))
         recent = await self.__get_recent(chat_id, msg["message_id"])
         replied_to = await self.__find_replied_to(
             chat_id, msg["reply_to_msg_id"], recent, fallback
@@ -165,20 +166,31 @@ class ContextBuilder:
         return {"context": assembled}
 
     @staticmethod
-    async def __embed_message(msg: dict) -> list[float] | None:
+    async def __embed_message(msg: dict, response_trigger: str | None) -> list[float] | None:
         """Embed the incoming message once for every similarity lookup.
 
         Bot-canon retrieval and per-user fact retrieval rank against the same
         query vector, so it is computed once here instead of once per collector.
 
+        Link retells are excluded outright. Their ``processed_text`` is the
+        whole fetched material block — transcript, frame descriptions and
+        stranger's comments — so the vector describes a video rather than
+        anything a member said, and ranking their stored facts against it is
+        both a wasted embedding call and a source of unrelated recall. The
+        response prompt drops recent history for these triggers for the same
+        reason (see :data:`~src.pipeline.response_node.LINK_RETELL_TRIGGERS`).
+
         Args:
             msg: IncomingMessage dict of the message being processed.
+            response_trigger: Routing trigger for this run, or None.
 
         Returns:
-            The message embedding, or None when the message carries no text or
-            embedding failed — callers then skip similarity retrieval rather
-            than failing the pipeline.
+            The message embedding, or None when the message is a link retell,
+            carries no text, or embedding failed — callers then skip
+            similarity retrieval rather than failing the pipeline.
         """
+        if response_trigger in LINK_RETELL_TRIGGERS:
+            return None
         text = msg.get("processed_text") or msg.get("raw_text") or ""
         if not text.strip():
             return None

@@ -437,7 +437,13 @@ context_builder
     │    empty chain + fallback → one-element chain from the fallback
     ├─ embed processed_text once (__embed_message) — shared by the user-fact
     │    and bot-canon lookups below; no text or embed failure → None, and both
-    │    similarity retrievals are skipped rather than failing the pipeline
+    │    similarity retrievals are skipped rather than failing the pipeline.
+    │    Link retells (LINK_RETELL_TRIGGERS) skip the embedding outright: their
+    │    processed_text is the whole fetched material block (transcript, frame
+    │    descriptions, strangers' comments), so the vector describes a video
+    │    rather than anything a member said — ranking members' stored facts
+    │    against it is a wasted embedding call and a source of unrelated
+    │    recall. Same reasoning as dropping recent history for those triggers
     ├─ user facts: similarity-gated, NOT the whole stored list —
     │    find_relevant_facts_for_users ranks every recent participant's facts
     │    (plus the initiating user's) against the message embedding in one
