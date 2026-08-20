@@ -4,12 +4,14 @@ import datetime
 import logging
 import re
 
+import tiktoken
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config, log
 from src.agent import needs_russian_correction, normalize_homoglyphs
 from src.config.prompts import (
     LINK_REPLY_GROUNDING_INSTRUCTION,
+    RESPONSE_PROMPT,
     SHORTS_TRIGGER_INSTRUCTION,
     SOCIAL_LINK_RETELL_INSTRUCTION,
     USER_FACTS_HEADER,
@@ -603,13 +605,53 @@ def build_response_input(
     Returns:
         Prompt string ready to pass as the final human turn to the response LLM.
     """
+    return flatten_blocks(build_response_blocks(
+        username, user_input, worker_output, context, response_trigger,
+        has_thread_history, media_type, is_bot_insult, wind_down, worker_tools_used,
+        photo_directive, meme_directive, group_profile_directive, voice_low_confidence,
+    ))
+
+
+def build_response_blocks(
+    username: str,
+    user_input: str,
+    worker_output: str,
+    context,
+    response_trigger: str = "explicit",
+    has_thread_history: bool = False,
+    media_type: str = "text",
+    is_bot_insult: bool = False,
+    wind_down: bool = False,
+    worker_tools_used: bool = False,
+    photo_directive: str | None = None,
+    meme_directive: str | None = None,
+    group_profile_directive: str | None = None,
+    voice_low_confidence: bool = False,
+) -> list[tuple[str, list[str]]]:
+    """Assemble the response prompt as labelled ``(name, lines)`` blocks, in order.
+
+    Same arguments as :func:`build_response_input`, which is a thin wrapper
+    that flattens this into the final prompt string
+    (:func:`flatten_blocks`). Kept as a separate function so the per-block
+    token accounting in :func:`log_response_input` can report each block's
+    cost individually without recomputing this assembly logic a second time
+    and risking the two views drifting apart.
+
+    Returns:
+        Ordered ``(label, lines)`` pairs; a block is omitted entirely when it
+        has nothing to contribute, matching what ``build_response_input``
+        would have rendered.
+    """
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    parts: list[str] = [f"Текущая дата и время: {now}", ""]
-    parts += build_user_facts_lines(context)
+    blocks: list[tuple[str, list[str]]] = [("datetime", [f"Текущая дата и время: {now}", ""])]
+
+    facts_lines = build_user_facts_lines(context)
+    if facts_lines:
+        blocks.append(("user_facts", facts_lines))
+
     role_lines = build_asking_user_tag_lines(context, username) + build_mentioned_tags_lines(context)
     if role_lines:
-        parts.append(WEEKLY_ROLES_RULE)
-        parts += role_lines
+        blocks.append(("weekly_roles", [WEEKLY_ROLES_RULE, *role_lines]))
 
     # Skip recent history when thread history is present (thread turns already
     # provide conversational context, group chat would just confuse the model),
@@ -620,23 +662,37 @@ def build_response_input(
     history_lines, replied_to = build_recent_history_lines(
         context, response_trigger, has_thread_history
     )
-    parts += history_lines
+    if history_lines:
+        blocks.append(("recent_history", history_lines))
 
     if worker_output:
         header = WORKER_DATA_VERIFIED_HEADER if worker_tools_used else WORKER_DATA_UNVERIFIED_HEADER
-        parts.append(f"{header}\n{worker_output}\n")
+        blocks.append(("worker_output", [f"{header}\n{worker_output}\n"]))
 
-    parts += build_directive_lines(
+    directive_lines = build_directive_lines(
         is_bot_insult, wind_down, photo_directive, meme_directive, group_profile_directive
     )
+    if directive_lines:
+        blocks.append(("directives", directive_lines))
 
-    parts.append(
-        build_trigger_line(
-            username, user_input, media_type, replied_to, response_trigger,
-            voice_low_confidence=voice_low_confidence,
-        )
-    )
-    return "\n".join(parts)
+    blocks.append(("trigger_line", [build_trigger_line(
+        username, user_input, media_type, replied_to, response_trigger,
+        voice_low_confidence=voice_low_confidence,
+    )]))
+    return blocks
+
+
+def flatten_blocks(blocks: list[tuple[str, list[str]]]) -> str:
+    """Join labelled prompt blocks into the final prompt string, in order.
+
+    Args:
+        blocks: Ordered ``(label, lines)`` pairs, e.g. from
+            :func:`build_response_blocks`.
+
+    Returns:
+        Every block's lines concatenated with newlines, labels dropped.
+    """
+    return "\n".join(line for _, lines in blocks for line in lines)
 
 
 def resolve_photo_directive(state: BotState) -> str | None:
@@ -725,7 +781,97 @@ async def persist_thread_turn(state: BotState, response_text: str) -> None:
     )
 
 
-def log_response_input(past_messages: list, enriched: str) -> None:
+# Token accounting for the DEBUG-level per-block breakdown below. Not the
+# tokenizer any actually-serving model uses (Groq's gpt-oss-120b/qwen3.6-27b,
+# or the OpenRouter gemma fallback all have their own) — o200k_base is the
+# closest available stand-in and, unlike a char-count heuristic, tracks real
+# subword boundaries, which matters for Cyrillic. Chosen over LangChain's
+# get_num_tokens() (falls back to a GPT-2 tokenizer via `transformers`, a
+# dependency only the imagegen-service carries — calling it here would raise
+# ImportError in the deployed bot container). tiktoken itself is already a
+# real dependency via langchain-openai. log_response_usage logs Groq's own
+# exact count alongside this estimate, so the estimate's real error is
+# visible rather than assumed.
+TOKENIZER_ENCODING = "o200k_base"
+TOKENIZER: tiktoken.Encoding | None = None
+TOKENIZER_LOAD_FAILED = False
+
+
+def get_tokenizer() -> tiktoken.Encoding | None:
+    """Return the lazily-loaded tiktoken encoder, or None if it failed to load.
+
+    Loaded at most once per process; a failure (e.g. no network on first use —
+    the encoding's BPE ranks are fetched on first load) is cached too, so a
+    DEBUG-mode outage does not retry a failing network call on every reply.
+
+    Returns:
+        The shared encoder, or None when loading it failed.
+    """
+    global TOKENIZER, TOKENIZER_LOAD_FAILED
+    if TOKENIZER is not None or TOKENIZER_LOAD_FAILED:
+        return TOKENIZER
+    try:
+        TOKENIZER = tiktoken.get_encoding(TOKENIZER_ENCODING)
+    except Exception as err:
+        TOKENIZER_LOAD_FAILED = True
+        logger.warning("Failed to load tiktoken encoding %s: %s", TOKENIZER_ENCODING, err)
+    return TOKENIZER
+
+
+def count_tokens(text: str) -> int | None:
+    """Estimate the token count of one prompt block.
+
+    Args:
+        text: Block text to measure.
+
+    Returns:
+        The estimated token count, or None when the tokenizer is unavailable
+        — callers then omit the block from the breakdown rather than crash.
+    """
+    tokenizer = get_tokenizer()
+    if tokenizer is None:
+        return None
+    return len(tokenizer.encode(text))
+
+
+def count_prompt_blocks(
+    past_messages: list, blocks: list[tuple[str, list[str]]]
+) -> dict[str, int]:
+    """Estimate the token cost of every block sent to the response LLM.
+
+    Covers two things that are not part of ``blocks`` but are still sent to
+    the model on every call, so the total is comparable to Groq's own
+    ``usage.input_tokens`` (see :func:`log_response_usage`) rather than only
+    covering the dynamically assembled part: the static system prompt
+    (``RESPONSE_PROMPT``, prepended by the executor — see
+    :class:`~src.agent.response.ResponseAgent`) and the thread-history turns
+    themselves.
+
+    Args:
+        past_messages: Thread-history turns preceding the final human turn.
+        blocks: The enriched turn's labelled blocks, from
+            :func:`build_response_blocks`.
+
+    Returns:
+        Mapping of block label to estimated token count. A block is omitted
+        when the tokenizer could not measure it (see :func:`count_tokens`);
+        an empty result means it could not measure anything at all.
+    """
+    thread_history_text = "\n".join(
+        message.content for message in past_messages if isinstance(message.content, str)
+    )
+    all_blocks = [("system_prompt", RESPONSE_PROMPT), ("thread_history", thread_history_text)]
+    all_blocks += [(label, "\n".join(lines)) for label, lines in blocks]
+
+    counts: dict[str, int] = {}
+    for label, text in all_blocks:
+        count = count_tokens(text)
+        if count is not None:
+            counts[label] = count
+    return counts
+
+
+def log_response_input(past_messages: list, blocks: list[tuple[str, list[str]]], enriched: str) -> int | None:
     """Dump the exact input the response LLM is about to see, at DEBUG level.
 
     Absurd replies are usually caused by something in the assembled prompt
@@ -733,14 +879,21 @@ def log_response_input(past_messages: list, enriched: str) -> None:
     that assembly is ephemeral — without this dump there is no way to see
     it after the fact. Thread history turns are logged as one-line excerpts
     (their full text lives in the ``thread_history`` table); the enriched
-    final turn is logged verbatim because it exists nowhere else.
+    final turn is logged verbatim because it exists nowhere else. The
+    per-block token breakdown is computed by :func:`count_prompt_blocks`.
 
     Args:
         past_messages: Thread-history turns preceding the final human turn.
+        blocks: The enriched turn's labelled blocks, from
+            :func:`build_response_blocks` — must flatten to ``enriched``.
         enriched: The assembled final human turn passed to the LLM.
+
+    Returns:
+        The estimated total prompt tokens across every block, or None when
+        DEBUG logging is disabled or the tokenizer could not be loaded.
     """
     if not logger.isEnabledFor(logging.DEBUG):
-        return
+        return None
     for position, message in enumerate(past_messages, start=1):
         speaker = "human" if isinstance(message, HumanMessage) else "ai"
         logger.debug(
@@ -748,6 +901,42 @@ def log_response_input(past_messages: list, enriched: str) -> None:
             position, len(past_messages), speaker, log.snippet(message.content),
         )
     logger.debug("Response LLM final turn:\n%s", enriched)
+
+    counts = count_prompt_blocks(past_messages, blocks)
+    if not counts:
+        return None
+    total = sum(counts.values())
+    logger.debug(
+        "Response LLM prompt blocks (~%d tokens, %s estimate): %s",
+        total, TOKENIZER_ENCODING,
+        ", ".join(f"{label}={count}" for label, count in counts.items()),
+    )
+    return total
+
+
+def log_response_usage(estimated_tokens: int, usage: dict) -> None:
+    """Compare the per-block token estimate against Groq's real usage, at DEBUG level.
+
+    ``estimated_tokens`` is a tiktoken ``o200k_base`` estimate; the actually
+    serving model has its own tokenizer, so this is not expected to match
+    exactly — logging both makes the estimate's real error visible on
+    production traffic instead of assumed.
+
+    Args:
+        estimated_tokens: Total from :func:`log_response_input`.
+        usage: ``AIMessage.usage_metadata`` from the response call, or an
+            empty dict when the model returned none.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    actual = usage.get("input_tokens")
+    if actual is None:
+        return
+    error_pct = 100 * (estimated_tokens - actual) / actual if actual else 0.0
+    logger.debug(
+        "Response LLM token estimate vs actual: estimated=%d actual=%d (%+.0f%%)",
+        estimated_tokens, actual, error_pct,
+    )
 
 
 class ResponseNode:
@@ -795,7 +984,7 @@ class ResponseNode:
 
         user_input = msg["processed_text"] or msg["raw_text"] or ""
         media_type = msg["media_type"]
-        enriched = build_response_input(
+        blocks = build_response_blocks(
             msg["username"],
             user_input,
             state.get("worker_output") or "",
@@ -811,9 +1000,13 @@ class ResponseNode:
             group_profile_directive=resolve_group_profile_directive(state),
             voice_low_confidence=bool(state.get("voice_low_confidence")),
         )
+        enriched = flatten_blocks(blocks)
         messages = past_messages + [HumanMessage(content=enriched)]
-        log_response_input(past_messages, enriched)
-        response_text = normalize_homoglyphs(await self.__generate(messages))
+        estimated_tokens = log_response_input(past_messages, blocks, enriched)
+        usage: dict = {}
+        response_text = normalize_homoglyphs(await self.__generate(messages, usage))
+        if estimated_tokens is not None:
+            log_response_usage(estimated_tokens, usage)
 
         # Foreign-script responses are persisted by LanguageCorrectionNode
         # after the retry, so history stores the reply the chat actually saw.
@@ -822,12 +1015,15 @@ class ResponseNode:
 
         return {"response": response_text, "response_messages": messages}
 
-    async def __generate(self, messages: list) -> str:
+    async def __generate(self, messages: list, usage_sink: dict) -> str:
         """Delegate to the response agent.
 
         Args:
             messages: Assembled message list (history + human turn, no system prompt —
                 the executor prepends it internally).
+            usage_sink: Filled in-place with the call's ``usage_metadata`` (input/
+                output/total tokens) when the model returned one, for the DEBUG
+                token-estimate comparison in :func:`log_response_usage`.
 
         Returns:
             Reply text from the agent. Empty string if the agent returned nothing.
@@ -837,4 +1033,4 @@ class ResponseNode:
             DailyLimitError: If all models have exhausted their daily token quota.
             RateLimitError: If rate-limit retries are exhausted on all models.
         """
-        return await self.__agent.invoke_response(messages)
+        return await self.__agent.invoke_response(messages, usage_sink=usage_sink)

@@ -41,7 +41,7 @@ class ResponseAgent:
         self.__response_executor = ResponseAgent.__build_executor()
         logger.info("ResponseAgent initialized with model: %s", config.RESPONSE_MODEL_FALLBACKS[0])
 
-    async def invoke_response(self, messages: list) -> str:
+    async def invoke_response(self, messages: list, usage_sink: dict | None = None) -> str:
         """Run the response executor and return the final reply text.
 
         Think-block stripping is handled by ``ThinkingStripper`` middleware inside
@@ -51,6 +51,12 @@ class ResponseAgent:
         Args:
             messages: Message list (history + human turn). The executor prepends
                 the system prompt internally; callers must not include it.
+            usage_sink: If given, filled in-place with the reply message's
+                ``usage_metadata`` (``input_tokens``/``output_tokens``/
+                ``total_tokens``) when the serving model returned one —
+                whichever model in the fallback chain actually answered.
+                Left empty when the model reports none. Optional so existing
+                callers and test doubles need no change.
 
         Returns:
             Reply text. Empty string when the model returns no content.
@@ -64,7 +70,10 @@ class ResponseAgent:
         if self.__response_executor is None:
             raise RuntimeError("ResponseAgent.init() must be called before invoking response executor")
         result = await guarded_ainvoke(self.__response_executor, {"messages": messages})
-        return result["messages"][-1].content or ""
+        last_message = result["messages"][-1]
+        if usage_sink is not None and last_message.usage_metadata:
+            usage_sink.update(last_message.usage_metadata)
+        return last_message.content or ""
 
     async def reset_model_index(self) -> None:
         """Rebuild the executor, resetting middleware state to the primary model."""

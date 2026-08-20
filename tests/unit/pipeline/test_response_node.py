@@ -9,10 +9,12 @@ context as the most recent human message and responded about the wrong thread.
 Fix: only "@username: user_input" is stored — context is assembled fresh each turn.
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import src.pipeline.response_node as response_node_module
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
 from src.config.prompts import (
     LINK_REPLY_GROUNDING_INSTRUCTION,
@@ -25,8 +27,15 @@ from src.pipeline.response_node import (
     build_asking_user_tag_lines,
     build_directive_lines,
     build_recent_history_lines,
+    build_response_blocks,
     build_response_input,
     build_trigger_line,
+    count_prompt_blocks,
+    count_tokens,
+    flatten_blocks,
+    get_tokenizer,
+    log_response_input,
+    log_response_usage,
     neutralize_speaker_lines,
     render_row,
     resolve_group_profile_directive,
@@ -770,3 +779,194 @@ class TestRowTruncation:
     def test_content_over_limit_truncated_with_ellipsis(self):
         content = "a" * (ROW_CHAR_LIMIT + 100)
         assert render_row(self.make_row(content)) == f"@alice: {'a' * ROW_CHAR_LIMIT}…"
+
+
+class TestBuildResponseBlocksMatchesInput:
+    """build_response_input must stay a thin flatten_blocks(build_response_blocks(...))
+    wrapper — the per-block DEBUG breakdown (log_response_input) depends on
+    blocks being the single source of truth, never a second reimplementation
+    that could drift from the actual prompt string.
+    """
+
+    def rich_context(self) -> dict:
+        return {
+            "user_facts": {"alice": ["любит PS5", "играет в FIFA"]},
+            "recent_history": [{
+                "message_id": 1, "username": "bob", "content": "привет всем",
+                "media_type": "text", "user_id": 2,
+            }],
+            "replied_to": None,
+            "reply_chain": [],
+            "asking_user_tag": {"tag": "Спидранер", "reason": "проходит за день"},
+            "mentioned_tags": {"carl": {"tag": "Ночной дозор", "reason": "полуночник"}},
+        }
+
+    def test_flattened_blocks_equal_build_response_input(self):
+        args = (
+            "alice", "@carl как дела? почему у тебя такая роль?",
+            "Найдено 3 совпадения.", self.rich_context(),
+        )
+        kwargs = dict(
+            response_trigger="explicit", has_thread_history=False,
+            is_bot_insult=True, wind_down=False, worker_tools_used=True,
+        )
+
+        blocks = build_response_blocks(*args, **kwargs)
+        prompt_input = build_response_input(*args, **kwargs)
+
+        assert flatten_blocks(blocks) == prompt_input
+
+    def test_every_documented_block_appears_when_applicable(self):
+        blocks = build_response_blocks(
+            "alice", "@carl как дела? почему у тебя такая роль?",
+            "Найдено 3 совпадения.", self.rich_context(),
+            response_trigger="explicit",
+        )
+        labels = [label for label, _ in blocks]
+        assert labels == [
+            "datetime", "user_facts", "weekly_roles", "recent_history",
+            "worker_output", "trigger_line",
+        ]
+
+    def test_empty_sections_are_omitted_entirely(self):
+        empty_context = {
+            "user_facts": {}, "recent_history": [], "replied_to": None, "reply_chain": [],
+        }
+        blocks = build_response_blocks("alice", "привет", "", empty_context)
+        assert [label for label, _ in blocks] == ["datetime", "trigger_line"]
+
+
+class TestTokenCounting:
+    """count_tokens/get_tokenizer never touch the network here — tiktoken.get_encoding
+    is mocked, and the module-level singleton is reset via monkeypatch so tests
+    cannot leak cached state into each other.
+    """
+
+    def test_get_tokenizer_loads_once_and_caches(self, monkeypatch):
+        monkeypatch.setattr(response_node_module, "TOKENIZER", None)
+        monkeypatch.setattr(response_node_module, "TOKENIZER_LOAD_FAILED", False)
+        stub_encoding = MagicMock()
+
+        with patch("tiktoken.get_encoding", return_value=stub_encoding) as mock_get_encoding:
+            first = get_tokenizer()
+            second = get_tokenizer()
+
+        assert first is stub_encoding
+        assert second is stub_encoding
+        mock_get_encoding.assert_called_once_with("o200k_base")
+
+    def test_get_tokenizer_caches_failure_without_retrying(self, monkeypatch):
+        monkeypatch.setattr(response_node_module, "TOKENIZER", None)
+        monkeypatch.setattr(response_node_module, "TOKENIZER_LOAD_FAILED", False)
+
+        with patch("tiktoken.get_encoding", side_effect=RuntimeError("no network")) as mock_get_encoding:
+            first = get_tokenizer()
+            second = get_tokenizer()
+
+        assert first is None
+        assert second is None
+        mock_get_encoding.assert_called_once()
+
+    def test_count_tokens_none_when_tokenizer_unavailable(self, monkeypatch):
+        monkeypatch.setattr(response_node_module, "TOKENIZER", None)
+        monkeypatch.setattr(response_node_module, "TOKENIZER_LOAD_FAILED", True)
+
+        assert count_tokens("привет") is None
+
+    def test_count_tokens_delegates_to_the_encoder(self, monkeypatch):
+        stub_encoding = MagicMock()
+        stub_encoding.encode.return_value = [1, 2, 3, 4]
+        monkeypatch.setattr(response_node_module, "TOKENIZER", stub_encoding)
+        monkeypatch.setattr(response_node_module, "TOKENIZER_LOAD_FAILED", False)
+
+        assert count_tokens("привет") == 4
+        stub_encoding.encode.assert_called_once_with("привет")
+
+
+class TestCountPromptBlocks:
+    """The token-accounting aggregation itself — no logging, no DEBUG gate.
+    count_tokens is patched to a deterministic stub throughout; these tests
+    exercise the aggregation logic, not the real tokenizer.
+    """
+
+    def make_blocks(self) -> list[tuple[str, list[str]]]:
+        return [("user_facts", ["любит PS5"]), ("trigger_line", ["@alice: привет"])]
+
+    def test_includes_system_prompt_and_thread_history_alongside_blocks(self):
+        with patch("src.pipeline.response_node.count_tokens", return_value=10):
+            counts = count_prompt_blocks([], self.make_blocks())
+        assert counts == {
+            "system_prompt": 10, "thread_history": 10, "user_facts": 10, "trigger_line": 10,
+        }
+
+    def test_omits_blocks_the_tokenizer_could_not_measure(self):
+        with patch("src.pipeline.response_node.count_tokens", return_value=None):
+            counts = count_prompt_blocks([], self.make_blocks())
+        assert counts == {}
+
+    def test_thread_history_folds_past_message_content(self):
+        past = [MagicMock(content="привет"), MagicMock(content="как дела?")]
+        with patch("src.pipeline.response_node.count_tokens") as mock_count:
+            mock_count.return_value = 3
+            count_prompt_blocks(past, [])
+        thread_history_call = next(
+            call for call in mock_count.call_args_list
+            if "привет" in call.args[0] and "как дела?" in call.args[0]
+        )
+        assert thread_history_call is not None
+
+
+class TestLogResponseInput:
+    """DEBUG gating, logging, and the returned total — delegates the actual
+    per-block counting to count_prompt_blocks (tested above), mocked here
+    for isolation."""
+
+    def make_blocks(self) -> list[tuple[str, list[str]]]:
+        return [("user_facts", ["любит PS5"]), ("trigger_line", ["@alice: привет"])]
+
+    def test_returns_none_when_debug_disabled(self, caplog):
+        caplog.set_level(logging.INFO)
+        with patch("src.pipeline.response_node.count_prompt_blocks", return_value={"trigger_line": 5}):
+            total = log_response_input([], self.make_blocks(), "@alice: привет")
+        assert total is None
+
+    def test_returns_the_summed_total(self, caplog):
+        caplog.set_level(logging.DEBUG)
+        counts = {"system_prompt": 10, "thread_history": 0, "user_facts": 3, "trigger_line": 4}
+        with patch("src.pipeline.response_node.count_prompt_blocks", return_value=counts):
+            total = log_response_input([], self.make_blocks(), "@alice: привет")
+        assert total == 17
+
+    def test_returns_none_when_no_block_could_be_measured(self, caplog):
+        caplog.set_level(logging.DEBUG)
+        with patch("src.pipeline.response_node.count_prompt_blocks", return_value={}):
+            total = log_response_input([], self.make_blocks(), "@alice: привет")
+        assert total is None
+
+    def test_logs_per_block_breakdown(self, caplog):
+        caplog.set_level(logging.DEBUG)
+        counts = {"user_facts": 7, "trigger_line": 9}
+        with patch("src.pipeline.response_node.count_prompt_blocks", return_value=counts):
+            log_response_input([], self.make_blocks(), "@alice: привет")
+        assert "user_facts=7" in caplog.text
+        assert "trigger_line=9" in caplog.text
+
+
+class TestLogResponseUsage:
+    """Compares the per-block estimate against Groq's real usage.input_tokens."""
+
+    def test_logs_estimate_and_actual(self, caplog):
+        caplog.set_level(logging.DEBUG)
+        log_response_usage(120, {"input_tokens": 100})
+        assert "estimated=120" in caplog.text
+        assert "actual=100" in caplog.text
+
+    def test_noop_when_debug_disabled(self, caplog):
+        caplog.set_level(logging.INFO)
+        log_response_usage(120, {"input_tokens": 100})
+        assert "estimated=" not in caplog.text
+
+    def test_noop_when_usage_carries_no_input_tokens(self, caplog):
+        caplog.set_level(logging.DEBUG)
+        log_response_usage(120, {})
+        assert "estimated=" not in caplog.text

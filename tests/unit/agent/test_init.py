@@ -190,10 +190,11 @@ def make_worker_agent(*, content=None, error=None):
     return WorkerAgent(worker_executor=executor)
 
 
-def make_response_agent(*, content=None, error=None):
+def make_response_agent(*, content=None, error=None, usage_metadata=None):
     """Return a ResponseAgent with an injected mock executor."""
     last_message = MagicMock()
     last_message.content = content or "ответ"
+    last_message.usage_metadata = usage_metadata
     executor = MagicMock()
     if error is not None:
         executor.ainvoke = AsyncMock(side_effect=error)
@@ -279,3 +280,33 @@ class TestInvokeResponse:
         """A 400 error unrelated to context length must propagate as BadRequestError."""
         with pytest.raises(groq.BadRequestError):
             await make_response_agent(error=make_bad_request_error("invalid tool definition")).invoke_response([HumanMessage(content="вопрос")])
+
+
+class TestInvokeResponseUsageSink:
+    """usage_sink lets callers read the real Groq token usage for the DEBUG
+    per-block estimate comparison (response_node.log_response_usage) without
+    changing invoke_response's return contract for existing callers."""
+
+    async def test_usage_sink_is_populated_when_present(self):
+        agent = make_response_agent(
+            content="ответ",
+            usage_metadata={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
+        )
+        usage_sink: dict = {}
+
+        await agent.invoke_response([HumanMessage(content="вопрос")], usage_sink=usage_sink)
+
+        assert usage_sink == {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}
+
+    async def test_usage_sink_stays_empty_when_model_reports_none(self):
+        agent = make_response_agent(content="ответ", usage_metadata=None)
+        usage_sink: dict = {}
+
+        await agent.invoke_response([HumanMessage(content="вопрос")], usage_sink=usage_sink)
+
+        assert usage_sink == {}
+
+    async def test_usage_sink_is_optional(self):
+        """Existing callers that never pass usage_sink must be unaffected."""
+        result = await make_response_agent(content="ответ").invoke_response([HumanMessage(content="вопрос")])
+        assert result == "ответ"
