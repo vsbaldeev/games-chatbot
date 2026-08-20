@@ -592,6 +592,19 @@ response   personality LLM (ReAct executor, no tools)
     │    letters spliced into a mostly-Cyrillic word (e.g. Greek μ/ά in "тμάксимс")
     │    are mapped back to Cyrillic deterministically, with no extra LLM call;
     │    standalone Greek symbols (π, 50 μg) and pure-Latin words (React) are left intact
+    ├─ output sanitization, deterministic regexes applied on both the send path
+    │    (src/events/messages.py deliver_and_record) and the thread_history persist
+    │    path below, so what's stored always matches what the chat saw:
+    │      strip_markdown         — bold/italic markers, table-separator lines
+    │      strip_speaker_prefix   — the response model sometimes continues the
+    │        "@user: …" / "Ты (бот): …" transcript it was shown (see the "Ты
+    │        (бот): …" bullet above) instead of answering, echoing that label
+    │        back as the start of its own reply; a leading label is stripped
+    │      strip_writing_tics     — single-word «scare quotes» (formal written
+    │        Russian, not chat style — multi-word «цитаты» are left alone),
+    │        non-breaking/en dashes normalized to a plain hyphen, and a
+    │        trailing emoji run dropped (the persona prompt asks for at most
+    │        one emoji only when it fits; the model appends one almost always)
     ├─ saves response_messages to state for LanguageCorrectionNode
     ├─ persists the exchange to thread_history only when no correction is
     │    needed — otherwise language_correction persists the corrected reply,

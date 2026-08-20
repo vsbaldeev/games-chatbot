@@ -74,7 +74,7 @@ def is_reply_to_game_message(update: Update) -> bool:
     return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
-from src.pipeline.response_node import strip_markdown
+from src.pipeline.response_node import strip_markdown, strip_speaker_prefix, strip_writing_tics
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import thread_history
 
@@ -312,7 +312,7 @@ async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) 
         bot_id: The bot's own user id, recorded as the message author.
         response_text: Raw response text produced by the pipeline.
     """
-    clean = normalize_homoglyphs(strip_markdown(response_text))
+    clean = normalize_homoglyphs(strip_writing_tics(strip_speaker_prefix(strip_markdown(response_text))))
     sent_id, anchored_to, sent_media_type = await deliver_response(final_state, msg, clean)
     link_material = final_state.get("youtube_short_content") or final_state.get("social_link_content")
     await unified_messages.insert(
