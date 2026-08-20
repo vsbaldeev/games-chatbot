@@ -62,14 +62,19 @@ POT_PROVIDER_URL = "http://pot-provider:4416"
 # merge → no ffmpeg binary needed in the image.
 SHORT_FORMAT = "18/b[ext=mp4][filesize<25M]/b[filesize<25M]"
 
-# YouTube occasionally serves a signed CDN URL for the chosen format that
-# 403s while the same format re-resolved moments later succeeds — an
-# intermittent per-request flake (see yt-dlp issue #17395), not a per-video
-# block. Bounded retry only for this exact signal; every other failure
-# (private, age-gated, removed, ...) still fails fast with no retry.
+# Two known intermittent, per-request YouTube extraction flakes that
+# self-heal on a re-request moments later — neither is a per-video block:
+#   * a signed CDN URL for the chosen format 403s (see yt-dlp issue #17395)
+#   * one of the several player clients yt-dlp queries times out, so the
+#     merged formats list comes back without format 18 and format
+#     selection fails with "Requested format is not available"
+# Bounded retry only for these exact signals; every other failure (private,
+# age-gated, removed, ...) still fails fast with no retry.
 SHORTS_CDN_403_SIGNAL = "unable to download video data: HTTP Error 403"
-SHORTS_CDN_403_RETRY_ATTEMPTS = 3
-SHORTS_CDN_403_RETRY_BACKOFF_SECONDS = 3
+SHORTS_FORMAT_UNAVAILABLE_SIGNAL = "Requested format is not available"
+SHORTS_TRANSIENT_RETRY_SIGNALS = (SHORTS_CDN_403_SIGNAL, SHORTS_FORMAT_UNAVAILABLE_SIGNAL)
+SHORTS_TRANSIENT_RETRY_ATTEMPTS = 3
+SHORTS_TRANSIENT_RETRY_BACKOFF_SECONDS = 3
 
 # Repost gate: (chat_id, video_id) recorded on first trigger, reposts within
 # the window fall through to the normal routing decision.
@@ -171,8 +176,8 @@ def build_ydl_opts(target_dir: str) -> dict:
     }
 
 
-def extract_info_retrying_cdn_403(ydl: yt_dlp.YoutubeDL, url: str) -> dict:
-    """Run ``extract_info``, retrying only YouTube's intermittent CDN 403.
+def extract_info_retrying_transient_errors(ydl: yt_dlp.YoutubeDL, url: str) -> dict:
+    """Run ``extract_info``, retrying only YouTube's known transient flakes.
 
     Args:
         ydl: Open ``YoutubeDL`` instance to extract with.
@@ -182,20 +187,20 @@ def extract_info_retrying_cdn_403(ydl: yt_dlp.YoutubeDL, url: str) -> dict:
         yt-dlp's info dict.
 
     Raises:
-        yt_dlp.utils.DownloadError: The CDN 403 persisted through all
+        yt_dlp.utils.DownloadError: A transient flake persisted through all
             retries, or the failure was some other error (private,
             age-gated, removed, ...) that is never retried.
     """
     last_error = None
-    for attempt in range(SHORTS_CDN_403_RETRY_ATTEMPTS):
+    for attempt in range(SHORTS_TRANSIENT_RETRY_ATTEMPTS):
         try:
             return ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as err:
-            if SHORTS_CDN_403_SIGNAL not in str(err):
+            if not any(signal in str(err) for signal in SHORTS_TRANSIENT_RETRY_SIGNALS):
                 raise
             last_error = err
-            if attempt < SHORTS_CDN_403_RETRY_ATTEMPTS - 1:
-                time.sleep(SHORTS_CDN_403_RETRY_BACKOFF_SECONDS)
+            if attempt < SHORTS_TRANSIENT_RETRY_ATTEMPTS - 1:
+                time.sleep(SHORTS_TRANSIENT_RETRY_BACKOFF_SECONDS)
     raise last_error
 
 
@@ -216,7 +221,7 @@ def download_short_sync(url: str, target_dir: str) -> tuple[bytes, dict]:
             video, so no file was produced.
     """
     with yt_dlp.YoutubeDL(build_ydl_opts(target_dir)) as ydl:
-        info = extract_info_retrying_cdn_403(ydl, url)
+        info = extract_info_retrying_transient_errors(ydl, url)
     requested = (info or {}).get("requested_downloads") or []
     filepath = requested[0].get("filepath") if requested else None
     if not filepath or not os.path.exists(filepath):
