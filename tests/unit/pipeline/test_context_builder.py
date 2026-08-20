@@ -27,6 +27,8 @@ STORE_FIND_RELEVANT_FACTS = (
     "src.pipeline.context_builder.user_memories.find_relevant_facts_for_users"
 )
 STORE_GET_TAG = "src.pipeline.context_builder.user_tags.get_tag"
+STORE_GET_TAGS_FOR_USERS = "src.pipeline.context_builder.user_tags.get_tags_for_users"
+ACHIEVEMENTS_GET_MEMBERS = "src.pipeline.context_builder.achievements.get_chat_members"
 DESCRIBE_PHOTO = "src.pipeline.ingester.describe_photo"
 
 
@@ -224,10 +226,11 @@ class TestPhotoEnrichmentInReplyChain:
 
 class TestAskingUserTag:
     """The sender's own weekly role + reason must be surfaced into the context so the
-    response LLM can explain "why do I have this role?" — only for the asker."""
+    response LLM can explain "why do I have this role?" — only for the asker, and
+    only when the message is about roles at all."""
 
     async def test_asking_user_tag_populated_when_present(self, context_builder):
-        incoming = make_incoming(user_id=42, username="alice")
+        incoming = make_incoming(user_id=42, username="alice", raw_text="а почему у меня такая роль?")
         state = make_state(incoming)
         tag_info = {"tag": "Ночной дозор", "reason": "пишет после полуночи"}
 
@@ -242,7 +245,7 @@ class TestAskingUserTag:
         assert result["context"]["asking_user_tag"] == tag_info
 
     async def test_asking_user_tag_none_when_absent(self, context_builder):
-        incoming = make_incoming(user_id=42, username="alice")
+        incoming = make_incoming(user_id=42, username="alice", raw_text="за что мне это?")
         state = make_state(incoming)
 
         with contextlib.ExitStack() as stack:
@@ -250,6 +253,102 @@ class TestAskingUserTag:
             result = await context_builder(state)
 
         assert result["context"]["asking_user_tag"] is None
+
+
+class TestRolesGate:
+    """Weekly roles must not enter the prompt unless the message is about them.
+
+    2026-08-20 incident: six of thirteen conversational replies raised weekly
+    roles unprompted — four of them consecutively, in a thread where nobody
+    had mentioned roles — until a member complained in the chat. The block
+    loaded whenever the asker merely *had* a role, and WEEKLY_ROLES_RULE's
+    «сам тему не поднимай» did not hold the model back.
+    """
+
+    ROLE = {"tag": "Чурка", "reason": "сам себя так назвал"}
+
+    async def test_unrelated_message_loads_no_role(self, context_builder):
+        incoming = make_incoming(user_id=42, username="alice", raw_text="Ты чет путаешь родной(с)")
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=self.ROLE)
+            result = await context_builder(state)
+
+        assert result["context"]["asking_user_tag"] is None
+        assert result["context"]["mentioned_tags"] == {}
+
+    async def test_role_named_without_the_word_still_counts(self, context_builder):
+        # «почему я чурка?» is the same question as «почему у меня такая роль?»
+        incoming = make_incoming(user_id=42, username="alice", raw_text="а почему я чурка?")
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=self.ROLE)
+            result = await context_builder(state)
+
+        assert result["context"]["asking_user_tag"] == self.ROLE
+
+    async def test_video_clip_word_does_not_trigger_the_block(self, context_builder):
+        # «ролик» shares a stem with «роль»; this chat talks about clips constantly.
+        incoming = make_incoming(
+            user_id=42, username="alice", raw_text="я по роликам с геймплеем сужу"
+        )
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=self.ROLE)
+            result = await context_builder(state)
+
+        assert result["context"]["asking_user_tag"] is None
+
+    async def test_plain_mention_does_not_load_that_members_role(self, context_builder):
+        incoming = make_incoming(
+            user_id=42, username="alice", raw_text="@tmaxims готов поиграть по сети?"
+        )
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=None)
+            mock_members = stack.enter_context(
+                patch(ACHIEVEMENTS_GET_MEMBERS, new_callable=AsyncMock)
+            )
+            result = await context_builder(state)
+
+        assert result["context"]["mentioned_tags"] == {}
+        mock_members.assert_not_called()
+
+    async def test_role_question_about_another_member_is_resolved(self, context_builder):
+        incoming = make_incoming(
+            user_id=42, username="alice", raw_text="@tmaxims почему у него такая роль?"
+        )
+        state = make_state(incoming)
+        other_role = {"tag": "Геймер", "reason": "тащит ноутбук и геймпад"}
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=None)
+            stack.enter_context(patch(
+                ACHIEVEMENTS_GET_MEMBERS, new_callable=AsyncMock, return_value=[(7, "tmaxims")],
+            ))
+            stack.enter_context(patch(
+                STORE_GET_TAGS_FOR_USERS, new_callable=AsyncMock, return_value={7: other_role},
+            ))
+            result = await context_builder(state)
+
+        assert result["context"]["mentioned_tags"] == {"tmaxims": other_role}
+
+    async def test_voice_transcript_can_trigger_the_block(self, context_builder):
+        incoming = make_incoming(
+            user_id=42, username="alice", media_type="voice",
+            raw_text=None, processed_text="слушай а за что мне такое",
+        )
+        state = make_state(incoming)
+
+        with contextlib.ExitStack() as stack:
+            patch_store(stack, tag=self.ROLE)
+            result = await context_builder(state)
+
+        assert result["context"]["asking_user_tag"] == self.ROLE
 
 
 class TestChainTruncation:

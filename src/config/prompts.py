@@ -464,10 +464,14 @@ USER_FACTS_HEADER = (
     "Что ты знаешь об участниках (фон, не тема: вспоминай факт только если "
     "сообщение прямо его касается, не повторяйся, списком не зачитывай):"
 )
+# Shown only when the message is actually about roles (the gate is
+# context_builder.is_about_roles, not this text) — so the old «сам тему не
+# поднимай» clause is gone: it asked the model to enforce a filter that is now
+# structural, and asking for filtering the prompt cannot enforce is exactly
+# what let roles leak into unrelated replies in the first place.
 WEEKLY_ROLES_RULE = (
-    "[Роли недели — фоновый контекст, сам тему не поднимай. Спрашивают, почему "
-    "такая роль — объясни своими словами из переданной причины; причины нет — "
-    "не выдумывай.]"
+    "[Роли недели. Объясняй роль своими словами из переданной причины; причины "
+    "нет — не выдумывай. Про чужие роли говори только если о них спросили.]"
 )
 
 # Framing for a YouTube Shorts trigger. The reply is posted as the caption on

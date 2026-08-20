@@ -35,7 +35,7 @@ class AssembledContext(TypedDict):
     recent_history: list[dict]         # flat recent messages used to fill the context window
     replied_to: dict | None            # the specific message being replied to, for annotation; may carry link_material (see src.pipeline.router's addressing gate)
     reply_chain: list[dict]            # full reply chain from root to replied-to message, oldest-first
-    asking_user_tag: dict | None       # {"tag", "reason"} weekly role of the message sender, if any
+    asking_user_tag: dict | None       # {"tag", "reason"} weekly role of the message sender; None unless the message is about roles
     mentioned_tags: dict[str, dict]    # username → {"tag", "reason"} for members @mentioned in the question
 
 

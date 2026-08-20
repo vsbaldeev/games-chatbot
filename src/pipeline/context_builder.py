@@ -32,6 +32,15 @@ RECENT_HISTORY_LIMIT = 20
 CHAIN_MSG_CHAR_LIMIT = 400
 MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 
+# Weekly-role topic markers. Endings are enumerated rather than matched with a
+# suffix wildcard on purpose: «ролик»/«ролике»/«роликам» are everyday words in
+# this chat (every posted clip is one), and a wildcard would load the roles
+# block on half the conversation.
+ROLE_QUESTION_RE = re.compile(
+    r"\b(?:роль|роли|ролью|ролей|ролям|ролями|ролях|титул\w*|за\s+что)\b",
+    re.IGNORECASE,
+)
+
 # User-fact retrieval: these gate what the bot recalls about *other people*,
 # where a mis-recall reads as the bot being absurd rather than merely
 # off-topic.
@@ -46,7 +55,8 @@ MENTION_RE = re.compile(r"@(\w+)", re.UNICODE)
 #
 # The same rule now applies to weekly-role lookups: only usernames the asker
 # typed themselves are resolved, never those merely present in the message
-# being replied to.
+# being replied to — and, since 2026-08-20, only when the message is about
+# roles at all (see :func:`is_about_roles`).
 USER_FACTS_SIMILAR_LIMIT = 5
 USER_FACTS_SIMILARITY_THRESHOLD = 0.85
 
@@ -64,6 +74,41 @@ def keep_conversational_facts(facts: list[str]) -> list[str]:
         The facts safe to show to the response model; may be empty.
     """
     return [fact for fact in facts if not user_memories.is_counter_fact(fact)]
+
+
+def message_text(msg: dict) -> str:
+    """Return the sender's own words for topic matching.
+
+    Both the processed and raw text are joined: a voice note carries its
+    transcript in ``processed_text`` while a typed caption stays in
+    ``raw_text``, and either may be the one that names the topic.
+
+    Args:
+        msg: IncomingMessage dict of the message being processed.
+
+    Returns:
+        The message's text, possibly empty.
+    """
+    return " ".join(filter(None, [msg.get("processed_text"), msg.get("raw_text")]))
+
+
+def is_about_roles(text: str, own_tag: str | None) -> bool:
+    """Decide whether a message is actually about weekly roles.
+
+    Matches an explicit role word (:data:`ROLE_QUESTION_RE`) or the asker's
+    own role name — «почему я чурка?» names the role without using the word,
+    and reads to the model as exactly the same question.
+
+    Args:
+        text: The sender's own words.
+        own_tag: The asker's weekly role name, or None when they have none.
+
+    Returns:
+        True when the roles block is relevant to this message.
+    """
+    if ROLE_QUESTION_RE.search(text):
+        return True
+    return bool(own_tag) and own_tag.lower() in text.lower()
 
 
 def key_facts_by_username(
@@ -107,10 +152,7 @@ class ContextBuilder:
         user_facts = await self.__collect_user_facts(
             chat_id, msg["user_id"], msg["username"], recent, query_embedding
         )
-        asking_user_tag = await user_tags.get_tag(chat_id=chat_id, user_id=msg["user_id"])
-        mentioned_tags = await self.__collect_mentioned_tags(
-            chat_id, msg, asker_username=msg["username"]
-        )
+        asking_user_tag, mentioned_tags = await self.__collect_role_context(chat_id, msg)
 
         assembled: AssembledContext = {
             "user_facts": user_facts,
@@ -146,6 +188,47 @@ class ContextBuilder:
             logger.warning("Failed to embed incoming message: %s", err)
             return None
 
+    async def __collect_role_context(
+        self, chat_id: int, msg: dict
+    ) -> tuple[dict | None, dict[str, dict]]:
+        """Load the weekly-role blocks only when the message is about roles.
+
+        Both blocks used to load on a condition unrelated to the question:
+        the asker's own role whenever they had one at all, and every
+        @mentioned member's role on any mention, including «@x пойдёшь
+        играть?». On 2026-08-20 six of thirteen conversational replies raised
+        roles unprompted — four of them consecutively, in a thread where
+        nobody had mentioned roles — until a member said so in the chat. The
+        block carried ``WEEKLY_ROLES_RULE``, which told the model «сам тему
+        не поднимай», and the model raised it anyway.
+
+        That is the user-facts failure repeating in a block that never got
+        the same treatment, and it is fixed the same way: relevance is
+        decided here, before the prompt exists, rather than by a rule the
+        model is free to ignore. Thread history made it self-sustaining —
+        once roles leaked into one reply, the next turn saw the bot itself
+        discussing them and carried on.
+
+        The asker's own tag is fetched before the gate is evaluated: it is
+        one indexed lookup, and its name is part of what decides relevance
+        (see :func:`is_about_roles`).
+
+        Args:
+            chat_id: Group chat the message belongs to.
+            msg: The incoming message dict.
+
+        Returns:
+            Tuple of ``(asker's role or None, mentioned members' roles)``;
+            ``(None, {})`` when the message is not about roles.
+        """
+        own_tag = await user_tags.get_tag(chat_id=chat_id, user_id=msg["user_id"])
+        if not is_about_roles(message_text(msg), own_tag["tag"] if own_tag else None):
+            return None, {}
+        mentioned_tags = await self.__collect_mentioned_tags(
+            chat_id, msg, asker_username=msg["username"]
+        )
+        return own_tag, mentioned_tags
+
     async def __collect_mentioned_tags(
         self, chat_id: int, msg: dict, asker_username: str
     ) -> dict[str, dict]:
@@ -173,10 +256,7 @@ class ContextBuilder:
         Returns:
             Mapping of username to ``{"tag", "reason"}`` for resolvable members.
         """
-        text = " ".join(filter(None, [
-            msg.get("processed_text"), msg.get("raw_text"),
-        ]))
-        mentioned = {mention.lower() for mention in MENTION_RE.findall(text)}
+        mentioned = {mention.lower() for mention in MENTION_RE.findall(message_text(msg))}
         mentioned.discard(asker_username.lower())
         if not mentioned:
             return {}

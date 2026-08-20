@@ -449,9 +449,24 @@ context_builder
     │    exists. Pure similarity by design: a fact learned minutes ago is not
     │    recalled unless the current message is actually about it.
     │    Counter tallies have NULL embeddings and can never match
-    ├─ load initiating user's weekly role + reason from user_tags → asking_user_tag
-    ├─ resolve @mentions (in the question + replied_to) to members and load their
-    │    weekly role + reason from user_tags → mentioned_tags
+    ├─ weekly roles (collect_role_context): BOTH role blocks are gated on the
+    │    message actually being about roles — ROLE_QUESTION_RE (роль/титул/«за
+    │    что», endings enumerated so «ролик» never matches) or the asker's own
+    │    role name appearing in the text («почему я чурка?»). Not a role
+    │    question → asking_user_tag=None, mentioned_tags={}, and no member
+    │    lookup runs at all.
+    │    Before 2026-08-20 the asker's role loaded whenever they merely *had*
+    │    one and every @mention loaded that member's role («@x пойдёшь
+    │    играть?»), with WEEKLY_ROLES_RULE telling the model «сам тему не
+    │    поднимай». It raised roles anyway: six of thirteen conversational
+    │    replies in one snapshot, four of them consecutively, until a member
+    │    complained in the chat. Thread history made it self-sustaining — once
+    │    roles leaked into a reply, the next turn saw the bot discussing them
+    │    and continued. Same failure as user facts above, fixed the same way:
+    │    decided by retrieval, before the prompt exists
+    ├─ when it IS a role question: initiating user's weekly role + reason from
+    │    user_tags → asking_user_tag; @mentions the asker typed themselves
+    │    resolved to members and their role + reason loaded → mentioned_tags
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
@@ -485,8 +500,9 @@ response   personality LLM (ReAct executor, no tools)
     │    chain root {chat_id}_{trigger_message_id} so a follow-up reply chain
     │    starts pre-seeded
     ├─ prompt: thread_history (last 10 turns, thread-scoped, reply chains only)
-    │            + user facts + asker's weekly role & reason (asking_user_tag, if any)
-    │            + @mentioned members' weekly roles & reasons (mentioned_tags, if any)
+    │            + user facts + asker's weekly role & reason (asking_user_tag, only on
+    │              role questions — see the context_builder gate above)
+    │            + @mentioned members' weekly roles & reasons (mentioned_tags, same gate)
     │            + recent history (last 10; random triggers get only the newest 3,
     │              RANDOM_TRIGGER_CONTEXT_LIMIT) +
     │              replied_to + worker findings + current message
@@ -655,8 +671,8 @@ AssembledContext:
                                           # it into the prompt (response_node.py); the same column also
                                           # marks the row for MessageRouter's addressing gate
     reply_chain: list[dict]              # full reply chain from root to replied-to, oldest-first
-    asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender, if any
-    mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question
+    asking_user_tag: dict | None         # {"tag", "reason"} weekly role of the message sender; None unless the message is about roles (ROLE_QUESTION_RE or the role's own name)
+    mentioned_tags: dict[str, dict]      # username → {"tag", "reason"} for members @mentioned in the question; empty under the same gate — a bare @mention no longer loads roles
 
 BotState:
     incoming: IncomingMessage
