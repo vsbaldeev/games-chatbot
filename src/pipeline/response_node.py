@@ -25,6 +25,13 @@ logger = log.get_logger(__name__)
 
 RECENT_FILL_LIMIT = 10
 
+# Per-row content budget for rendered history, matching context_builder's
+# CHAIN_MSG_CHAR_LIMIT for reply-chain rows. Recent history and the replied-to
+# block used to render whole: ten forwarded walls of text went into the prompt
+# unabridged, and the only thing standing between that and a blown context
+# window was GroqContextGuard catching the failure after the call.
+ROW_CHAR_LIMIT = 400
+
 # Random (unprompted) triggers get a thin recent-history slice: enough to
 # catch an obvious topic mismatch, not enough to drown a spontaneous
 # reaction in chat noise.
@@ -177,6 +184,20 @@ def neutralize_speaker_lines(content: str) -> str:
     return SPEAKER_LINE_RE.sub(r"\1", content)
 
 
+def truncate_row_content(content: str) -> str:
+    """Cap one rendered history row at :data:`ROW_CHAR_LIMIT` characters.
+
+    Args:
+        content: Stored message content.
+
+    Returns:
+        The content unchanged, or truncated with a trailing ellipsis.
+    """
+    if len(content) <= ROW_CHAR_LIMIT:
+        return content
+    return content[:ROW_CHAR_LIMIT] + "…"
+
+
 def render_row(row: dict) -> str:
     """Format a message row as ``speaker [переслал] [media_type]: content``.
 
@@ -184,7 +205,8 @@ def render_row(row: dict) -> str:
     bot's own past messages (see :func:`row_speaker`). Forwarded rows carry a
     ``[переслал]`` marker so LLM prompts can tell shared channel content from
     the participant's own words. Content is neutralized against forged
-    speaker lines (:func:`neutralize_speaker_lines`).
+    speaker lines (:func:`neutralize_speaker_lines`) and capped at
+    :data:`ROW_CHAR_LIMIT`.
 
     Args:
         row: Message dict with ``user_id``, ``username``, ``media_type``, and
@@ -195,7 +217,7 @@ def render_row(row: dict) -> str:
     """
     media_type = row["media_type"]
     content = unified_messages.display_media_content(media_type, row["content"])
-    content = neutralize_speaker_lines(content)
+    content = truncate_row_content(neutralize_speaker_lines(content))
     forwarded_label = " [переслал]" if row.get("is_forwarded") else ""
     media_label = f" [{media_type}]" if media_type != "text" else ""
     return f"{row_speaker(row)}{forwarded_label}{media_label}: {content}"

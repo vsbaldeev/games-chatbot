@@ -8,7 +8,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 
 from src import log
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
-from src.pipeline.response_node import neutralize_speaker_lines, row_speaker
+from src.pipeline.response_node import neutralize_speaker_lines, row_speaker, truncate_row_content
 from src.pipeline.state import BotState
 from src.store import unified_messages
 
@@ -193,8 +193,8 @@ class WorkerNode:
 
         The bot's own past messages are labelled ``Ты (бот)`` rather than
         ``@username`` so the worker never treats them as another participant.
-        Content is neutralized against forged speaker lines, the same as
-        the response prompt's rows — this prompt is flattened the same
+        Content is neutralized against forged speaker lines and capped, the
+        same as the response prompt's rows — this prompt is flattened the same
         way and carries the same risk (see
         :func:`src.pipeline.response_node.neutralize_speaker_lines`).
 
@@ -206,5 +206,5 @@ class WorkerNode:
             Formatted string representation of the message.
         """
         content = unified_messages.display_media_content(row["media_type"], row["content"])
-        content = neutralize_speaker_lines(content)
+        content = truncate_row_content(neutralize_speaker_lines(content))
         return f"{row_speaker(row)}: {content}"
