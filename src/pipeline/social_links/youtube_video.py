@@ -84,9 +84,11 @@ class YoutubeVideoHandler:
         """
         info = await self.__extract_info(url)
         if info is None:
+            logger.warning("YouTube metadata extraction returned nothing for %s", url)
             return None
         content_block = self.__compose(info)
         if not content_block:
+            logger.warning("YouTube metadata had no usable title/description for %s", url)
             return None
         return {"content_block": content_block, "video_bytes": None}
 

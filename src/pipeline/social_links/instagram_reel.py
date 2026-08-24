@@ -96,10 +96,12 @@ class InstagramReelHandler:
         """
         downloaded = await self.__download(url)
         if downloaded is None:
+            logger.warning("Instagram Reel download returned nothing for %s", url)
             return None
         video_bytes, info = downloaded
         content_block = self.__compose(info or {})
         if not content_block:
+            logger.warning("Instagram Reel had no usable caption/comments for %s", url)
             return None
         return {"content_block": content_block, "video_bytes": video_bytes}
 
