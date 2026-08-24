@@ -62,10 +62,17 @@ class TestFetch:
         assert result["video_bytes"] == b"video bytes"
         assert "Топ-комментарии" not in result["content_block"]
 
-    async def test_no_caption_returns_none_even_on_successful_download(self, handler):
+    async def test_no_caption_no_comments_returns_none(self, handler):
         with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", {}))):
             result = await handler.fetch("https://www.instagram.com/reel/Cx7AbCdEfG/")
         assert result is None
+
+    async def test_no_caption_falls_back_to_comments_only(self, handler):
+        info = {"comments": [{"text": "дизлайк, техника безопасности", "like_count": 12}]}
+        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))):
+            result = await handler.fetch("https://www.instagram.com/reel/Cx7AbCdEfG/")
+        assert result is not None
+        assert "(12 лайков)" in result["content_block"]
 
     async def test_download_failure_returns_none(self, handler):
         with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=None)):

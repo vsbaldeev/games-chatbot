@@ -208,16 +208,18 @@ class InstagramReelHandler:
             info: yt-dlp info dict of the downloaded Reel.
 
         Returns:
-            Labelled block (header + caption + comments), or "" when there
-            is no caption to react to.
+            Labelled block (header + caption and/or comments), or "" when
+            there is neither a caption nor comments to react to.
         """
         caption = (info.get("description") or "").strip()
-        if not caption:
-            return ""
-        parts = ["[Instagram Reel]", caption]
         comments_block = render_comment_lines(
             info.get("comments") or [], SOCIAL_LINK_MAX_COMMENTS, SOCIAL_LINK_COMMENT_CHAR_LIMIT
         )
+        if not caption and not comments_block:
+            return ""
+        parts = ["[Instagram Reel]"]
+        if caption:
+            parts.append(caption)
         if comments_block:
             parts.append(comments_block)
         return "\n".join(parts)
