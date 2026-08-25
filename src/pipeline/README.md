@@ -115,7 +115,13 @@ ingester (current message, should_respond=True only)
     │     message together with the summary caption (see src/events/README.md)
     │     — same as Instagram's social_link_video
     │     PO tokens for YouTube bot-detection come automatically from the
-    │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin
+    │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin;
+    │     yt-dlp's own quiet/no_warnings options would otherwise silently
+    │     discard PO-token/player-client failures (the actual reason a
+    │     format goes missing), so YoutubeDL is given a logger
+    │     (shorts.YtdlpLogger) — YoutubeDL checks for one before quiet/
+    │     no_warnings, so it bypasses that suppression and routes yt-dlp's
+    │     internal warnings through this module's own logger instead
     │     trigger="social_link": summarize_social_link dispatches to the
     │     matched handler (src.pipeline.social_links — instagram_reel or
     │     youtube_video) for a metadata-only fetch: no transcript, no

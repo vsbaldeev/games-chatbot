@@ -138,6 +138,30 @@ def under_daily_cap(chat_id: int) -> bool:
     return True
 
 
+class YtdlpLogger:
+    """Routes yt-dlp's internal diagnostics through this module's logger.
+
+    Passing an object here (``ydl_opts["logger"]``) makes yt-dlp deliver
+    every warning/error to it instead of stdout/stderr — and, critically,
+    ``YoutubeDL.report_warning``/``to_stderr`` check for a logger *before*
+    checking ``quiet``/``no_warnings``, so this bypasses that suppression
+    entirely. Without it, a PO-token failure or a player-client error (the
+    actual reason format 18 goes missing from the merged list) is silently
+    discarded, leaving only the final, contextless "Requested format is not
+    available" — quiet/no_warnings are still set for stdout hygiene, but
+    diagnosis needs what they were swallowing.
+    """
+
+    def debug(self, message: str) -> None:
+        logger.debug("yt-dlp: %s", message)
+
+    def warning(self, message: str) -> None:
+        logger.warning("yt-dlp: %s", message)
+
+    def error(self, message: str) -> None:
+        logger.error("yt-dlp: %s", message)
+
+
 def build_ydl_opts(target_dir: str) -> dict:
     """Assemble yt-dlp options for downloading one Short into a directory.
 
@@ -146,12 +170,15 @@ def build_ydl_opts(target_dir: str) -> dict:
 
     Returns:
         Options dict for ``yt_dlp.YoutubeDL``: muxed-only format, duration
-        and filesize guards, top-comments fetching and the PO-token provider
-        address for the bgutil plugin.
+        and filesize guards, top-comments fetching, the PO-token provider
+        address for the bgutil plugin, and a logger that surfaces internal
+        yt-dlp warnings (PO-token/player-client failures) instead of
+        silently dropping them.
     """
     return {
         "format": SHORT_FORMAT,
         "outtmpl": os.path.join(target_dir, "short.%(ext)s"),
+        "logger": YtdlpLogger(),
         "quiet": True,
         "noprogress": True,
         "no_warnings": True,
