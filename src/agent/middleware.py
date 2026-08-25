@@ -4,13 +4,17 @@ import asyncio
 import random
 import re
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import groq
 import openai
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
+from src import log
 from src.agent.exceptions import ContextLengthError, DailyLimitError, RateLimitError
+
+logger = log.get_logger(__name__)
 
 CONTEXT_LENGTH_PHRASES = (
     "context_length_exceeded",
@@ -227,6 +231,84 @@ class ThinkingStripper(AgentMiddleware):
         if stripped == last.content:
             return None
         return {"messages": messages[:-1] + [last.model_copy(update={"content": stripped})]}
+
+
+def _model_name(request) -> str:
+    """Best-effort model identifier for logging, e.g. ``google/gemma-4-31b-it:free``.
+
+    Args:
+        request: The ``ModelRequest`` whose resolved model to name.
+
+    Returns:
+        The model's ``model_name`` attribute (present on both ``ChatGroq`` and
+        ``ChatOpenAI``), or its ``repr`` if that attribute is somehow absent.
+    """
+    return getattr(request.model, "model_name", None) or repr(request.model)
+
+
+def _provider_name(request) -> str:
+    """Best-effort provider host for logging, e.g. ``groq.com`` or ``openrouter.ai``.
+
+    Distinguishes a Groq call from an OpenRouter one — both can carry a
+    ``ChatOpenAI``-shaped model_name at a glance, so the model name alone
+    does not say which provider (and which rate-limit pool) actually served
+    or rejected the call.
+
+    Args:
+        request: The ``ModelRequest`` whose resolved model to identify.
+
+    Returns:
+        The hostname from the model's configured API base URL when one is
+        set (true for every ``ChatOpenAI`` instance in this codebase, since
+        they are always built with OPENROUTER_BASE_URL), ``"groq.com"`` for
+        a ``ChatGroq`` on its default endpoint, or the model class name as a
+        last resort.
+    """
+    model = request.model
+    base_url = getattr(model, "openai_api_base", None) or getattr(model, "groq_api_base", None)
+    if base_url:
+        host = urlparse(base_url).hostname
+        if host:
+            return host
+    return "groq.com" if type(model).__name__ == "ChatGroq" else type(model).__name__
+
+
+class ModelAttemptLogger(AgentMiddleware):
+    """Log which provider and model actually served (or failed) each call in a fallback chain.
+
+    Neither ``ModelFallbackMiddleware`` nor ``ModelRetryMiddleware`` log
+    anything, so without this there is no way to tell from the logs which
+    model in the chain — or even which provider — a given request hit; only
+    that some call to groq.com or openrouter.ai returned a 429. Placed
+    inside ``ModelFallbackMiddleware``/``ModelRetryMiddleware`` (so it sees
+    every retry and every fallover) and outside ``GroqContextGuard`` (so it
+    logs the raw provider exception, before that guard reclassifies it).
+    """
+
+    async def awrap_model_call(self, request, handler: Callable) -> Any:
+        """Log the resolved provider/model, then the call's outcome.
+
+        Args:
+            request: Model request forwarded to the handler unchanged.
+            handler: Async callable that executes the underlying model.
+
+        Returns:
+            Model response on success.
+
+        Raises:
+            Exception: Whatever the handler raised, unchanged, after logging it.
+        """
+        provider = _provider_name(request)
+        model_name = _model_name(request)
+        try:
+            result = await handler(request)
+        except Exception as err:
+            logger.warning(
+                "Model call failed: %s/%s (%s: %s)", provider, model_name, type(err).__name__, err
+            )
+            raise
+        logger.debug("Model call served by: %s/%s", provider, model_name)
+        return result
 
 
 class GroqContextGuard(AgentMiddleware):

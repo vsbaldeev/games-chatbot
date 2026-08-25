@@ -9,6 +9,7 @@ from src import config, log
 from src.agent.exceptions import ContextLengthError, DailyLimitError, RateLimitError
 from src.agent.middleware import (
     GroqContextGuard,
+    ModelAttemptLogger,
     ThinkingStripper,
     ToolMessageSanitizer,
     guarded_ainvoke,
@@ -108,6 +109,7 @@ class WorkerAgent:
             middleware=[
                 ModelFallbackMiddleware(*fallback_llms),
                 ModelRetryMiddleware(retry_on=should_retry, on_failure="error", max_retries=3),
+                ModelAttemptLogger(),
                 GroqContextGuard(),
                 ToolMessageSanitizer(),
                 ThinkingStripper(),

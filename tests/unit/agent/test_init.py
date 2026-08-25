@@ -10,6 +10,8 @@ Fix: strip_thinking() removes thinking blocks at every consumption point.
      so thinking-internal foreign text doesn't trigger a spurious Russian retry.
 """
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import groq
@@ -17,11 +19,14 @@ import pytest
 
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import AIMessage as LCAIMessage
+from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from src.agent import (
     ContextLengthError,
     DailyLimitError,
     GroqContextGuard,
+    ModelAttemptLogger,
     RateLimitError,
     ResponseAgent,
     ThinkingStripper,
@@ -196,6 +201,41 @@ class TestGroqContextGuard:
         handler = AsyncMock(side_effect=ValueError("unrelated"))
         with pytest.raises(ValueError):
             await guard.awrap_model_call(None, handler)
+
+
+class TestModelAttemptLogger:
+    """Neither ModelFallbackMiddleware nor ModelRetryMiddleware log which
+    provider/model a call actually hit — this middleware fills that gap so
+    a fallover between Groq and OpenRouter (or between OpenRouter models) is
+    visible in the logs instead of just a stream of unattributed 429s."""
+
+    async def test_successful_openrouter_call_logs_provider_and_model_at_debug(self, caplog):
+        request = SimpleNamespace(
+            model=ChatOpenAI(model="z-ai/glm-5.2:free", api_key="x", base_url="https://openrouter.ai/api/v1")
+        )
+        handler = AsyncMock(return_value="response")
+        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+            result = await ModelAttemptLogger().awrap_model_call(request, handler)
+        assert result == "response"
+        assert "openrouter.ai/z-ai/glm-5.2:free" in caplog.text
+
+    async def test_failed_groq_call_logs_provider_and_model_at_warning_then_reraises(self, caplog):
+        request = SimpleNamespace(model=ChatGroq(model="openai/gpt-oss-120b", api_key="x"))
+        handler = AsyncMock(side_effect=ValueError("boom"))
+        with caplog.at_level(logging.WARNING, logger="src.agent.middleware"), pytest.raises(ValueError):
+            await ModelAttemptLogger().awrap_model_call(request, handler)
+        assert "groq.com/openai/gpt-oss-120b" in caplog.text
+
+    async def test_distinguishes_openrouter_models_sharing_the_chatopenai_class(self, caplog):
+        """Two OpenRouter fallback legs (Gemma, GLM) are both ChatOpenAI instances —
+        the log must still show which specific model was hit, not just the class."""
+        gemma_request = SimpleNamespace(
+            model=ChatOpenAI(model="google/gemma-4-31b-it:free", api_key="x", base_url="https://openrouter.ai/api/v1")
+        )
+        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+            await ModelAttemptLogger().awrap_model_call(gemma_request, AsyncMock(return_value="ok"))
+        assert "google/gemma-4-31b-it:free" in caplog.text
+        assert "z-ai/glm-5.2:free" not in caplog.text
 
 
 class TestWorkerAgent:

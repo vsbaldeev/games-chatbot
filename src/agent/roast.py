@@ -16,6 +16,7 @@ from src.agent.language import (
 )
 from src.agent.middleware import (
     GroqContextGuard,
+    ModelAttemptLogger,
     ThinkingStripper,
     guarded_ainvoke,
     should_retry,
@@ -185,6 +186,7 @@ class RoastAgent:
         )
         middleware = [
             ModelRetryMiddleware(retry_on=should_retry, on_failure="error", max_retries=3),
+            ModelAttemptLogger(),
             GroqContextGuard(),
             ThinkingStripper(),
         ]
