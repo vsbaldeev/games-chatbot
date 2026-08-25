@@ -143,7 +143,13 @@ class WorkerNode:
         except ContextLengthError as err:
             logger.warning("Worker context too long: %s", err)
             return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
-        except (DailyLimitError, RateLimitError):
+        except (DailyLimitError, RateLimitError) as err:
+            # Raising here skips this node's state patch entirely, so a
+            # search notification already sent by the callback above would
+            # otherwise be un-locatable by the top-level handler. Stash it on
+            # the exception itself as a fallback route to the same message.
+            if callback is not None and callback.sent_message is not None:
+                err.search_notification_msg = callback.sent_message
             raise
         except Exception as err:
             logger.error("Worker failed: %s", err, exc_info=True)

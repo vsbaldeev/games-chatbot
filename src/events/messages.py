@@ -28,7 +28,7 @@ from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES
-from src.events.sending import send_and_store
+from src.events.sending import edit_and_store, send_and_store
 from src.events.voice_reply import try_send_voice_reply
 from src.group_profile.profile import run_group_profile
 from src.life import selfie
@@ -52,8 +52,11 @@ RATE_LIMIT_NOTICE = (
     "⏳ Groq не завезли лимитов. Бот временно на перекуре — слишком много запросов. "
     "Попробуйте через минуту, анончики."
 )
+# Provider-agnostic: DailyLimitError/RateLimitError already have their own
+# specific notices above, so whatever reaches this one isn't a known Groq/
+# OpenRouter quota issue — blaming Groq by name here would misdiagnose it.
 GENERIC_FAILURE_NOTICE = (
-    "Что-то сломалось. Скорее всего, Groq опять тупит. Попробуй позже."
+    "Что-то сломалось внутри бота. Попробуй позже."
 )
 
 # Incoming media types answered in kind with a voice note.
@@ -257,7 +260,9 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
     return sent.message_id, msg.message_id, "text"
 
 
-async def send_limit_notice(msg, chat_id: int, notice_text: str) -> None:
+async def send_limit_notice(
+    msg, chat_id: int, notice_text: str, *, notification_msg=None
+) -> None:
     """Send a quota/rate-limit notice, throttled to one per chat per cooldown.
 
     The first notice within ``LIMIT_NOTICE_COOLDOWN_SECONDS`` goes out as a
@@ -269,7 +274,18 @@ async def send_limit_notice(msg, chat_id: int, notice_text: str) -> None:
         msg: The triggering ``telegram.Message`` to reply or react to.
         chat_id: Chat the notice belongs to (cooldown is per chat).
         notice_text: The full notice to send when outside the cooldown.
+        notification_msg: A search-notification message («🔍 Ищу…») already
+            sent earlier this turn, if any. When given, it is always edited
+            to the full notice text — bypassing the cooldown's reaction
+            fallback — because that message must be resolved to something
+            meaningful rather than left hanging. The cooldown window is
+            still recorded, so a later non-notification hit within it still
+            degrades to the reaction.
     """
+    if notification_msg is not None:
+        quota_notice_gate.seen(chat_id)
+        await edit_and_store(notification_msg, chat_id, notice_text, reply_to=msg.message_id)
+        return
     if not quota_notice_gate.seen(chat_id):
         await send_and_store(msg.get_bot(), chat_id, notice_text, reply_to=msg.message_id)
         return
@@ -439,7 +455,9 @@ def launch_group_profile_task(bot, chat_id: int, reply_to_msg_id: int, rubric: s
     asyncio.create_task(deliver_group_profile(bot, chat_id, reply_to_msg_id, rubric))
 
 
-async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed: bool) -> str:
+async def notify_pipeline_failure(
+    error: Exception, msg, chat_id: int, addressed: bool, notification_msg=None
+) -> str:
     """Log a pipeline failure, notify the chat when addressed, name the kind.
 
     Args:
@@ -448,6 +466,12 @@ async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed
         chat_id: Chat the failure happened in.
         addressed: True when the user explicitly addressed the bot; only then
             is a notice posted to the chat.
+        notification_msg: A search-notification message («🔍 Ищу…») the
+            worker node sent earlier this same turn, if the pipeline got
+            that far before failing. When given, the failure notice edits
+            it in place instead of sending a second message, so the user
+            never sees the search indicator hang unresolved alongside an
+            unrelated failure reply.
 
     Returns:
         Short error kind for the canonical log line, e.g. ``"DailyLimit"``.
@@ -455,28 +479,30 @@ async def notify_pipeline_failure(error: Exception, msg, chat_id: int, addressed
     if isinstance(error, DailyLimitError):
         logger.warning("Daily token quota exhausted for chat %s", chat_id)
         if addressed:
-            await send_limit_notice(msg, chat_id, DAILY_LIMIT_NOTICE)
+            await send_limit_notice(msg, chat_id, DAILY_LIMIT_NOTICE, notification_msg=notification_msg)
         return "DailyLimit"
     if isinstance(error, ContextLengthError):
         logger.warning("Context length exceeded for chat %s", chat_id)
         if addressed:
-            await send_and_store(
-                msg.get_bot(), chat_id, build_context_length_notice(msg),
-                reply_to=msg.message_id,
-            )
+            await _send_or_edit_notice(msg, chat_id, build_context_length_notice(msg), notification_msg)
         return "ContextLength"
     if isinstance(error, RateLimitError):
         logger.warning("Rate limit reached for chat %s", chat_id)
         if addressed:
-            await send_limit_notice(msg, chat_id, RATE_LIMIT_NOTICE)
+            await send_limit_notice(msg, chat_id, RATE_LIMIT_NOTICE, notification_msg=notification_msg)
         return "RateLimit"
     logger.error("Pipeline error for chat %s: %s", chat_id, error, exc_info=True)
     if addressed:
-        await send_and_store(
-            msg.get_bot(), chat_id, GENERIC_FAILURE_NOTICE,
-            reply_to=msg.message_id,
-        )
+        await _send_or_edit_notice(msg, chat_id, GENERIC_FAILURE_NOTICE, notification_msg)
     return "Exception"
+
+
+async def _send_or_edit_notice(msg, chat_id: int, text: str, notification_msg) -> None:
+    """Deliver a failure notice, editing ``notification_msg`` if given instead of sending anew."""
+    if notification_msg is not None:
+        await edit_and_store(notification_msg, chat_id, text, reply_to=msg.message_id)
+        return
+    await send_and_store(msg.get_bot(), chat_id, text, reply_to=msg.message_id)
 
 
 async def run_pipeline(
@@ -506,7 +532,14 @@ async def run_pipeline(
     final_state = initial_state
 
     try:
-        final_state = await PIPELINE.ainvoke(initial_state)
+        # Streamed instead of a plain .ainvoke() so a node failure after the
+        # worker step (e.g. the response LLM call) still leaves final_state
+        # holding whatever the worker completed — notably
+        # search_notification_msg — for the except block below. A plain
+        # ainvoke() raising mid-graph returns nothing at all, stranding the
+        # 🔍 Ищу… message with no way to resolve it.
+        async for state_update in PIPELINE.astream(initial_state, stream_mode="values"):
+            final_state = state_update
         response = final_state.get("response") or ""
         if response.strip():
             await deliver_and_record(final_state, msg, context.bot.id, response)
@@ -529,7 +562,10 @@ async def run_pipeline(
             canonical.emit(final_state, "profile", time.monotonic() - started_at)
             return True
     except Exception as error:
-        error_kind = await notify_pipeline_failure(error, msg, chat.id, addressed)
+        notification_msg = final_state.get("search_notification_msg") or getattr(
+            error, "search_notification_msg", None
+        )
+        error_kind = await notify_pipeline_failure(error, msg, chat.id, addressed, notification_msg)
         canonical.emit(final_state, f"error:{error_kind}", time.monotonic() - started_at)
         return False
     canonical.emit(final_state, "ignored", time.monotonic() - started_at)

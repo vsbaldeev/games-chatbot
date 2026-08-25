@@ -8,8 +8,17 @@ re-tested here.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.events.messages import deliver_and_record, deliver_response, passive_voice_extract
-from src.events.sending import send_and_store
+from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.events.messages import (
+    GENERIC_FAILURE_NOTICE,
+    RATE_LIMIT_NOTICE,
+    deliver_and_record,
+    deliver_response,
+    notify_pipeline_failure,
+    passive_voice_extract,
+    send_limit_notice,
+)
+from src.events.sending import edit_and_store, send_and_store
 from tests.builders import make_incoming, make_state
 
 REPLY_VOICE_PATCH_TARGET = "src.events.messages.try_send_voice_reply"
@@ -18,6 +27,7 @@ UPDATE_CONTENT_PATCH_TARGET = "src.events.messages.unified_messages.update_conte
 EXTRACT_AND_SAVE_PATCH_TARGET = "src.events.messages.extract_and_save"
 LINK_DELIVER_PATCH_TARGET = "src.events.messages.deliver_link_message"
 INSERT_PATCH_TARGET = "src.events.messages.unified_messages.insert"
+MESSAGES_INSERT_PATCH_TARGET = "src.events.sending.unified_messages.insert"
 
 
 def make_msg() -> MagicMock:
@@ -192,3 +202,102 @@ class TestSendAndStoreBroadcastFlag:
         ) as mock_insert:
             await send_and_store(bot, 1000, "обычный ответ")
         assert mock_insert.await_args.kwargs["is_broadcast"] is False
+
+
+class TestEditAndStore:
+    async def test_edits_message_and_persists_it(self):
+        message = MagicMock(message_id=321)
+        message.edit_text = AsyncMock()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock) as mock_insert:
+            await edit_and_store(message, 1000, "готово", reply_to=55)
+        message.edit_text.assert_awaited_once_with("готово")
+        assert mock_insert.await_args.kwargs["message_id"] == 321
+        assert mock_insert.await_args.kwargs["content"] == "готово"
+        assert mock_insert.await_args.kwargs["reply_to_msg_id"] == 55
+
+
+def make_failing_msg(message_id: int = 55) -> MagicMock:
+    msg = MagicMock()
+    msg.message_id = message_id
+    msg.get_bot = MagicMock(return_value=MagicMock())
+    return msg
+
+
+def make_notification(message_id: int = 321) -> MagicMock:
+    notification = MagicMock(message_id=message_id)
+    notification.edit_text = AsyncMock()
+    return notification
+
+
+class TestNotifyPipelineFailureResolvesSearchNotification:
+    """A dangling «🔍 Ищу…» message must be edited into the failure notice,
+    never left hanging alongside a second, separate message (reported bug:
+    the bot was sending both)."""
+
+    async def test_rate_limit_edits_notification_instead_of_sending(self):
+        msg = make_failing_msg()
+        notification = make_notification()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock), \
+             patch("src.events.messages.send_and_store", new_callable=AsyncMock) as mock_send:
+            kind = await notify_pipeline_failure(RateLimitError("x"), msg, 900001, True, notification)
+        assert kind == "RateLimit"
+        notification.edit_text.assert_awaited_once_with(RATE_LIMIT_NOTICE)
+        mock_send.assert_not_awaited()
+
+    async def test_generic_exception_edits_notification_instead_of_sending(self):
+        msg = make_failing_msg()
+        notification = make_notification()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock), \
+             patch("src.events.messages.send_and_store", new_callable=AsyncMock) as mock_send:
+            kind = await notify_pipeline_failure(ValueError("boom"), msg, 900002, True, notification)
+        assert kind == "Exception"
+        notification.edit_text.assert_awaited_once_with(GENERIC_FAILURE_NOTICE)
+        mock_send.assert_not_awaited()
+
+    async def test_context_length_edits_notification_instead_of_sending(self):
+        msg = make_failing_msg()
+        notification = make_notification()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock), \
+             patch("src.events.messages.send_and_store", new_callable=AsyncMock) as mock_send:
+            kind = await notify_pipeline_failure(ContextLengthError("too long"), msg, 900003, True, notification)
+        assert kind == "ContextLength"
+        notification.edit_text.assert_awaited_once()
+        mock_send.assert_not_awaited()
+
+    async def test_daily_limit_edits_notification_instead_of_sending(self):
+        msg = make_failing_msg()
+        notification = make_notification()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock), \
+             patch("src.events.messages.send_and_store", new_callable=AsyncMock) as mock_send:
+            kind = await notify_pipeline_failure(DailyLimitError("done"), msg, 900004, True, notification)
+        assert kind == "DailyLimit"
+        notification.edit_text.assert_awaited_once()
+        mock_send.assert_not_awaited()
+
+    async def test_no_notification_falls_back_to_sending_a_new_message(self):
+        msg = make_failing_msg()
+        with patch("src.events.messages.send_and_store", new_callable=AsyncMock) as mock_send:
+            kind = await notify_pipeline_failure(RateLimitError("x"), msg, 900005, True, None)
+        assert kind == "RateLimit"
+        mock_send.assert_awaited_once()
+
+    async def test_unaddressed_sends_nothing_even_with_a_notification(self):
+        msg = make_failing_msg()
+        notification = make_notification()
+        with patch("src.events.messages.send_and_store", new_callable=AsyncMock) as mock_send:
+            await notify_pipeline_failure(RateLimitError("x"), msg, 900006, False, notification)
+        notification.edit_text.assert_not_awaited()
+        mock_send.assert_not_awaited()
+
+
+class TestSendLimitNoticeWithNotification:
+    async def test_notification_bypasses_cooldown_reaction_fallback(self):
+        """Even mid-cooldown, a stranded search notification gets the full
+        text edited in — the reaction-only degrade only applies to a fresh send."""
+        msg = make_failing_msg()
+        notification = make_notification()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock):
+            await send_limit_notice(msg, 900007, RATE_LIMIT_NOTICE, notification_msg=notification)
+            await send_limit_notice(msg, 900007, RATE_LIMIT_NOTICE, notification_msg=notification)
+        assert notification.edit_text.await_count == 2
+        msg.set_reaction.assert_not_called()

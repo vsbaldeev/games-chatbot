@@ -66,3 +66,33 @@ async def send_and_store(
     except Exception as err:
         logger.warning("Failed to store sent message %s: %s", sent.message_id, err)
     return sent
+
+
+async def edit_and_store(
+    message, chat_id: int, text: str, *, reply_to: int | None = None
+) -> None:
+    """Edit an already-sent bot message and persist the edit to ``unified_messages``.
+
+    Used to resolve a message the bot sent earlier in the same turn (e.g. the
+    「🔍 Ищу…」 search-notification) into its final text, instead of leaving
+    that message stranded and sending a second, separate one.
+
+    Args:
+        message: The ``telegram.Message`` to edit (previously sent by the bot).
+        chat_id: Chat the message belongs to.
+        text: New text to edit the message to.
+        reply_to: Message id the edited message is anchored to, or None.
+    """
+    await message.edit_text(text)
+    try:
+        await unified_messages.insert(
+            chat_id=chat_id,
+            message_id=message.message_id,
+            user_id=config.BOT_ID,
+            username=config.BOT_USERNAME,
+            content=text,
+            media_type="text",
+            reply_to_msg_id=reply_to,
+        )
+    except Exception as err:
+        logger.warning("Failed to store edited message %s: %s", message.message_id, err)

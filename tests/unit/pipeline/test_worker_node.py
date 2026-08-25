@@ -19,7 +19,7 @@ import pytest
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError, WORKER_PROMPT
 from src.pipeline.worker_node import WorkerNode
-from tests.builders import make_incoming, make_message_row, make_state
+from tests.builders import make_incoming, make_message_row, make_state, make_telegram_message
 
 
 def make_worker() -> WorkerNode:
@@ -205,6 +205,32 @@ class TestErrorPropagation:
         agent.invoke_worker = AsyncMock(side_effect=RateLimitError("rate_limit exceeded"))
         with pytest.raises(RateLimitError):
             await WorkerNode(agent)(make_worker_state())
+
+    async def test_rate_limit_after_search_notification_carries_the_sent_message(self):
+        """If invoke_worker's own LLM call fails after web_search already fired
+        the «🔍 Ищу…» notification, the raised error must carry that message
+        so the top-level handler can edit it instead of leaving it stranded
+        alongside a separate failure reply."""
+        telegram_message = make_telegram_message(text="что там с GTA 6?")
+        sent_notification = MagicMock(message_id=555)
+        telegram_message.reply_text = AsyncMock(return_value=sent_notification)
+        incoming = make_incoming(
+            telegram_message=telegram_message,
+            raw_text="что там с GTA 6?",
+            processed_text="что там с GTA 6?",
+        )
+        state = make_state(incoming, should_respond=True, context={"reply_chain": [], "recent_history": []})
+
+        async def fake_invoke_worker(worker_input, callbacks=None):
+            await callbacks[0].on_tool_start({"name": "web_search"}, "GTA 6 release date")
+            raise RateLimitError("rate_limit exceeded")
+
+        agent = MagicMock()
+        agent.invoke_worker = AsyncMock(side_effect=fake_invoke_worker)
+
+        with pytest.raises(RateLimitError) as excinfo:
+            await WorkerNode(agent)(state)
+        assert excinfo.value.search_notification_msg is sent_notification
 
 
 class TestSkipConditions:

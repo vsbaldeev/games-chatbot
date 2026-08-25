@@ -192,6 +192,16 @@ Additional rules:
 - `ContextLengthError` advice depends on how the message arrived: replies get
   "start a new message instead of replying to the old chain", non-replies get
   "the message itself is too long, shorten it".
+- If the worker already sent the «🔍 Ищу…» search-notification message this
+  turn before a later node failed, the failure notice edits that message in
+  place (`edit_and_store`, bypassing the cooldown's reaction fallback) instead
+  of sending a second, separate message — `run_pipeline` streams the graph
+  (`PIPELINE.astream(..., stream_mode="values")`) rather than using a plain
+  `.ainvoke()` specifically so `final_state` still holds
+  `search_notification_msg` when a later node raises. A worker-side failure
+  that happens after the notification already fired but before the node
+  returns (the exception itself, not the graph state) carries the same
+  message via `err.search_notification_msg`, set in `WorkerNode.__call__`.
 
 ## Stat columns tracked per media type
 
