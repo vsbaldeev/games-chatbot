@@ -27,10 +27,15 @@ from src.agent import (
     ThinkingStripper,
     WorkerAgent,
     apply_language_correction,
+    guarded_ainvoke,
     should_retry,
     strip_thinking,
 )
-from tests.builders import make_bad_request_error, make_rate_limit_error
+from tests.builders import (
+    make_bad_request_error,
+    make_openai_rate_limit_error,
+    make_rate_limit_error,
+)
 
 
 class TestStripThinking:
@@ -124,6 +129,35 @@ class TestShouldRetry:
     def test_bad_request_error_returns_false(self):
         err = make_bad_request_error("request too large")
         assert should_retry(err) is False
+
+    def test_openrouter_transient_rate_limit_returns_true(self):
+        """The response/roast chains' OpenRouter fallback leg raises
+        openai.RateLimitError, not groq.RateLimitError — must be retried too."""
+        err = make_openai_rate_limit_error("rate-limited upstream")
+        assert should_retry(err) is True
+
+    def test_openrouter_daily_quota_returns_false(self):
+        err = make_openai_rate_limit_error("tokens_per_day quota exceeded")
+        assert should_retry(err) is False
+
+
+class TestGuardedAinvoke:
+    async def test_openrouter_rate_limit_maps_to_rate_limit_error(self):
+        """An exhausted OpenRouter 429 must surface as the typed RateLimitError,
+        same as a Groq one, so the pipeline sends the rate-limit notice instead
+        of logging a raw traceback and the generic failure notice."""
+        runnable = MagicMock()
+        runnable.ainvoke = AsyncMock(side_effect=make_openai_rate_limit_error("rate-limited upstream"))
+        with pytest.raises(RateLimitError):
+            await guarded_ainvoke(runnable, {"messages": []})
+
+    async def test_openrouter_daily_quota_maps_to_daily_limit_error(self):
+        runnable = MagicMock()
+        runnable.ainvoke = AsyncMock(
+            side_effect=make_openai_rate_limit_error("tokens_per_day quota exceeded")
+        )
+        with pytest.raises(DailyLimitError):
+            await guarded_ainvoke(runnable, {"messages": []})
 
 
 class TestGroqContextGuard:

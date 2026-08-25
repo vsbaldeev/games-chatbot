@@ -6,6 +6,7 @@ import re
 from typing import Any, Callable
 
 import groq
+import openai
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -35,8 +36,14 @@ def strip_thinking(text: str) -> str:
     return ThinkingStripper.THINK_RE.sub("", text).strip()
 
 
+RATE_LIMIT_ERRORS = (groq.RateLimitError, openai.RateLimitError)
+
+
 def should_retry(err: Exception) -> bool:
-    """Return ``True`` only for transient Groq rate limits (TPM), not daily quota (TPD).
+    """Return ``True`` only for transient rate limits (TPM), not daily quota (TPD).
+
+    Covers both Groq and OpenAI-compatible (OpenRouter) rate-limit errors, since
+    the response/roast fallback chains mix both providers.
 
     Args:
         err: Exception raised by the model call.
@@ -44,7 +51,7 @@ def should_retry(err: Exception) -> bool:
     Returns:
         ``True`` for transient 429s worth retrying; ``False`` otherwise.
     """
-    if not isinstance(err, groq.RateLimitError):
+    if not isinstance(err, RATE_LIMIT_ERRORS):
         return False
     error_str = str(err).lower()
     return not any(phrase in error_str for phrase in DAILY_LIMIT_PHRASES)
@@ -122,15 +129,15 @@ async def guarded_ainvoke(runnable, *args, **kwargs) -> Any:
     Raises:
         ContextLengthError: For 400 errors matching context-length phrases.
         DailyLimitError: For 429 errors matching daily-quota phrases.
-        RateLimitError: For other 429 rate-limit errors.
+        RateLimitError: For other 429 rate-limit errors (Groq or OpenRouter).
     """
     try:
         return await runnable.ainvoke(*args, **kwargs)
-    except groq.BadRequestError as err:
+    except (groq.BadRequestError, openai.BadRequestError) as err:
         if any(phrase in str(err).lower() for phrase in CONTEXT_LENGTH_PHRASES):
             raise ContextLengthError("Input exceeds model context window") from err
         raise
-    except groq.RateLimitError as err:
+    except RATE_LIMIT_ERRORS as err:
         error_str = str(err).lower()
         if any(phrase in error_str for phrase in DAILY_LIMIT_PHRASES):
             raise DailyLimitError("Daily token quota exhausted") from err

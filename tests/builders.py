@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import groq
+import openai
 
 
 def make_telegram_message(
@@ -88,6 +89,15 @@ def make_rate_limit_error(message: str) -> groq.RateLimitError:
     mock_response.status_code = 429
     mock_response.request = MagicMock()
     return groq.RateLimitError(message, response=mock_response, body=None)
+
+
+def make_openai_rate_limit_error(message: str) -> openai.RateLimitError:
+    """Create an ``openai.RateLimitError`` (HTTP 429), as raised by the
+    OpenRouter fallback leg of the response/roast chains."""
+    mock_response = MagicMock()
+    mock_response.status_code = 429
+    mock_response.request = MagicMock()
+    return openai.RateLimitError(message, response=mock_response, body=None)
 
 
 def make_message_row(
