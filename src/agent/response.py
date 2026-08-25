@@ -84,9 +84,10 @@ class ResponseAgent:
         """Build a response executor with retry/fallback middleware.
 
         The fallback chain always tries any remaining Groq models first, then
-        falls over to RESPONSE_FALLBACK_MODEL on OpenRouter — a real
-        cross-provider leg, so a Groq-wide outage degrades to a paid call
-        instead of taking chat replies down entirely. Skipped when
+        falls over to RESPONSE_OPENROUTER_FALLBACKS on OpenRouter, in order —
+        real cross-provider legs, so a Groq-wide outage degrades to a paid
+        call instead of taking chat replies down entirely, and a single
+        OpenRouter free model saturating doesn't either. Skipped when
         OPENROUTER_API_KEY is unset, same fail-open contract as
         filter_node.make_filter_llm.
 
@@ -98,14 +99,17 @@ class ResponseAgent:
             for model in config.RESPONSE_MODEL_FALLBACKS[1:]
         ]
         if config.OPENROUTER_API_KEY:
-            fallback_llms.append(ChatOpenAI(
-                model=config.RESPONSE_FALLBACK_MODEL,
-                api_key=config.OPENROUTER_API_KEY,
-                base_url=config.OPENROUTER_BASE_URL,
-                temperature=0.7,
-                max_tokens=1024,
-                max_retries=0,
-            ))
+            fallback_llms.extend(
+                ChatOpenAI(
+                    model=model,
+                    api_key=config.OPENROUTER_API_KEY,
+                    base_url=config.OPENROUTER_BASE_URL,
+                    temperature=0.7,
+                    max_tokens=1024,
+                    max_retries=0,
+                )
+                for model in config.RESPONSE_OPENROUTER_FALLBACKS
+            )
         else:
             logger.warning(
                 "Response: OPENROUTER_API_KEY unset — no cross-provider fallback for %s",

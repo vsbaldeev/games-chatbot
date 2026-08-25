@@ -128,18 +128,26 @@ WORKER_MODEL_FALLBACKS: list[str] = [
 # per call. openai/gpt-oss-120b is the new Groq-side primary — UNVALIDATED
 # for Russian casual style, re-check output quality against the old Llama
 # voice. This chain also gained a cross-provider leg it never had before
-# (RESPONSE_FALLBACK_MODEL, below) — until now a Groq-only outage took chat
+# (RESPONSE_OPENROUTER_FALLBACKS, below) — until now a Groq-only outage took chat
 # replies down entirely (see ResponseAgent.__build_executor).
 RESPONSE_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-120b",
 ]
 
-# Cross-provider (OpenRouter) fallback for the response chain. Free-tier
-# Gemma — picked for Russian/Cyrillic quality among currently-free OpenRouter
-# models now that Llama/Qwen/DeepSeek are gone from that tier too. Requires
-# OPENROUTER_API_KEY; without it ResponseAgent stays Groq-only, same
-# fail-open contract as make_filter_llm.
-RESPONSE_FALLBACK_MODEL = "google/gemma-4-31b-it:free"
+# Cross-provider (OpenRouter) fallback chain for the response chain, tried in
+# order after the Groq legs. Gemma was picked for Russian/Cyrillic quality
+# among currently-free OpenRouter models now that Llama/Qwen/DeepSeek are gone
+# from that tier too, but it's a single shared free pool (Google AI Studio)
+# that saturates under load — this was hitting 429s often enough in practice
+# to need a second, differently-sourced leg. GLM added 2026-08-25 as that
+# second leg (Zhipu/Z.ai backend, so an independent quota pool from Gemma's);
+# its Russian casual-voice quality is UNVALIDATED, re-check same as the Groq
+# gpt-oss-120b primary. Requires OPENROUTER_API_KEY; without it ResponseAgent
+# stays Groq-only, same fail-open contract as make_filter_llm.
+RESPONSE_OPENROUTER_FALLBACKS: list[str] = [
+    "google/gemma-4-31b-it:free",
+    "z-ai/glm-5.2:free",
+]
 
 # Roast generation fallback chain. Middle leg was llama-3.3-70b-versatile,
 # decommissioned by Groq 2026-08-16 with no free-tier same-family
@@ -150,9 +158,12 @@ ROAST_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-20b",
 ]
 
-# Cross-provider (OpenRouter) fallback for the roast chain — see
-# RESPONSE_FALLBACK_MODEL, same model and same reasoning.
-ROAST_FALLBACK_MODEL = "google/gemma-4-31b-it:free"
+# Cross-provider (OpenRouter) fallback chain for the roast chain — see
+# RESPONSE_OPENROUTER_FALLBACKS, same models and same reasoning.
+ROAST_OPENROUTER_FALLBACKS: list[str] = [
+    "google/gemma-4-31b-it:free",
+    "z-ai/glm-5.2:free",
+]
 
 # Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
 # Karras). Standard multi-step sampling, not an LCM speed hack: low-step/

@@ -142,9 +142,9 @@ class RoastAgent:
     def __build_executor():
         """Build the roast executor with retry/fallback middleware.
 
-        Falls over to ROAST_FALLBACK_MODEL on OpenRouter after the Groq legs
-        are exhausted — a real cross-provider leg, same pattern as
-        ResponseAgent. Skipped when OPENROUTER_API_KEY is unset.
+        Falls over to ROAST_OPENROUTER_FALLBACKS on OpenRouter, in order,
+        after the Groq legs are exhausted — real cross-provider legs, same
+        pattern as ResponseAgent. Skipped when OPENROUTER_API_KEY is unset.
 
         Returns:
             Configured LangChain agent executor.
@@ -158,15 +158,18 @@ class RoastAgent:
             for model in config.ROAST_MODEL_FALLBACKS[1:]
         ]
         if config.OPENROUTER_API_KEY:
-            fallback_llms.append(ChatOpenAI(
-                model=config.ROAST_FALLBACK_MODEL,
-                api_key=config.OPENROUTER_API_KEY,
-                base_url=config.OPENROUTER_BASE_URL,
-                temperature=0.5,
-                top_p=0.9,
-                max_tokens=1024,
-                max_retries=0,
-            ))
+            fallback_llms.extend(
+                ChatOpenAI(
+                    model=model,
+                    api_key=config.OPENROUTER_API_KEY,
+                    base_url=config.OPENROUTER_BASE_URL,
+                    temperature=0.5,
+                    top_p=0.9,
+                    max_tokens=1024,
+                    max_retries=0,
+                )
+                for model in config.ROAST_OPENROUTER_FALLBACKS
+            )
         else:
             logger.warning(
                 "Roast: OPENROUTER_API_KEY unset — no cross-provider fallback for %s",

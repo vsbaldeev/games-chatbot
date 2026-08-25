@@ -41,7 +41,7 @@ commands, jobs or engagement features.
        fact that makes the joke land. The mode instruction tells the model which angle to take.
 
 4. LLM call
-       model:       openai/gpt-oss-120b → gpt-oss-20b → OpenRouter google/gemma-4-31b-it:free (fallback chain)
+       model:       openai/gpt-oss-120b → gpt-oss-20b → OpenRouter google/gemma-4-31b-it:free → z-ai/glm-5.2:free (fallback chain)
                     gpt-oss-120b is primary: better world-knowledge/fact-comprehension.
                     NOTE: the middle Groq leg used to be llama-3.3-70b-versatile
                     (decommissioned 2026-08-16, no free-tier replacement); the main
