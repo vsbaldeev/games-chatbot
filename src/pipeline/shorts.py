@@ -29,10 +29,14 @@ back to non-JS player clients. That alone turned out not to be the whole
 story: even with deno present, yt-dlp's own default client-selection has
 been observed picking a single client ("visionos") whose formats list has
 no format 18 at all, failing deterministically rather than flakily.
-``SHORTS_PLAYER_CLIENTS`` pins an explicit, known-good client set instead
-of trusting that shifting default. Both gaps were only diagnosable via
-:class:`YtdlpLogger` below — yt-dlp's own ``quiet``/``no_warnings`` options
-were discarding the warnings that actually named each cause.
+``SHORTS_PLAYER_CLIENTS`` pins an explicit client set instead of trusting
+that shifting default — see its comment for why the set itself has already
+needed revising once, and why it is pinned to the same client family
+(WEBPO_CLIENTS) the bgutil provider above actually supports, rather than
+clients that merely looked token-free at the time. All three gaps were
+only diagnosable via :class:`YtdlpLogger` below — yt-dlp's own
+``quiet``/``no_warnings`` options were discarding the warnings that
+actually named each cause.
 """
 
 import asyncio
@@ -78,13 +82,34 @@ SHORT_FORMAT = "18/b[ext=mp4][filesize<25M]/b[filesize<25M]"
 # picking a single client — "visionos" — whose formats list has no format
 # 18 at all, failing every attempt deterministically rather than flakily.
 # yt-dlp's default client set shifts often as it reacts to YouTube's bot
-# countermeasures, so instead of trusting whatever it currently prefers,
-# pin an explicit set known to carry format 18: android_vr needs no PO
-# token at all (REQUIRE_JS_PLAYER=False, no GVS_PO_TOKEN_POLICY); android
-# and ios both accept the bgutil-sourced PO token as an alternative to
-# sign-in. yt-dlp queries all three and merges their formats, so one
-# client lacking 18 (or being blocked) no longer fails the whole request.
-SHORTS_PLAYER_CLIENTS = ["android_vr", "android", "ios"]
+# countermeasures (yt-dlp itself self-updates daily — see
+# YtdlpUpdateJobManager — so "shifts" means "can change again tomorrow"),
+# so instead of trusting whatever it currently prefers, pin an explicit set.
+#
+# First attempt (2026-08-26) pinned android_vr/android/ios because they
+# looked token-free at the time. That broke again within hours: a yt-dlp
+# self-update added a GVS PO-token requirement to android_vr, and YouTube's
+# ongoing SABR-only rollout (yt-dlp issue #12482) started stripping URLs
+# from android/ios formats entirely. The deeper problem: the bgutil
+# PO-token provider this module already wires up (POT_PROVIDER_URL below)
+# can only ever serve WEBPO_CLIENTS — WEB/MWEB/TVHTML5 and their variants
+# (see yt_dlp.extractor.youtube.pot.utils.WEBPO_CLIENTS) — never android/
+# ios/android_vr, no matter how healthy the sidecar is. Picking non-web
+# clients meant never actually using the token pipeline this bot already
+# runs a docker-compose service for.
+#
+# Pinned to web/mweb (WEBPO_CLIENTS members, so the existing pot-provider
+# sidecar can actually authenticate them), plus tv (currently no GVS
+# requirement at all, per INNERTUBE_CLIENTS, so a free extra chance) and
+# android_vr kept from the first attempt (still lists format 18's URL —
+# whether the missing-GVS-token 403 actually fires may not be universal
+# or fully rolled out, so it costs little to leave in the merged set).
+# UNVERIFIED against a real PO token: there is no way to reach the
+# docker-compose-only pot-provider sidecar, or confirm web/mweb still
+# offer a muxed (non-DASH) format at all, outside of production — watch
+# real logs after deploy. If every client here still fails, the remaining
+# options are a manually supplied po_token or accepting some links fail.
+SHORTS_PLAYER_CLIENTS = ["web", "mweb", "tv", "android_vr"]
 
 # Two known intermittent, per-request YouTube extraction flakes that
 # self-heal on a re-request moments later — neither is a per-video block:

@@ -128,9 +128,17 @@ ingester (current message, should_respond=True only)
     │     formats, including format 18 (SHORT_FORMAT's pin); even with deno,
     │     yt-dlp's own default client selection has been observed picking a
     │     single client with no format 18 at all, failing deterministically
-    │     — SHORTS_PLAYER_CLIENTS pins an explicit known-good client set
-    │     instead of trusting that shifting default; both gaps were only
-    │     diagnosable once YtdlpLogger surfaced the real warnings
+    │     — SHORTS_PLAYER_CLIENTS pins an explicit client set instead of
+    │     trusting that shifting default. The pin itself already needed
+    │     revising once: a token-free-looking set (android_vr/android/ios)
+    │     broke again within hours of a yt-dlp self-update, because the
+    │     bgutil PO-token provider this module wires up can only ever
+    │     authenticate WEBPO_CLIENTS (web/mweb/tv and variants) — never
+    │     those three — so it was never actually usable for them regardless
+    │     of the sidecar's health. Now pinned to web/mweb/tv (+ android_vr
+    │     kept as a bonus) so the docker-compose PO-token pipeline is
+    │     actually in the loop. All of this was only diagnosable once
+    │     YtdlpLogger surfaced the real warnings
     │     trigger="social_link": summarize_social_link dispatches to the
     │     matched handler (src.pipeline.social_links — instagram_reel or
     │     youtube_video) for a metadata-only fetch: no transcript, no
