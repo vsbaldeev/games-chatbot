@@ -122,6 +122,11 @@ ingester (current message, should_respond=True only)
     │     (shorts.YtdlpLogger) — YoutubeDL checks for one before quiet/
     │     no_warnings, so it bypasses that suppression and routes yt-dlp's
     │     internal warnings through this module's own logger instead
+    │     yt-dlp also needs a JS runtime (deno, installed in the Dockerfile)
+    │     to solve YouTube's signature/n-parameter challenges — without one
+    │     it silently degrades to non-JS player clients missing many
+    │     formats, including format 18 (SHORT_FORMAT's pin), so every
+    │     download failed until YtdlpLogger surfaced the real warning
     │     trigger="social_link": summarize_social_link dispatches to the
     │     matched handler (src.pipeline.social_links — instagram_reel or
     │     youtube_video) for a metadata-only fetch: no transcript, no

@@ -2,9 +2,28 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# git is required to install igdb-mcp-server from GitHub (not on PyPI)
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# git is required to install igdb-mcp-server from GitHub (not on PyPI);
+# curl/unzip fetch the deno binary below
+RUN apt-get update && apt-get install -y --no-install-recommends git curl unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp needs a JS runtime to solve YouTube's signature/n-parameter
+# challenges; without one it silently falls back to non-JS player clients
+# that are missing many formats — including format 18, the one Shorts
+# downloads pin to (src/pipeline/shorts.py's SHORT_FORMAT) — so extraction
+# intermittently (in practice: every time) fails with "Requested format is
+# not available" and no indication why (see shorts.py's YtdlpLogger for how
+# that surfaced). Deno is yt-dlp's default/recommended runtime — just being
+# on PATH is enough, no yt-dlp-side config needed. Checksum-verified since
+# this runs as root during build.
+ENV DENO_VERSION=2.9.5
+RUN cd /tmp \
+    && curl -fsSLO "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
+    && curl -fsSLO "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip.sha256sum" \
+    && sha256sum -c deno-x86_64-unknown-linux-gnu.zip.sha256sum \
+    && unzip -q deno-x86_64-unknown-linux-gnu.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/deno \
+    && rm deno-x86_64-unknown-linux-gnu.zip deno-x86_64-unknown-linux-gnu.zip.sha256sum
 
 # Install dependencies in a separate layer so rebuilds on code changes are fast
 COPY requirements.txt .

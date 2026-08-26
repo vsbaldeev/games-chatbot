@@ -22,6 +22,14 @@ is handled automatically by the bgutil PO-token provider: the
 and fetches tokens from the ``pot-provider`` docker-compose sidecar (see
 ``docker-compose.yml``). If the sidecar is down, yt-dlp proceeds without a
 token — degraded, never fatal.
+
+yt-dlp also needs a JS runtime (deno, installed in the Dockerfile) to solve
+YouTube's signature/n-parameter challenges. Without one it silently falls
+back to non-JS player clients that are missing many formats — including
+format 18, the one ``SHORT_FORMAT`` pins to — so every download failed with
+a contextless "Requested format is not available" until this was diagnosed
+via :class:`YtdlpLogger` below (yt-dlp's own ``quiet``/``no_warnings``
+options were discarding the warning that actually named the cause).
 """
 
 import asyncio
