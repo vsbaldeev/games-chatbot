@@ -23,7 +23,7 @@ from src.agent import (
 )
 from src.pipeline import canonical
 from src.pipeline.graph import build_pipeline
-from src.events.link_repost import deliver_link_message, resolve_link_delivery
+from src.events.link_repost import AmbiguousDeliveryError, deliver_link_message, resolve_link_delivery
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
@@ -561,6 +561,14 @@ async def run_pipeline(
             launch_group_profile_task(context.bot, chat.id, msg.message_id, rubric)
             canonical.emit(final_state, "profile", time.monotonic() - started_at)
             return True
+    except AmbiguousDeliveryError as error:
+        # The video may well have been delivered despite the timeout (see
+        # link_repost's docstring) — no notice, no fallback text, just log
+        # and move on. Sending anything here risks the exact duplicate this
+        # exists to avoid.
+        logger.warning("Ambiguous link delivery for chat %s: %s", chat.id, error)
+        canonical.emit(final_state, "ambiguous_delivery", time.monotonic() - started_at)
+        return True
     except Exception as error:
         notification_msg = final_state.get("search_notification_msg") or getattr(
             error, "search_notification_msg", None

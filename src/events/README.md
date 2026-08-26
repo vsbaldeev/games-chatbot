@@ -79,6 +79,27 @@ still reaches the chat. The one exception is a video-less, non-bare send that
 failed: that call already *was* the anchored text reply, so it re-raises
 instead of retrying itself.
 
+A `telegram.error.TimedOut` on a *video* send is handled differently: PTB's
+client-side timeout can fire after Telegram already accepted and processed
+the upload, so the video may have been delivered despite the exception —
+and there is no Bot API call to check either "did that land?" or "what
+message id was it?" (the only place that id ever existed is the response we
+didn't get). Retrying with the text fallback in that case risks turning an
+*unconfirmed* failure into a *confirmed* duplicate (video + separate summary
+text — the exact bug this guards against), so `deliver_link_message` skips
+the fallback entirely and raises `AmbiguousDeliveryError` instead.
+`run_pipeline` (`src/events/messages.py`) catches it specifically — before
+the generic exception handler — logs a warning, and returns without posting
+anything further; the generic-exception path is never reached, so no
+"something broke" notice goes out for what is likely a success. Every other
+error type, and a `TimedOut` on a text-only send (no video in flight, so
+nothing ambiguous), still take the ordinary text-fallback path above.
+`src/bot/app.py` also raises PTB's timeouts themselves
+(`BOT_READ_TIMEOUT_SECONDS=30`, `BOT_MEDIA_WRITE_TIMEOUT_SECONDS=60`, up from
+defaults sized for text, not video) so the race is rarer to begin with — the
+`AmbiguousDeliveryError` handling above is what makes the remaining cases
+safe rather than merely rare.
+
 `fit_caption` fits the text inside the relevant Telegram limit through a
 three-rung ladder: send as composed when it already fits; otherwise compress
 the summary against the remaining budget via `src/agent/compress.py`

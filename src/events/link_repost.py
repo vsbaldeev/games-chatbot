@@ -9,15 +9,36 @@ The delete only ever happens after a successful send. A send that returns a
 ``telegram.Message`` is the delivery confirmation; there is nothing further to
 check. If the send fails the original message stays and the summary still goes
 out as a plain text reply — the download and LLM spend already happened.
+
+The one exception is ``telegram.error.TimedOut`` on a video send: PTB's
+client-side timeout can fire after Telegram has already accepted and
+processed the upload, so the video may have been delivered despite the
+exception. There is no Bot API call to check ("did my last send actually
+land?" has no answer, and neither does "what message id was that?" — the
+only place that id ever existed is the response we didn't get). Retrying
+the text fallback in that case risks a confirmed duplicate to resolve an
+unconfirmed failure, so it is skipped instead — see
+:class:`AmbiguousDeliveryError`.
 """
 
 import io
 import re
 
+import telegram.error
+
 from src import log
 from src.agent.compress import compress_to_budget
 
 logger = log.get_logger(__name__)
+
+
+class AmbiguousDeliveryError(Exception):
+    """Raised when a video send timed out and the outcome is unknowable.
+
+    Callers must not treat this as an ordinary failure (e.g. by posting a
+    generic error notice) — the video may well have gone through. Silently
+    absorbing it is the intended handling.
+    """
 
 CAPTION_LIMIT = 1024  # Telegram Bot API cap on media captions
 TEXT_LIMIT = 4096  # Telegram Bot API cap on a plain text message
@@ -243,6 +264,8 @@ async def deliver_link_message(
 
     Raises:
         Exception: Re-raised when the failed send was already the anchored text reply.
+        AmbiguousDeliveryError: A video send timed out — outcome unknown, see
+            the module docstring. Never followed by a text fallback.
     """
     is_bare = resolve_bare_deletion(is_bare, url)
     caption = await fit_caption(
@@ -252,6 +275,12 @@ async def deliver_link_message(
     try:
         sent, media_type = await send_combined(msg, caption, video, anchored=not is_bare)
     except Exception as error:
+        if isinstance(error, telegram.error.TimedOut) and video is not None:
+            logger.warning(
+                "Video send timed out — outcome unknown, skipping duplicate text fallback: %s",
+                error,
+            )
+            raise AmbiguousDeliveryError(str(error)) from error
         if video is None and not is_bare:
             # This failed call was already the anchored text reply; retrying
             # it would just raise again. Let the caller handle it.

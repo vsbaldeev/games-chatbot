@@ -3,10 +3,12 @@
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+import telegram.error
 
 from src.events.link_repost import (
     CAPTION_LIMIT,
     TEXT_LIMIT,
+    AmbiguousDeliveryError,
     build_cap_remaining_footer,
     build_caption,
     deliver_link_message,
@@ -303,6 +305,58 @@ class TestDeliverLinkMessageNotBare:
             )
         msg.delete.assert_not_awaited()
         msg.reply_text.assert_awaited_once_with("Про котиков.")
+
+
+class TestDeliverLinkMessageAmbiguousTimeout:
+    """A TimedOut video send may have actually landed server-side — retrying
+    with a text fallback risks a confirmed duplicate to fix an unconfirmed
+    failure, so it must raise instead of falling back (reported bug: the
+    bot posted the video AND a duplicate text summary)."""
+
+    async def test_bare_video_timeout_raises_without_a_text_fallback(self):
+        msg = make_msg()
+        msg.chat.send_video = AsyncMock(side_effect=telegram.error.TimedOut())
+        with pytest.raises(AmbiguousDeliveryError):
+            await deliver_link_message(
+                msg, summary="Про котиков.", video=b"bytes", username="vasya",
+                url="https://youtu.be/abc", is_bare=True,
+            )
+        msg.reply_text.assert_not_awaited()
+        msg.delete.assert_not_awaited()
+
+    async def test_anchored_video_timeout_raises_without_a_text_fallback(self):
+        msg = make_msg()
+        msg.reply_video = AsyncMock(side_effect=telegram.error.TimedOut())
+        with pytest.raises(AmbiguousDeliveryError):
+            await deliver_link_message(
+                msg, summary="Про котиков.", video=b"bytes", username="vasya",
+                url="https://youtu.be/abc", is_bare=False,
+            )
+        msg.reply_text.assert_not_awaited()
+
+    async def test_non_timeout_video_failure_still_falls_back_to_text(self):
+        """Only a TimedOut is ambiguous — an unambiguous failure (e.g. file
+        too large) keeps the existing text-fallback behavior."""
+        msg = make_msg()
+        msg.chat.send_video = AsyncMock(side_effect=RuntimeError("too big"))
+        sent_id, anchored_to, media_type = await deliver_link_message(
+            msg, summary="Про котиков.", video=b"bytes", username="vasya",
+            url="https://youtu.be/abc", is_bare=True,
+        )
+        msg.reply_text.assert_awaited_once_with("Про котиков.")
+        assert (sent_id, anchored_to, media_type) == (902, 55, "text")
+
+    async def test_text_only_timeout_still_falls_back_to_text(self):
+        """No video was in flight, so there is nothing ambiguous — a timed-out
+        text-only send (un-anchored) still gets the plain retry."""
+        msg = make_msg()
+        msg.chat.send_message = AsyncMock(side_effect=telegram.error.TimedOut())
+        sent_id, anchored_to, media_type = await deliver_link_message(
+            msg, summary="Про котиков.", video=None, username="vasya",
+            url="https://youtu.be/abc", is_bare=True,
+        )
+        msg.reply_text.assert_awaited_once_with("Про котиков.")
+        assert (sent_id, anchored_to, media_type) == (902, 55, "text")
 
 
 class TestResolveLinkDelivery:

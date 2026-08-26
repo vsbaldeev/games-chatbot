@@ -21,6 +21,18 @@ from src.tts import speech_service
 log.setup()
 logger = log.get_logger(__name__)
 
+# PTB's defaults (read_timeout=5s, media_write_timeout=20s) are sized for
+# text messages, not video uploads. A Short's video can take Telegram
+# longer than 5s to finish processing (thumbnailing etc.) before it
+# responds, and uploading it can take longer than 20s on a modest VPS
+# uplink — either one raises telegram.error.TimedOut client-side even
+# though the send often already succeeded server-side. That race is what
+# produced duplicate messages in src.events.link_repost.deliver_link_message:
+# its TimedOut fallback assumes the send failed and posts the summary again
+# as plain text, when the video message had actually gone through.
+BOT_READ_TIMEOUT_SECONDS = 30
+BOT_MEDIA_WRITE_TIMEOUT_SECONDS = 60
+
 
 async def __on_startup(application: Application) -> None:
     # The database schema is owned by Alembic migrations (`alembic upgrade head`),
@@ -52,7 +64,14 @@ def main() -> None:
         MessageHandlerManager,
     )
 
-    app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(__on_startup).build()
+    app = (
+        ApplicationBuilder()
+        .token(config.TELEGRAM_TOKEN)
+        .read_timeout(BOT_READ_TIMEOUT_SECONDS)
+        .media_write_timeout(BOT_MEDIA_WRITE_TIMEOUT_SECONDS)
+        .post_init(__on_startup)
+        .build()
+    )
     app.add_error_handler(__on_error)
 
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
