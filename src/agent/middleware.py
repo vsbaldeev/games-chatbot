@@ -273,20 +273,59 @@ def _provider_name(request) -> str:
     return "groq.com" if type(model).__name__ == "ChatGroq" else type(model).__name__
 
 
+def _message_text(message: Any) -> str:
+    """Best-effort plain text for one message, for DEBUG-safe logging.
+
+    Args:
+        message: A LangChain message (input or output).
+
+    Returns:
+        Its string content when non-empty; otherwise, for an ``AIMessage``
+        requesting tools, the tool names (content is often empty on a
+        tool-calling turn); otherwise an empty string.
+    """
+    content = getattr(message, "content", "")
+    if isinstance(content, str) and content:
+        return content
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        names = ", ".join(call.get("name", "?") for call in tool_calls)
+        return f"<tool_calls: {names}>"
+    return content if isinstance(content, str) else str(content)
+
+
+def _format_messages(messages: list) -> str:
+    """Render a message list as one compact, DEBUG-safe log line.
+
+    Args:
+        messages: LangChain messages — a request's input or a response's output.
+
+    Returns:
+        ``"<empty>"`` for an empty list, otherwise ``"role: snippet | role: snippet"``
+        with each message's text collapsed and truncated via :func:`log.snippet`.
+    """
+    if not messages:
+        return "<empty>"
+    return " | ".join(
+        f"{getattr(message, 'type', type(message).__name__)}: {log.snippet(_message_text(message))}"
+        for message in messages
+    )
+
+
 class ModelAttemptLogger(AgentMiddleware):
-    """Log which provider and model actually served (or failed) each call in a fallback chain.
+    """Log which provider/model served (or failed) each call, with input/output.
 
     Neither ``ModelFallbackMiddleware`` nor ``ModelRetryMiddleware`` log
     anything, so without this there is no way to tell from the logs which
-    model in the chain — or even which provider — a given request hit; only
-    that some call to groq.com or openrouter.ai returned a 429. Placed
-    inside ``ModelFallbackMiddleware``/``ModelRetryMiddleware`` (so it sees
-    every retry and every fallover) and outside ``GroqContextGuard`` (so it
-    logs the raw provider exception, before that guard reclassifies it).
+    model in the chain — or even which provider — a given request hit, or
+    what was actually sent/returned. Placed inside
+    ``ModelFallbackMiddleware``/``ModelRetryMiddleware`` (so it sees every
+    retry and every fallover) and outside ``GroqContextGuard`` (so it logs
+    the raw provider exception, before that guard reclassifies it).
     """
 
     async def awrap_model_call(self, request, handler: Callable) -> Any:
-        """Log the resolved provider/model, then the call's outcome.
+        """Log the resolved provider/model and input, then the call's outcome.
 
         Args:
             request: Model request forwarded to the handler unchanged.
@@ -300,14 +339,19 @@ class ModelAttemptLogger(AgentMiddleware):
         """
         provider = _provider_name(request)
         model_name = _model_name(request)
+        input_summary = _format_messages(request.messages)
         try:
             result = await handler(request)
         except Exception as err:
             logger.warning(
-                "Model call failed: %s/%s (%s: %s)", provider, model_name, type(err).__name__, err
+                "Model call failed: %s/%s (%s: %s) input=%s",
+                provider, model_name, type(err).__name__, err, input_summary,
             )
             raise
-        logger.debug("Model call served by: %s/%s", provider, model_name)
+        logger.debug(
+            "Model call served by: %s/%s input=%s output=%s",
+            provider, model_name, input_summary, _format_messages(result.result),
+        )
         return result
 
 

@@ -203,24 +203,29 @@ class TestGroqContextGuard:
             await guard.awrap_model_call(None, handler)
 
 
+def make_model_request(model, messages=None) -> SimpleNamespace:
+    return SimpleNamespace(model=model, messages=messages if messages is not None else [])
+
+
 class TestModelAttemptLogger:
     """Neither ModelFallbackMiddleware nor ModelRetryMiddleware log which
     provider/model a call actually hit — this middleware fills that gap so
     a fallover between Groq and OpenRouter (or between OpenRouter models) is
-    visible in the logs instead of just a stream of unattributed 429s."""
+    visible in the logs instead of just a stream of unattributed 429s, along
+    with what was actually sent and returned."""
 
     async def test_successful_openrouter_call_logs_provider_and_model_at_debug(self, caplog):
-        request = SimpleNamespace(
-            model=ChatOpenAI(model="z-ai/glm-5.2:free", api_key="x", base_url="https://openrouter.ai/api/v1")
+        request = make_model_request(
+            ChatOpenAI(model="z-ai/glm-5.2:free", api_key="x", base_url="https://openrouter.ai/api/v1")
         )
-        handler = AsyncMock(return_value="response")
+        handler = AsyncMock(return_value=SimpleNamespace(result=[LCAIMessage(content="привет")]))
         with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
             result = await ModelAttemptLogger().awrap_model_call(request, handler)
-        assert result == "response"
+        assert result.result[0].content == "привет"
         assert "openrouter.ai/z-ai/glm-5.2:free" in caplog.text
 
     async def test_failed_groq_call_logs_provider_and_model_at_warning_then_reraises(self, caplog):
-        request = SimpleNamespace(model=ChatGroq(model="openai/gpt-oss-120b", api_key="x"))
+        request = make_model_request(ChatGroq(model="openai/gpt-oss-120b", api_key="x"))
         handler = AsyncMock(side_effect=ValueError("boom"))
         with caplog.at_level(logging.WARNING, logger="src.agent.middleware"), pytest.raises(ValueError):
             await ModelAttemptLogger().awrap_model_call(request, handler)
@@ -229,13 +234,51 @@ class TestModelAttemptLogger:
     async def test_distinguishes_openrouter_models_sharing_the_chatopenai_class(self, caplog):
         """Two OpenRouter fallback legs (Gemma, GLM) are both ChatOpenAI instances —
         the log must still show which specific model was hit, not just the class."""
-        gemma_request = SimpleNamespace(
-            model=ChatOpenAI(model="google/gemma-4-31b-it:free", api_key="x", base_url="https://openrouter.ai/api/v1")
+        gemma_request = make_model_request(
+            ChatOpenAI(model="google/gemma-4-31b-it:free", api_key="x", base_url="https://openrouter.ai/api/v1")
         )
+        handler = AsyncMock(return_value=SimpleNamespace(result=[LCAIMessage(content="ok")]))
         with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
-            await ModelAttemptLogger().awrap_model_call(gemma_request, AsyncMock(return_value="ok"))
+            await ModelAttemptLogger().awrap_model_call(gemma_request, handler)
         assert "google/gemma-4-31b-it:free" in caplog.text
         assert "z-ai/glm-5.2:free" not in caplog.text
+
+    async def test_logs_input_messages_on_success(self, caplog):
+        request = make_model_request(
+            ChatGroq(model="openai/gpt-oss-120b", api_key="x"),
+            messages=[HumanMessage(content="когда выйдет GTA 6?")],
+        )
+        handler = AsyncMock(return_value=SimpleNamespace(result=[LCAIMessage(content="19 ноября 2026")]))
+        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+            await ModelAttemptLogger().awrap_model_call(request, handler)
+        assert "когда выйдет GTA 6?" in caplog.text
+        assert "19 ноября 2026" in caplog.text
+
+    async def test_logs_input_messages_on_failure(self, caplog):
+        request = make_model_request(
+            ChatGroq(model="openai/gpt-oss-120b", api_key="x"),
+            messages=[HumanMessage(content="что там по игре?")],
+        )
+        handler = AsyncMock(side_effect=ValueError("boom"))
+        with caplog.at_level(logging.WARNING, logger="src.agent.middleware"), pytest.raises(ValueError):
+            await ModelAttemptLogger().awrap_model_call(request, handler)
+        assert "что там по игре?" in caplog.text
+
+    async def test_tool_call_output_shows_tool_names_when_content_is_empty(self, caplog):
+        """A worker-agent turn requesting a tool has no text content — the log
+        must still show something useful instead of an empty output=<empty>."""
+        request = make_model_request(
+            ChatGroq(model="openai/gpt-oss-120b", api_key="x"),
+            messages=[HumanMessage(content="кто разработчик GTA 6?")],
+        )
+        tool_call_message = LCAIMessage(
+            content="",
+            tool_calls=[{"name": "web_search", "args": {"query": "GTA 6 developer"}, "id": "1"}],
+        )
+        handler = AsyncMock(return_value=SimpleNamespace(result=[tool_call_message]))
+        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+            await ModelAttemptLogger().awrap_model_call(request, handler)
+        assert "web_search" in caplog.text
 
 
 class TestWorkerAgent:
