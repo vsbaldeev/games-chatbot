@@ -125,8 +125,12 @@ ingester (current message, should_respond=True only)
     │     yt-dlp also needs a JS runtime (deno, installed in the Dockerfile)
     │     to solve YouTube's signature/n-parameter challenges — without one
     │     it silently degrades to non-JS player clients missing many
-    │     formats, including format 18 (SHORT_FORMAT's pin), so every
-    │     download failed until YtdlpLogger surfaced the real warning
+    │     formats, including format 18 (SHORT_FORMAT's pin); even with deno,
+    │     yt-dlp's own default client selection has been observed picking a
+    │     single client with no format 18 at all, failing deterministically
+    │     — SHORTS_PLAYER_CLIENTS pins an explicit known-good client set
+    │     instead of trusting that shifting default; both gaps were only
+    │     diagnosable once YtdlpLogger surfaced the real warnings
     │     trigger="social_link": summarize_social_link dispatches to the
     │     matched handler (src.pipeline.social_links — instagram_reel or
     │     youtube_video) for a metadata-only fetch: no transcript, no

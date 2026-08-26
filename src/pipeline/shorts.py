@@ -24,12 +24,15 @@ and fetches tokens from the ``pot-provider`` docker-compose sidecar (see
 token — degraded, never fatal.
 
 yt-dlp also needs a JS runtime (deno, installed in the Dockerfile) to solve
-YouTube's signature/n-parameter challenges. Without one it silently falls
-back to non-JS player clients that are missing many formats — including
-format 18, the one ``SHORT_FORMAT`` pins to — so every download failed with
-a contextless "Requested format is not available" until this was diagnosed
-via :class:`YtdlpLogger` below (yt-dlp's own ``quiet``/``no_warnings``
-options were discarding the warning that actually named the cause).
+YouTube's signature/n-parameter challenges; without one it silently falls
+back to non-JS player clients. That alone turned out not to be the whole
+story: even with deno present, yt-dlp's own default client-selection has
+been observed picking a single client ("visionos") whose formats list has
+no format 18 at all, failing deterministically rather than flakily.
+``SHORTS_PLAYER_CLIENTS`` pins an explicit, known-good client set instead
+of trusting that shifting default. Both gaps were only diagnosable via
+:class:`YtdlpLogger` below — yt-dlp's own ``quiet``/``no_warnings`` options
+were discarding the warnings that actually named each cause.
 """
 
 import asyncio
@@ -70,12 +73,29 @@ POT_PROVIDER_URL = "http://pot-provider:4416"
 # merge → no ffmpeg binary needed in the image.
 SHORT_FORMAT = "18/b[ext=mp4][filesize<25M]/b[filesize<25M]"
 
+# yt-dlp auto-selects which of YouTube's several player clients to query,
+# and that default has been observed (2026-08-26, via YtdlpLogger below)
+# picking a single client — "visionos" — whose formats list has no format
+# 18 at all, failing every attempt deterministically rather than flakily.
+# yt-dlp's default client set shifts often as it reacts to YouTube's bot
+# countermeasures, so instead of trusting whatever it currently prefers,
+# pin an explicit set known to carry format 18: android_vr needs no PO
+# token at all (REQUIRE_JS_PLAYER=False, no GVS_PO_TOKEN_POLICY); android
+# and ios both accept the bgutil-sourced PO token as an alternative to
+# sign-in. yt-dlp queries all three and merges their formats, so one
+# client lacking 18 (or being blocked) no longer fails the whole request.
+SHORTS_PLAYER_CLIENTS = ["android_vr", "android", "ios"]
+
 # Two known intermittent, per-request YouTube extraction flakes that
 # self-heal on a re-request moments later — neither is a per-video block:
 #   * a signed CDN URL for the chosen format 403s (see yt-dlp issue #17395)
-#   * one of the several player clients yt-dlp queries times out, so the
+#   * one of SHORTS_PLAYER_CLIENTS times out for this one request, so the
 #     merged formats list comes back without format 18 and format
-#     selection fails with "Requested format is not available"
+#     selection fails with "Requested format is not available" — the
+#     deterministic version of this (yt-dlp defaulting to a single client
+#     that never has format 18) is what SHORTS_PLAYER_CLIENTS above fixes;
+#     this retry stays as defense-in-depth for a genuine one-off timeout
+#     on one of the pinned clients
 # Bounded retry only for these exact signals; every other failure (private,
 # age-gated, removed, ...) still fails fast with no retry.
 SHORTS_CDN_403_SIGNAL = "unable to download video data: HTTP Error 403"
@@ -177,11 +197,11 @@ def build_ydl_opts(target_dir: str) -> dict:
         target_dir: Directory the muxed mp4 is written into.
 
     Returns:
-        Options dict for ``yt_dlp.YoutubeDL``: muxed-only format, duration
-        and filesize guards, top-comments fetching, the PO-token provider
-        address for the bgutil plugin, and a logger that surfaces internal
-        yt-dlp warnings (PO-token/player-client failures) instead of
-        silently dropping them.
+        Options dict for ``yt_dlp.YoutubeDL``: muxed-only format, a pinned
+        player-client set (``SHORTS_PLAYER_CLIENTS``), duration and filesize
+        guards, top-comments fetching, the PO-token provider address for the
+        bgutil plugin, and a logger that surfaces internal yt-dlp warnings
+        (PO-token/player-client failures) instead of silently dropping them.
     """
     return {
         "format": SHORT_FORMAT,
@@ -199,6 +219,7 @@ def build_ydl_opts(target_dir: str) -> dict:
         "getcomments": True,
         "extractor_args": {
             "youtube": {
+                "player_client": SHORTS_PLAYER_CLIENTS,
                 "comment_sort": ["top"],
                 # Fields: max-comments, max-parents, max-replies — one list
                 # element per field (the Python-API equivalent of the CLI's

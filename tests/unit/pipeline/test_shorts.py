@@ -7,6 +7,7 @@ import pytest
 import yt_dlp
 
 from src.pipeline.shorts import (
+    SHORTS_PLAYER_CLIENTS,
     SHORTS_TRANSIENT_RETRY_ATTEMPTS,
     YtdlpLogger,
     build_ydl_opts,
@@ -78,3 +79,10 @@ class TestYtdlpLoggerSurfacesInternalDiagnostics:
         assert isinstance(opts["logger"], YtdlpLogger)
         assert opts["quiet"] is True
         assert opts["no_warnings"] is True
+
+    def test_build_ydl_opts_pins_the_player_client_set(self):
+        """yt-dlp's own default client selection has been observed picking a
+        single client with no format 18 at all — pinning a known-good set
+        is what actually fixes that, not just diagnoses it."""
+        opts = build_ydl_opts("/tmp/whatever")
+        assert opts["extractor_args"]["youtube"]["player_client"] == SHORTS_PLAYER_CLIENTS
