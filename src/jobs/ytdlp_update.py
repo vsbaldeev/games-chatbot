@@ -14,6 +14,13 @@ This job keeps the fix fully automatic:
 
 Worst case, a YouTube-side breakage lasts about a day with no human
 involved. Any error here is logged and skipped until the next run.
+
+Installs with the same extras as ``requirements.txt``'s yt-dlp line and
+``entrypoint.sh``'s startup install (``curl-cffi`` for Instagram, ``default``
+for yt-dlp-ejs — yt-dlp's own JS challenge-solver scripts, exact-pinned by
+yt-dlp to match its own version). A bare ``yt-dlp`` install here would
+upgrade yt-dlp without its matching yt-dlp-ejs, silently breaking
+JS-challenge-dependent formats the moment the two drift apart.
 """
 
 import asyncio
@@ -28,6 +35,7 @@ logger = log.get_logger(__name__)
 
 RUNTIME_DEPS_DIR = "/app/runtime-deps"
 PIP_TIMEOUT_SECONDS = 300
+YTDLP_PACKAGE_SPEC = "yt-dlp[curl-cffi,default]"
 
 
 async def run_pip(*pip_args: str) -> tuple[int, str]:
@@ -87,7 +95,7 @@ async def ytdlp_update_job(context) -> None:
         return
     return_code, output = await run_pip(
         "install", "--dry-run", "--upgrade", "--target", RUNTIME_DEPS_DIR,
-        "--no-cache-dir", "yt-dlp",
+        "--no-cache-dir", YTDLP_PACKAGE_SPEC,
     )
     if return_code != 0:
         logger.warning("yt-dlp update: dry-run failed, skipping until tomorrow: %s", output[-500:])
@@ -96,7 +104,7 @@ async def ytdlp_update_job(context) -> None:
         logger.info("yt-dlp update: %s is current, nothing to do", current_version)
         return
     return_code, output = await run_pip(
-        "install", "--upgrade", "--target", RUNTIME_DEPS_DIR, "--no-cache-dir", "yt-dlp",
+        "install", "--upgrade", "--target", RUNTIME_DEPS_DIR, "--no-cache-dir", YTDLP_PACKAGE_SPEC,
     )
     if return_code != 0:
         logger.warning("yt-dlp update: install failed, skipping until tomorrow: %s", output[-500:])

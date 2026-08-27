@@ -125,7 +125,13 @@ ingester (current message, should_respond=True only)
     │     yt-dlp also needs a JS runtime (deno, installed in the Dockerfile)
     │     to solve YouTube's signature/n-parameter challenges — without one
     │     it silently degrades to non-JS player clients missing many
-    │     formats, including format 18 (SHORT_FORMAT's pin); even with deno,
+    │     formats, including format 18 (SHORT_FORMAT's pin). Deno alone is
+    │     not sufficient either: it also needs the yt-dlp-ejs package (the
+    │     actual challenge-solving script, exact-pinned to yt-dlp's own
+    │     version) — requirements.txt, entrypoint.sh and
+    │     src/jobs/ytdlp_update.py all install yt-dlp with its "default"
+    │     extra so this stays in sync on every auto-update instead of
+    │     silently drifting apart; even with both,
     │     yt-dlp's own default client selection has been observed picking a
     │     single client with no format 18 at all, failing deterministically
     │     — SHORTS_PLAYER_CLIENTS pins an explicit client set instead of

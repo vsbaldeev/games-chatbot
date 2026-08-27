@@ -25,17 +25,30 @@ token — degraded, never fatal.
 
 yt-dlp also needs a JS runtime (deno, installed in the Dockerfile) to solve
 YouTube's signature/n-parameter challenges; without one it silently falls
-back to non-JS player clients. That alone turned out not to be the whole
-story: even with deno present, yt-dlp's own default client-selection has
-been observed picking a single client ("visionos") whose formats list has
-no format 18 at all, failing deterministically rather than flakily.
-``SHORTS_PLAYER_CLIENTS`` pins an explicit client set instead of trusting
-that shifting default — see its comment for why the set itself has already
-needed revising once, and why it is pinned to the same client family
-(WEBPO_CLIENTS) the bgutil provider above actually supports, rather than
-clients that merely looked token-free at the time. All three gaps were
-only diagnosable via :class:`YtdlpLogger` below — yt-dlp's own
-``quiet``/``no_warnings`` options were discarding the warnings that
+back to non-JS player clients. Deno alone is necessary but not sufficient:
+yt-dlp still needs the actual challenge-solving *script* to run in it,
+which it will only fetch itself at runtime from GitHub/npm if
+``--remote-components`` is passed (running arbitrary fetched JS on every
+extraction — not something to enable). The safe alternative is the
+``yt-dlp-ejs`` PyPI package, which bundles that script locally and is
+exact-pinned by yt-dlp to match its own version; ``requirements.txt``
+pulls it in via yt-dlp's ``default`` extra, and ``entrypoint.sh`` /
+``src/jobs/ytdlp_update.py`` install with the same extra so it never
+drifts out of sync on an auto-update. Without it, deno sits idle
+("challenge solver script ... skipped") and formats needing the n-challenge
+solved silently disappear.
+
+That JS-runtime story alone also turned out not to be the whole one:
+even with deno (and yt-dlp-ejs) present, yt-dlp's own default
+client-selection has been observed picking a single client ("visionos")
+whose formats list has no format 18 at all, failing deterministically
+rather than flakily. ``SHORTS_PLAYER_CLIENTS`` pins an explicit client set
+instead of trusting that shifting default — see its comment for why the
+set itself has already needed revising once, and why it is pinned to the
+same client family (WEBPO_CLIENTS) the bgutil provider above actually
+supports, rather than clients that merely looked token-free at the time.
+All of this was only diagnosable via :class:`YtdlpLogger` below — yt-dlp's
+own ``quiet``/``no_warnings`` options were discarding the warnings that
 actually named each cause.
 """
 
@@ -104,10 +117,12 @@ SHORT_FORMAT = "18/b[ext=mp4][filesize<25M]/b[filesize<25M]"
 # android_vr kept from the first attempt (still lists format 18's URL —
 # whether the missing-GVS-token 403 actually fires may not be universal
 # or fully rolled out, so it costs little to leave in the merged set).
-# UNVERIFIED against a real PO token: there is no way to reach the
-# docker-compose-only pot-provider sidecar, or confirm web/mweb still
-# offer a muxed (non-DASH) format at all, outside of production — watch
-# real logs after deploy. If every client here still fails, the remaining
+# UNVERIFIED against a real PO token specifically: the JS challenge-solving
+# side (deno + yt-dlp-ejs, see the module docstring) is now confirmed
+# working locally with no warnings, but there is no way to reach the
+# docker-compose-only pot-provider sidecar or confirm web/mweb still offer
+# a muxed (non-DASH) format at all, outside of production — watch real
+# logs after deploy. If every client here still fails, the remaining
 # options are a manually supplied po_token or accepting some links fail.
 SHORTS_PLAYER_CLIENTS = ["web", "mweb", "tv", "android_vr"]
 

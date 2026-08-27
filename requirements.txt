@@ -24,7 +24,14 @@ numpy>=1.26.0
 scipy>=1.11.0  # required by the Silero TTS model package at load time
 # curl-cffi extra: yt-dlp's Instagram extractor requires browser
 # impersonation to pass Instagram's anti-bot check, even anonymously.
-yt-dlp[curl-cffi]>=2026.7.4
+# default extra: pulls in yt-dlp-ejs, pinned by yt-dlp itself to the exact
+# compatible version — without it, yt-dlp has no JS challenge-solver script
+# to run even with a working deno binary on PATH (src/pipeline/shorts.py's
+# SHORT_FORMAT needs YouTube's "n" parameter descrambled to get a working
+# URL), and yt-dlp will only fetch one at runtime from GitHub/npm if
+# --remote-components is passed — running arbitrary fetched JS on every
+# extraction, which this avoids by installing the vetted package instead.
+yt-dlp[curl-cffi,default]>=2026.7.4
 bgutil-ytdlp-pot-provider>=1.3.1
 Pillow>=10.0.0
 fastembed>=0.4.0
