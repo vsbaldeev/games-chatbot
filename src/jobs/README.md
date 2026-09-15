@@ -1,6 +1,6 @@
 Scheduled background jobs — each registered as a daily Telegram JobQueue entry.
 
-Job managers live in src/bot/jobs.py. Implementations live here, one file per job.
+Job managers live in src/app/jobs.py. Implementations live here, one file per job.
 
 ## Schedule
 

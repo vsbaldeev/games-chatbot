@@ -1,6 +1,6 @@
 Telegram event handlers for non-command updates: member tracking, reactions, and messages.
 
-All handlers are registered by EventHandlerManager and MessageHandlerManager in src/bot/handlers.py.
+All handlers are registered by EventHandlerManager and MessageHandlerManager in src/app/handlers.py.
 
 ## Handlers
 
@@ -94,7 +94,7 @@ anything further; the generic-exception path is never reached, so no
 "something broke" notice goes out for what is likely a success. Every other
 error type, and a `TimedOut` on a text-only send (no video in flight, so
 nothing ambiguous), still take the ordinary text-fallback path above.
-`src/bot/app.py` also raises PTB's timeouts themselves
+`src/app/app.py` also raises PTB's timeouts themselves
 (`BOT_READ_TIMEOUT_SECONDS=30`, `BOT_MEDIA_WRITE_TIMEOUT_SECONDS=60`, up from
 defaults sized for text, not video) so the race is rarer to begin with — the
 `AmbiguousDeliveryError` handling above is what makes the remaining cases

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 from telegram.ext import CommandHandler
 
-from src.bot.handlers import CommandHandlerManager
+from src.app.handlers import CommandHandlerManager
 
 
 def registered_command_names() -> set[str]:
@@ -50,11 +50,11 @@ class TestMemeCommandRemoved:
 
 class TestWeeklyRoastJobRemoved:
     def test_jobs_module_has_no_roast_job_manager(self):
-        jobs = importlib.import_module("src.bot.jobs")
+        jobs = importlib.import_module("src.app.jobs")
         assert not hasattr(jobs, "RoastJobManager")
 
     def test_weekly_roast_job_not_imported(self):
-        jobs = importlib.import_module("src.bot.jobs")
+        jobs = importlib.import_module("src.app.jobs")
         assert not hasattr(jobs, "weekly_roast_job")
 
 

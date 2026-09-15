@@ -31,7 +31,7 @@ MAX_TOKENS = 2048
 
 # The roles job is scheduled daily but only acts on Sundays, so the one
 # meaningful run each week is Sunday at this UTC time. The startup catch-up
-# relies on this matching the schedule registered in src/bot/jobs.py.
+# relies on this matching the schedule registered in src/app/jobs.py.
 ROLES_RUN_TIME = datetime.time(hour=14, minute=0, tzinfo=datetime.timezone.utc)
 # Delay before the startup catch-up fires, to let initialisation settle.
 CATCH_UP_DELAY_SECONDS = 30

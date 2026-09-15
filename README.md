@@ -54,7 +54,7 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | Module | Description |
 |---|---|
 | [src/pipeline/](src/pipeline/README.md) | LangGraph StateGraph — message processing nodes and graph wiring |
-| [src/bot/](src/bot/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
+| [src/app/](src/app/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
 | [src/commands/](src/commands/README.md) | Command handlers — /duel |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup, yt-dlp refresh |
@@ -104,7 +104,7 @@ Hosting      VPS / Docker Compose (bot + postgres + pot-provider containers)
 ```bash
 # Local (requires .env from .env.example)
 alembic upgrade head   # apply schema migrations first
-python -m src.bot
+python -m src.app
 
 # Production
 docker compose up -d --build

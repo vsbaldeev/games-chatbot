@@ -1,6 +1,6 @@
 """
 Telegram bot — entry point and startup lifecycle.
-Run with: python -m src.bot
+Run with: python -m src.app
 """
 
 from telegram import Update
@@ -8,7 +8,7 @@ from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
 from src import log
 from src.agent import worker_agent, response_agent, roast_agent
-from src.bot.jobs import (
+from src.app.jobs import (
     MemeJobManager,
     MessageCleanupJobManager,
     ResetModelJobManager,
@@ -58,7 +58,7 @@ async def __on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
 
 def main() -> None:
     from src import config
-    from src.bot.handlers import (
+    from src.app.handlers import (
         EventHandlerManager,
         CommandHandlerManager,
         MessageHandlerManager,

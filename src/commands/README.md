@@ -1,6 +1,6 @@
 Command handler implementations, organised by domain.
 
-All handlers are registered in CommandHandlerManager (src/bot/handlers.py).
+All handlers are registered in CommandHandlerManager (src/app/handlers.py).
 Adding a new command: handler → register in CommandHandlerManager → export from
 src/commands/__init__.py → mention in cmd_help and the agent system prompt (src/agent.py).
 
