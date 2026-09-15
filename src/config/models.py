@@ -142,11 +142,20 @@ RESPONSE_MODEL_FALLBACKS: list[str] = [
 # to need a second, differently-sourced leg. GLM added 2026-08-25 as that
 # second leg (Zhipu/Z.ai backend, so an independent quota pool from Gemma's);
 # its Russian casual-voice quality is UNVALIDATED, re-check same as the Groq
-# gpt-oss-120b primary. Requires OPENROUTER_API_KEY; without it ResponseAgent
-# stays Groq-only, same fail-open contract as make_filter_llm.
+# gpt-oss-120b primary. Both free legs share the failure mode that started
+# this chain (a shared free pool saturating under load), so the chain ends
+# in a paid floor: qwen3-235b-a22b-2507, added 2026-08-31 after the Groq
+# gpt-oss-120b primary hit its 8000 TPM cap and the free legs alone weren't
+# a guaranteed out. Its Russian casual-voice quality is also UNVALIDATED —
+# picked over re-adding llama-3.3-70b-instruct (this repo's one proven RU
+# pick, used as FILTER_FALLBACK_MODEL) to actually test the newer, larger
+# model instead of falling back to the known-safe choice again; revisit if
+# output quality disappoints. Requires OPENROUTER_API_KEY; without it
+# ResponseAgent stays Groq-only, same fail-open contract as make_filter_llm.
 RESPONSE_OPENROUTER_FALLBACKS: list[str] = [
     "google/gemma-4-31b-it:free",
     "z-ai/glm-5.2:free",
+    "qwen/qwen3-235b-a22b-2507",
 ]
 
 # Roast generation fallback chain. Middle leg was llama-3.3-70b-versatile,
