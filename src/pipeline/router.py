@@ -286,8 +286,6 @@ class MessageRouter:
             content = unified_messages.STICKER_PLACEHOLDER
         elif media_type == "animation":
             content = unified_messages.ANIMATION_PLACEHOLDER
-        elif media_type == "audio":
-            content = unified_messages.AUDIO_PLACEHOLDER
         else:
             content = ""
 

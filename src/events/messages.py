@@ -87,7 +87,6 @@ REPLY_PLACEHOLDERS = {
     "video": unified_messages.VIDEO_PLACEHOLDER,
     "sticker": unified_messages.STICKER_PLACEHOLDER,
     "animation": unified_messages.ANIMATION_PLACEHOLDER,
-    "audio": unified_messages.AUDIO_PLACEHOLDER,
 }
 
 
@@ -117,7 +116,7 @@ def derive_reply_media_type(reply) -> str:
         One of the media-type strings used in ``unified_messages`` rows;
         ``"text"`` when no known media attachment is present.
     """
-    for media_type in ("voice", "video_note", "video", "photo", "sticker", "animation", "audio"):
+    for media_type in ("voice", "video_note", "video", "photo", "sticker", "animation"):
         if getattr(reply, media_type, None):
             return media_type
     return "text"
@@ -788,22 +787,6 @@ async def handle_animation_message(update: Update, context: ContextTypes.DEFAULT
         return
     await achievements.increment_stat(user_id, chat_id, username, "animation_messages")
     await run_pipeline(update, context, media_type="animation", file_id=msg.animation.file_id)
-
-
-async def handle_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    if not msg or not msg.audio:
-        return
-    if update.effective_user and update.effective_user.is_bot:
-        return
-    username = get_username(update)
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    if msg.forward_origin is not None:
-        await achievements.increment_stat(user_id, chat_id, username, "forwarded_messages")
-        await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
-        return
-    await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
 
 
 async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

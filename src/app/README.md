@@ -94,7 +94,6 @@ handlers run.
 | sticker, groups only | `handle_sticker_message` | `0` | |
 | video, groups only | `handle_video_message` | `0` | |
 | animation (GIF), groups only | `handle_animation_message` | `0` | |
-| audio, groups only | `handle_audio_message` | `0` | |
 
 ### Ignored updates
 
@@ -104,6 +103,7 @@ Not registered by any manager above — PTB drops these silently, no error.
 |---|---|
 | any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` still fires there, since it has no chat-type filter |
 | message reaction (add/remove emoji) | no handler registered for `message_reaction` updates anywhere in the codebase |
+| audio (music/sound file attachment) | `handle_audio_message` was removed — never transcribed, no stat, rarely sent in practice |
 | document, location, contact, poll, dice, venue | no filter registered for these types anywhere in the codebase |
 
 ## Scheduled jobs (jobs.py)

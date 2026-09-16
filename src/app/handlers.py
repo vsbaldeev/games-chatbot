@@ -24,7 +24,6 @@ from src.events.messages import (
     handle_sticker_message,
     handle_video_message,
     handle_animation_message,
-    handle_audio_message,
 )
 
 class HandlerManagerInterface(ABC):
@@ -58,4 +57,3 @@ class MessageHandlerManager(HandlerManagerInterface):
         app.add_handler(MessageHandler(filters.Sticker.ALL & group_only, handle_sticker_message))
         app.add_handler(MessageHandler(filters.VIDEO & group_only, handle_video_message))
         app.add_handler(MessageHandler(filters.ANIMATION & group_only, handle_animation_message))
-        app.add_handler(MessageHandler(filters.AUDIO & group_only, handle_audio_message))
