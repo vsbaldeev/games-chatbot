@@ -6,7 +6,6 @@ from telegram import Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
-    ChatMemberHandler,
     CommandHandler,
     MessageHandler,
     MessageReactionHandler,
@@ -16,9 +15,8 @@ from telegram.ext import (
 
 from src.commands import general, games
 from src.events.members import (
-    track_member,
-    handle_new_chat_members,
-    handle_bot_added_to_chat,
+    register_sender_as_member,
+    register_users_from_join_message,
 )
 from src.events.messages import (
     handle_message,
@@ -39,12 +37,11 @@ class HandlerManagerInterface(ABC):
 
 class EventHandlerManager(HandlerManagerInterface):
     def add_handlers(self, app: Application) -> None:
-        app.add_handler(TypeHandler(Update, track_member), group=-1)
+        app.add_handler(TypeHandler(Update, register_sender_as_member), group=-1)
         app.add_handler(MessageHandler(
             filters.StatusUpdate.NEW_CHAT_MEMBERS & filters.ChatType.GROUPS,
-            handle_new_chat_members,
+            register_users_from_join_message,
         ))
-        app.add_handler(ChatMemberHandler(handle_bot_added_to_chat, ChatMemberHandler.MY_CHAT_MEMBER))
         app.add_handler(MessageReactionHandler(
             handle_reaction,
             message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_UPDATED,

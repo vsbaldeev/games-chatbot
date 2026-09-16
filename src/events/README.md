@@ -6,9 +6,8 @@ All handlers are registered by EventHandlerManager and MessageHandlerManager in 
 
 ```
 members.py
-    track_member(update)           — upsert user into chat_members on every update
-    handle_new_chat_members(...)   — send welcome message when new user joins
-    handle_bot_added_to_chat(...)  — send greeting when bot is added to a new group
+    register_sender_as_member(update)           — upsert user into chat_members on every update
+    register_users_from_join_message(...)   — upsert joined users into chat_members
 
 reactions.py
     handle_reaction(update)        — map Telegram reaction emoji to user_stats columns

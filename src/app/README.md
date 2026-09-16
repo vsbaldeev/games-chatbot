@@ -8,7 +8,7 @@ to. `app.main()` builds the one instance this whole process uses.
 **Handler** — a `(filter, callback)` pair registered with `app.add_handler(...)`. The filter
 (`filters.TEXT`, `filters.PHOTO`, ...) decides whether it matches a given Update. Handlers also
 have a `group` number, default `0` — PTB runs at most one matching handler per group, so a
-handler in a different group (only `track_member`, group `-1`) fires alongside the default-group
+handler in a different group (only `register_sender_as_member`, group `-1`) fires alongside the default-group
 match, not instead of it.
 
 **Job** — a `(schedule, callback)` pair registered with `app.job_queue.run_daily(...)` /
@@ -63,32 +63,49 @@ instead of letting PTB report "no error handlers".
 ## Handler managers (handlers.py)
 
 Each class implements `HandlerManagerInterface.add_handlers(app)`. `EventHandlerManager` runs
-first and registers `track_member` in group `-1` so every update is seen before the normal
+first and registers `register_sender_as_member` in group `-1` so every update is seen before the normal
 handler groups run.
 
-```
-EventHandlerManager
-    TypeHandler(Update, track_member)           — register every active user in chat_members
-    MessageHandler(new_chat_members)            — greet new members
-    ChatMemberHandler(bot_added)                — handle bot being added to a new group
-    MessageReactionHandler(handle_reaction)     — track emoji reactions → user_stats
+### EventHandlerManager
 
-CommandHandlerManager
-    /start          — welcome message
-    /help           — command list
-    /duel           — emoji duel picker
-    CallbackQueryHandler(duel_*)   — duel inline buttons
+Registers first, in group `-1`, so `register_sender_as_member` sees every update before the default-group
+handlers run.
 
-MessageHandlerManager
-    text        → handle_message        — main pipeline entry point
-    voice       → handle_voice_message
-    video_note  → handle_voice_message  (same handler, different media_type)
-    photo       → handle_photo_message
-    sticker     → handle_sticker_message
-    video       → handle_video_message
-    animation   → handle_animation_message
-    audio       → handle_audio_message
-```
+| Update / trigger | Handler | Group | Notes |
+|---|---|---|---|
+| any `Update` | `register_sender_as_member` | `-1` | registers every active user in `chat_members`; no chat-type filter |
+| new chat member, groups only | `register_users_from_join_message` | `0` | registers each joined user in `chat_members` |
+| message reaction updated | `handle_reaction` | `0` | tracks emoji reactions → `user_stats`; no chat-type filter |
+
+### CommandHandlerManager
+
+| Update / trigger | Handler | Group | Notes |
+|---|---|---|---|
+| `/start`, groups only | `general.cmd_start` | `0` | welcome message |
+| `/help`, groups only | `general.cmd_help` | `0` | command list |
+| `/duel`, groups only | `games.cmd_duel` | `0` | emoji duel picker |
+| callback query, `duel_*` pattern | `games.handle_duel_callback` | `0` | duel inline buttons |
+
+### MessageHandlerManager
+
+| Update / trigger | Handler | Group | Notes |
+|---|---|---|---|
+| text (not a command), groups only | `handle_message` | `0` | main pipeline entry point |
+| voice or video note, groups only | `handle_voice_message` | `0` | same handler for both media types |
+| photo, groups only | `handle_photo_message` | `0` | |
+| sticker, groups only | `handle_sticker_message` | `0` | |
+| video, groups only | `handle_video_message` | `0` | |
+| animation (GIF), groups only | `handle_animation_message` | `0` | |
+| audio, groups only | `handle_audio_message` | `0` | |
+
+### Ignored updates
+
+Not registered by any manager above — PTB drops these silently, no error.
+
+| Update / trigger | Why ignored |
+|---|---|
+| any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` and `handle_reaction` still fire there, since neither filters by chat type |
+| document, location, contact, poll, dice, venue | no filter registered for these types anywhere in the codebase |
 
 ## Scheduled jobs (jobs.py)
 

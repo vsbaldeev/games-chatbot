@@ -1,9 +1,8 @@
 """Telegram event handler implementations — members, messages, reactions."""
 
 from src.events.members import (
-    track_member,
-    handle_new_chat_members,
-    handle_bot_added_to_chat,
+    register_sender_as_member,
+    register_users_from_join_message,
 )
 from src.events.messages import (
     handle_message,
@@ -15,9 +14,8 @@ from src.events.messages import (
 from src.events.reactions import handle_reaction
 
 __all__ = [
-    "track_member",
-    "handle_new_chat_members",
-    "handle_bot_added_to_chat",
+    "register_sender_as_member",
+    "register_users_from_join_message",
     "handle_message",
     "handle_voice_message",
     "handle_photo_message",
