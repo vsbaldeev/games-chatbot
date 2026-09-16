@@ -1,10 +1,10 @@
 """
-Part 1 — retirement of the command-driven roast surface.
+Retirement of the command-driven roast surface.
 
-The /roast command and the weekly scheduled roast are removed in favour of
-autonomous humor, while the offense auto-roast generation path
-(``Roaster.generate`` / ``generate_roast_text``) is preserved because the
-offense clap-back still uses it.
+The /roast command, the weekly scheduled roast, and the roast generator
+itself (``src.commands.fun.roast``, ``src.agent.roast``) are all removed —
+insults are now handled entirely by the engagement wind-down engine in
+``src.pipeline.filter_node`` / ``src.pipeline.engagement_gate``.
 """
 
 import importlib
@@ -56,15 +56,3 @@ class TestWeeklyRoastJobRemoved:
     def test_weekly_roast_job_not_imported(self):
         jobs = importlib.import_module("src.app.jobs")
         assert not hasattr(jobs, "weekly_roast_job")
-
-
-class TestOffenseRoastPathPreserved:
-    def test_generate_roast_text_still_exported(self):
-        roast = importlib.import_module("src.commands.fun.roast")
-        assert hasattr(roast, "generate_roast_text")
-        assert hasattr(roast.Roaster, "generate")
-
-    def test_cmd_roast_removed(self):
-        roast = importlib.import_module("src.commands.fun.roast")
-        assert not hasattr(roast, "cmd_roast")
-        assert not hasattr(roast.Roaster, "cmd_roast")

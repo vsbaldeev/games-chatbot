@@ -29,7 +29,6 @@ TRACKABLE_STATS = {
     "photo_messages",
     "night_messages",
     "animation_messages",
-    "roasted_count",
     "duel_wins",
 }
 

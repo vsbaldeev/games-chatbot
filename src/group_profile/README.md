@@ -52,7 +52,7 @@ generate.py    generate_verdicts(rubric, materials_by_uid) -> dict[int, dict]
                normalize_homoglyphs (src.agent.language) — this model
                occasionally splices a Latin/Greek glyph into an otherwise-
                Cyrillic word, the same deterministic repair already applied
-               to RESPONSE/ROAST output.
+               to RESPONSE output.
               fill_missing_verdicts(...) — members the LLM omitted from its
                JSON are re-asked once, then get a neutral fallback verdict —
                every eligible member ends up with an entry, mirroring

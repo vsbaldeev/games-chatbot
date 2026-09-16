@@ -58,7 +58,7 @@ user_stats (
     user_id, chat_id, username,
     -- counters incremented via increment_stat()
     sticker_messages, forwarded_messages, voice_messages, video_messages,
-    photo_messages, night_messages, animation_messages, duel_wins, roasted_count,
+    photo_messages, night_messages, animation_messages, duel_wins,
     -- max-value trackers updated via update_max_stat()
     voice_max_duration, long_message_max,
     last_seen INTEGER,

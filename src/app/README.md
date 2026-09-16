@@ -130,7 +130,7 @@ packages, each with its own README:
 src/commands/   /start, /help, /duel and other slash-command handlers
 src/events/     handle_message and friends — the per-media-type update handlers
 src/jobs/       the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
-src/agent/      worker/response/roast LLM agents, initialised in __on_startup
+src/agent/      worker/response LLM agents, initialised in __on_startup
 src/store/      Postgres access — db.init() opens the pool __on_startup depends on
 src/tts/        voice reply synthesis, initialised in __on_startup
 ```

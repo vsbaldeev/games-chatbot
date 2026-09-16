@@ -80,7 +80,6 @@ LLM (agent)  Groq gpt-oss-120b → qwen3.6-27b → gpt-oss-20b (fallback chain; 
 LLM (memory) Groq qwen/qwen3.6-27b → gpt-oss-20b (reasoning disabled on primary — thinking would eat the whole token budget)
 Embeddings   fastembed paraphrase-multilingual-MiniLM-L12-v2 (ONNX, 384-dim, local)
 LLM (response) Groq gpt-oss-120b → OpenRouter google/gemma-4-31b-it:free → z-ai/glm-5.2:free → qwen/qwen3-235b-a22b-2507 (cross-provider fallback chain; Llama was decommissioned by Groq and is no longer free anywhere; GLM leg added because Gemma's shared free pool was rate-limiting too often; Qwen paid leg added as a floor once both free legs proved shared-pool-fragile too)
-LLM (roast)  Groq openai/gpt-oss-120b → gpt-oss-20b → OpenRouter google/gemma-4-31b-it:free → z-ai/glm-5.2:free (cross-provider fallback chain)
 LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.6-27b (autonomous comedian; JSON decide-or-abstain)
 LLM (roles)  Groq openai/gpt-oss-120b (also used for on-request group profiling, src/group_profile/)
 LLM (filter) Groq qwen/qwen3.6-27b (reasoning disabled) → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)

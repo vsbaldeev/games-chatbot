@@ -158,22 +158,6 @@ RESPONSE_OPENROUTER_FALLBACKS: list[str] = [
     "qwen/qwen3-235b-a22b-2507",
 ]
 
-# Roast generation fallback chain. Middle leg was llama-3.3-70b-versatile,
-# decommissioned by Groq 2026-08-16 with no free-tier same-family
-# replacement — dropped rather than replaced, since the chain already had
-# two working Groq models either side of it.
-ROAST_MODEL_FALLBACKS: list[str] = [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-]
-
-# Cross-provider (OpenRouter) fallback chain for the roast chain — see
-# RESPONSE_OPENROUTER_FALLBACKS, same models and same reasoning.
-ROAST_OPENROUTER_FALLBACKS: list[str] = [
-    "google/gemma-4-31b-it:free",
-    "z-ai/glm-5.2:free",
-]
-
 # Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
 # Karras). Standard multi-step sampling, not an LCM speed hack: low-step/
 # low-guidance sampling reliably hallucinated compositions. One 512px image
@@ -215,9 +199,9 @@ MEME_JUDGE_ATTEMPTS = 3
 # free-tier Llama replacement anywhere); openai/gpt-oss-120b is the
 # replacement. It's a reasoning model with no proven "no thinking" mode in
 # this codebase, so SELFIE_SCENE_MAX_TOKENS is raised to the same headroom
-# ROAST_MODEL_FALLBACKS' gpt-oss-120b primary needs, rather than risk the
-# whole budget disappearing into a hidden <think> block before strip_thinking
-# ever sees an answer.
+# a gpt-oss-120b reasoning-model call needs elsewhere in this file, rather
+# than risk the whole budget disappearing into a hidden <think> block before
+# strip_thinking ever sees an answer.
 SELFIE_SCENE_MODEL = "openai/gpt-oss-120b"
 SELFIE_SCENE_MAX_TOKENS = 1024
 

@@ -26,14 +26,14 @@ USER_ID = 42
 
 class TestSelectStatHighlights:
     def test_skips_zero_and_unknown_stats(self):
-        stats = {"duel_wins": 0, "unknown_stat": 99, "roasted_count": 3}
+        stats = {"duel_wins": 0, "unknown_stat": 99, "sticker_messages": 3}
         highlights = select_stat_highlights(stats)
         assert len(highlights) == 1
         assert "3" in highlights[0]
 
     def test_sorted_descending_and_capped(self):
         stats = {
-            "roasted_count": 1, "duel_wins": 2, "night_messages": 3,
+            "duel_wins": 2, "night_messages": 3,
             "sticker_messages": 4, "voice_messages": 5,
         }
         highlights = select_stat_highlights(stats)
@@ -70,14 +70,14 @@ class TestFormatMemberMaterial:
             facts=["любит доту"],
             quotes=["я лучший"],
             role={"tag": "Молчун", "reason": "молчит неделями"},
-            stats=["прожарен раз: 3"],
+            stats=["побед в дуэлях: 3"],
         )
         block = format_member_material(material)
         assert "любит доту" in block
         assert "я лучший" in block
         assert "Молчун" in block
         assert "молчит неделями" in block
-        assert "прожарен раз: 3" in block
+        assert "побед в дуэлях: 3" in block
 
     def test_role_without_reason_still_renders_tag(self):
         material = MemberMaterial(username="vasya", role={"tag": "Молчун", "reason": ""})
@@ -94,13 +94,13 @@ class TestGatherMemberMaterial:
              patch("src.agent.roast_material.user_tags.get_tag",
                    AsyncMock(return_value={"tag": "Молчун", "reason": "тихий"})), \
              patch("src.agent.roast_material.achievements.get_user_stats",
-                   AsyncMock(return_value={"roasted_count": 2})):
+                   AsyncMock(return_value={"duel_wins": 2})):
             material = await gather_member_material(CHAT_ID, USER_ID, "vasya")
         assert material.username == "vasya"
         assert material.facts == ["факт1"]
         assert material.quotes == ["цитата"]
         assert material.role == {"tag": "Молчун", "reason": "тихий"}
-        assert material.stats == ["прожарен раз: 2"]
+        assert material.stats == ["побед в дуэлях: 2"]
         assert material.is_empty is False
 
     async def test_missing_everything_yields_empty_material(self):

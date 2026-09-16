@@ -80,7 +80,7 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
                       link_messages, voice_messages, video_messages, video_note_messages,
                       photo_messages, night_messages, long_messages,
                       voice_max_duration, long_message_max,
-                      roasted_count, duel_wins, animation_messages
+                      duel_wins, animation_messages
                FROM user_stats WHERE user_id = $1 AND chat_id = $2""",
             user_id, chat_id,
         )
@@ -99,7 +99,6 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
         "long_messages":       row["long_messages"],
         "voice_max_duration":  row["voice_max_duration"],
         "long_message_max":    row["long_message_max"],
-        "roasted_count":       row["roasted_count"],
         "duel_wins":           row["duel_wins"],
         "animation_messages":  row["animation_messages"],
     }

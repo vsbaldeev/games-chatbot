@@ -24,7 +24,6 @@ MAX_STAT_HIGHLIGHTS = 4
 # Curated, roast-worthy stats → Russian phrase templates ({count} is filled in).
 # Only these keys surface as highlights; the rest of the stat row is ignored.
 STAT_LABELS = {
-    "roasted_count": "прожарен раз: {count}",
     "duel_wins": "побед в дуэлях: {count}",
     "night_messages": "ночных сообщений: {count}",
     "sticker_messages": "стикеров отправил: {count}",
