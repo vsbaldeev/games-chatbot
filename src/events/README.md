@@ -10,7 +10,7 @@ members.py
     register_users_from_join_message(...)   — upsert joined users into chat_members
 
 messages.py
-    handle_message(update)         — text: track stats (night, link, forward, emoji, long),
+    handle_text_message(update)         — text: track stats (night, link, forward, emoji, long),
                                      then enter the LangGraph pipeline
     handle_voice_message(update)   — increment voice_messages + update voice_max_duration,
                                      enter pipeline

@@ -18,7 +18,7 @@ from src.events.members import (
     register_users_from_join_message,
 )
 from src.events.messages import (
-    handle_message,
+    handle_text_message,
     handle_voice_message,
     handle_photo_message,
     handle_sticker_message,
@@ -51,7 +51,7 @@ class CommandHandlerManager(HandlerManagerInterface):
 class MessageHandlerManager(HandlerManagerInterface):
     def add_handlers(self, app: Application) -> None:
         group_only = filters.ChatType.GROUPS
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & group_only, handle_message))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & group_only, handle_text_message))
         app.add_handler(MessageHandler((filters.VOICE | filters.VIDEO_NOTE) & group_only, handle_voice_message))
         app.add_handler(MessageHandler(filters.PHOTO & group_only, handle_photo_message))
         app.add_handler(MessageHandler(filters.Sticker.ALL & group_only, handle_sticker_message))

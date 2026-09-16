@@ -5,7 +5,7 @@ from src.events.members import (
     register_users_from_join_message,
 )
 from src.events.messages import (
-    handle_message,
+    handle_text_message,
     handle_voice_message,
     handle_photo_message,
     handle_sticker_message,
@@ -15,7 +15,7 @@ from src.events.messages import (
 __all__ = [
     "register_sender_as_member",
     "register_users_from_join_message",
-    "handle_message",
+    "handle_text_message",
     "handle_voice_message",
     "handle_photo_message",
     "handle_sticker_message",

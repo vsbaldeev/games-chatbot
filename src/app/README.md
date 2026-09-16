@@ -88,7 +88,7 @@ handlers run.
 
 | Update / trigger | Handler | Group | Notes |
 |---|---|---|---|
-| text (not a command), groups only | `handle_message` | `0` | main pipeline entry point |
+| text (not a command), groups only | `handle_text_message` | `0` | main pipeline entry point |
 | voice or video note, groups only | `handle_voice_message` | `0` | same handler for both media types |
 | photo, groups only | `handle_photo_message` | `0` | |
 | sticker, groups only | `handle_sticker_message` | `0` | |
@@ -127,7 +127,7 @@ packages, each with its own README:
 
 ```
 src/commands/   /help, /duel and other slash-command handlers
-src/events/     handle_message and friends — the per-media-type update handlers
+src/events/     handle_text_message and friends — the per-media-type update handlers
 src/jobs/       the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
 src/agent/      worker/response LLM agents, initialised in __on_startup
 src/store/      Postgres access — db.init() opens the pool __on_startup depends on
