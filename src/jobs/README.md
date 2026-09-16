@@ -23,7 +23,7 @@ members who share a name can never collapse into one entry.
    (factless members are left untagged)
 3. generate_roles: anonymise to user_0, user_1, … via src/utils/anon_map.py
    (shared with src/group_profile/, real ids never sent to LLM);
-   LLM (TAG_MODEL, qwen/qwen3.6-27b) returns {role, reason} per anon key;
+   LLM (TAG_MODEL, qwen/qwen3.8-27b) returns {role, reason} per anon key;
    remap back. Called with reasoning_effort="none", which this model accepts
    (the earlier gpt-oss-120b primary 400s on "none" and needed a "low"
    budget workaround instead — see git history); "none" leaves the whole

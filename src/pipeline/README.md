@@ -224,7 +224,7 @@ frame extraction (PyAV)
 
 vision LLM fallback (src.agent.vision.make_vision_llm)
     every vision call in this file (photo, sticker, video/video_note frames)
-    goes through the shared factory: Groq primary (qwen/qwen3.6-27b,
+    goes through the shared factory: Groq primary (qwen/qwen3.8-27b,
     reasoning_effort="none") with an OpenRouter fallback
     (qwen/qwen3-vl-32b-instruct) so a Groq daily-quota exhaustion or outage
     degrades to a paid call instead of silently dropping the description —
@@ -317,7 +317,7 @@ filter  (runs after ingester)
     │       │   with an OpenRouter fallback so a Groq outage cannot turn an
     │       │   addressed question into silence (make_filter_llm). Groq
     │       │   decommissioned every Llama chat model on 2026-08-16 with no
-    │       │   free-tier replacement, so FILTER_MODEL is now qwen/qwen3.6-27b
+    │       │   free-tier replacement, so FILTER_MODEL is now qwen/qwen3.8-27b
     │       │   (reasoning disabled) — accuracy against real messages unverified
     │       └─ otherwise → engagement gate (see wind-down engine below)
     ├─ text, LLM → NOT_ADDRESSED (author replied to the bot but is talking to
@@ -355,7 +355,7 @@ filter  (runs after ingester)
     │    text) so «бот» resolves to the right referent — game bots, other
     │    Telegram bots and people playing «как бот» classify as OTHER
     ├─ LLM → BOT_INSULT → confirmed by INSULT_CONFIRM_MODEL
-    │    (qwen/qwen3.6-27b — currently identical to FILTER_MODEL, so this is a
+    │    (qwen/qwen3.8-27b — currently identical to FILTER_MODEL, so this is a
     │    same-model re-ask, not a genuine second opinion) on the same input;
     │    only agreement acts —
     │    disagreement or a confirmation error resolves to silence
@@ -505,7 +505,7 @@ context_builder
     │
     ▼
 worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, web);
-         chain gpt-oss-120b → qwen3.6-27b → gpt-oss-20b (no 8B floor: at that size
+         chain gpt-oss-120b → qwen3.8-27b → gpt-oss-20b (no 8B floor: at that size
          the worker fabricates from memory instead of calling tools; exhaustion
          raises an honest quota error instead)
     ├─ CONTEXT FIRST: if reply chain already contains the answer, no tools called
@@ -690,7 +690,7 @@ memory_writer
             similarity to it (find_relevant_facts_for_users) — not the user's
             whole stored list; an embed failure shows no existing facts rather
             than falling back to everything
-          → qwen/qwen3.6-27b (reasoning disabled) extracts up to 3 new facts
+          → qwen/qwen3.8-27b (reasoning disabled) extracts up to 3 new facts
           → source rules: only the user's own words are evidence — the bot's
             reply is context, never a fact source; voice transcripts are
             framed as spoken words; photo/video descriptions are marked as

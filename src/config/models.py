@@ -16,10 +16,10 @@ WHISPER_MODEL = "whisper-large-v3"
 WHISPER_LANGUAGE = "ru"
 
 # Vision: image and video-frame description.
-# qwen/qwen3.6-27b is the only non-deprecated vision-capable model on the free tier.
+# qwen/qwen3.8-27b is the only non-deprecated vision-capable model on the free tier.
 # Reasoning model: callers must pass reasoning_effort="none" or the whole
 # max_tokens budget is burned inside a <think> block.
-VISION_MODEL = "qwen/qwen3.6-27b"
+VISION_MODEL = "qwen/qwen3.8-27b"
 
 # Cross-provider fallback for the vision model, used when Groq's daily quota
 # for VISION_MODEL is exhausted or the API is unreachable (see
@@ -39,7 +39,7 @@ VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
 #
 # llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16 with no
 # same-family replacement on any free tier (Groq's own migration notice
-# points at GPT-OSS/Qwen, not another Llama size). qwen/qwen3.6-27b is the
+# points at GPT-OSS/Qwen, not another Llama size). qwen/qwen3.8-27b is the
 # replacement — the same reasoning-model family already proven in this
 # codebase under a tight token budget via reasoning_effort="none" (see
 # VISION_MODEL, MEME_JUDGE_MAX_TOKENS=50, and make_filter_llm below), which is
@@ -51,7 +51,7 @@ VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
 # MEMORY_MODEL_FALLBACKS[0], and TAG_MODEL (see below), undoing the original
 # point of picking a different model family for this call site. Re-split if
 # quota exhaustion starts correlating across them.
-FILTER_MODEL = "qwen/qwen3.6-27b"
+FILTER_MODEL = "qwen/qwen3.8-27b"
 
 # Cross-provider fallback for the filter, used when Groq is out of quota or
 # unreachable (see filter_node.make_filter_llm). Same weights, different
@@ -69,7 +69,7 @@ FILTER_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct"
 # same-model re-ask at temperature 0 — it will nearly always agree, so the
 # overheard gate is effectively open. Needs a decision: point this at a
 # genuinely different model (openai/gpt-oss-120b) or drop the second call.
-INSULT_CONFIRM_MODEL = "qwen/qwen3.6-27b"
+INSULT_CONFIRM_MODEL = "qwen/qwen3.8-27b"
 
 # Memory fact extraction fallback chain (chat facts and posted-episode
 # canon-fact distillation both use this — see memory_writer.make_extraction_llm).
@@ -80,7 +80,7 @@ INSULT_CONFIRM_MODEL = "qwen/qwen3.6-27b"
 # bucket, and it's Groq's own recommended replacement for the model this slot
 # used before. (Was llama-3.1-8b-instant, decommissioned by Groq 2026-08-16.)
 MEMORY_MODEL_FALLBACKS: list[str] = [
-    "qwen/qwen3.6-27b",     # primary
+    "qwen/qwen3.8-27b",     # primary
     "openai/gpt-oss-20b",   # fallback: separate, larger daily quota
 ]
 
@@ -90,7 +90,7 @@ MEMORY_MODEL_FALLBACKS: list[str] = [
 # immediate stand-in was openai/gpt-oss-120b (a reasoning model), which then
 # needed its own truncation fix (reasoning tokens eating into max_tokens,
 # see git history) before it could even produce complete JSON reliably.
-# qwen/qwen3.6-27b replaced it after a side-by-side on this call's actual
+# qwen/qwen3.8-27b replaced it after a side-by-side on this call's actual
 # shape (8 members x 4 rubrics): zero reasoning tokens on every call versus
 # gpt-oss's "low" spiking to 289-339 on some calls (same truncation risk,
 # just less often), no JSON errors (gpt-oss produced one: a "veredict" key
@@ -102,7 +102,7 @@ MEMORY_MODEL_FALLBACKS: list[str] = [
 # MEMORY_MODEL_FALLBACKS[0]; accepted given this call site's low volume
 # (weekly roles, cooldown-gated group-profile requests) but unmeasured — see
 # FILTER_MODEL's note above on the same bucket getting crowded.
-TAG_MODEL = "qwen/qwen3.6-27b"
+TAG_MODEL = "qwen/qwen3.8-27b"
 
 # Tool-calling worker fallback chain. No 8B floor: at that size the worker
 # skips tools and fabricates facts from parametric memory — for a
@@ -115,7 +115,7 @@ TAG_MODEL = "qwen/qwen3.6-27b"
 # this comment warns against.
 WORKER_MODEL_FALLBACKS: list[str] = [
     "openai/gpt-oss-120b",   # primary:    120B, best tool-call quality
-    "qwen/qwen3.6-27b",      # fallback-1: 27B,  parallel tools
+    "qwen/qwen3.8-27b",      # fallback-1: 27B,  parallel tools
     "openai/gpt-oss-20b",    # fallback-2: 20B,  structured tool caller
 ]
 

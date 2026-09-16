@@ -320,7 +320,7 @@ def make_filter_llm(model: str) -> Runnable:
     fail-open handles it.
 
     ``reasoning_effort="none"`` disables the primary's hidden reasoning —
-    both FILTER_MODEL and INSULT_CONFIRM_MODEL are qwen/qwen3.6-27b, a
+    both FILTER_MODEL and INSULT_CONFIRM_MODEL are qwen/qwen3.8-27b, a
     reasoning model, and FILTER_MAX_TOKENS=10 leaves no room for a <think>
     block before the one-word label.
 

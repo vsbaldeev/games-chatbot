@@ -40,8 +40,10 @@ extraction call disables reasoning (reasoning_effort="none") — otherwise the
 whole token budget is burned inside a <think> block and no answer is ever
 produced. As a backstop, _parse_facts strips any think blocks first.
 make_extraction_llm() chains the fallback model behind it via
-with_fallbacks(), so a Groq daily-quota (or other rate-limit) 429 on the
-primary fails over instead of killing extraction for the rest of the day.
+with_fallbacks(), catching groq.APIError (not just RateLimitError) so a
+daily-quota 429, a decommissioned/renamed model 404, or any other Groq
+API-side failure on the primary fails over instead of killing extraction
+for the rest of the day.
 
 Output is one fact per line rather than a JSON array: small models reliably
 emit bare, unquoted list items (e.g. "[fact one, fact two]"), which breaks
@@ -160,7 +162,7 @@ def make_extraction_llm() -> Runnable:
         ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0.2, max_tokens=256, max_retries=0)
         for model in config.MEMORY_MODEL_FALLBACKS[1:]
     ]
-    return primary_llm.with_fallbacks(fallback_llms, exceptions_to_handle=(groq.RateLimitError,))
+    return primary_llm.with_fallbacks(fallback_llms, exceptions_to_handle=(groq.APIError,))
 
 
 FACT_LINE_STRIP_RE = re.compile(r"^[\s\-*•\d.)]+")

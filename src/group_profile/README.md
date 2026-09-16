@@ -39,7 +39,7 @@ generate.py    generate_verdicts(rubric, materials_by_uid) -> dict[int, dict]
                one Groq call (TAG_MODEL) with the rubric delimited in the
                human turn and each member's dossier below it; parses
                {"verdict", "reason"} per anon key and remaps back.
-               TAG_MODEL (qwen/qwen3.6-27b) is a reasoning model called with
+               TAG_MODEL (qwen/qwen3.8-27b) is a reasoning model called with
                reasoning_effort="none", which this model accepts (the earlier
                gpt-oss-120b primary 400s on "none" and needed a "low" budget
                workaround instead — see git history). "none" leaves the whole

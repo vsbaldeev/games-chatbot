@@ -754,7 +754,7 @@ def log_response_usage(usage: dict) -> None:
     """Log the response call's real token usage, at DEBUG level.
 
     Reads ``AIMessage.usage_metadata`` — the serving model's own exact count
-    (Groq's gpt-oss-120b/qwen3.6-27b, or the OpenRouter gemma fallback,
+    (Groq's gpt-oss-120b/qwen3.8-27b, or the OpenRouter gemma fallback,
     whichever answered), captured post-call with no separate tokenizer and no
     third-party network call: a local per-block *estimate* was considered for
     this (tiktoken, and LangChain's own ``get_num_tokens()``) and rejected —
