@@ -80,7 +80,6 @@ handlers run.
 
 | Update / trigger | Handler | Group | Notes |
 |---|---|---|---|
-| `/start`, groups only | `general.cmd_start` | `0` | welcome message |
 | `/help`, groups only | `general.cmd_help` | `0` | command list |
 | `/duel`, groups only | `games.cmd_duel` | `0` | emoji duel picker |
 | callback query, `duel_*` pattern | `games.handle_duel_callback` | `0` | duel inline buttons |
@@ -127,7 +126,7 @@ YtdlpUpdateJobManager    daily 03:30 UTC   ytdlp_update_job        (installs new
 packages, each with its own README:
 
 ```
-src/commands/   /start, /help, /duel and other slash-command handlers
+src/commands/   /help, /duel and other slash-command handlers
 src/events/     handle_message and friends — the per-media-type update handlers
 src/jobs/       the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
 src/agent/      worker/response LLM agents, initialised in __on_startup

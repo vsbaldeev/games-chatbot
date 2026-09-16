@@ -1,13 +1,7 @@
-"""General bot commands — /start and /help."""
+"""General bot commands — /help."""
 
 from telegram import Update
 from telegram.ext import ContextTypes
-
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "Привет. Я здесь. Спрашивайте про игры — если, конечно, есть что спросить."
-    )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

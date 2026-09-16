@@ -8,7 +8,6 @@ src/commands/__init__.py → mention in cmd_help and the agent system prompt (sr
 
 ```
 general.py
-    /start          — welcome message
     /help           — full command list
 
 games/

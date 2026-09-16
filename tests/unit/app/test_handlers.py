@@ -39,7 +39,13 @@ class TestRoastCommandRemoved:
 
     def test_core_commands_still_registered(self):
         names = registered_command_names()
-        assert {"start", "help", "duel"}.issubset(names)
+        assert {"help", "duel"}.issubset(names)
+
+
+class TestStartCommandRemoved:
+    def test_start_command_not_registered(self):
+        """cmd_start was a no-op reply — members register on first activity regardless."""
+        assert "start" not in registered_command_names()
 
 
 class TestMemeCommandRemoved:
