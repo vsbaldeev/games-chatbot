@@ -37,7 +37,7 @@ unified_messages (
 INDEX idx_unified_messages_chat_time ON (chat_id, created_at DESC)
 
 -- LLM-extracted facts per user per chat; cap 30 rows per (chat_id, user_id).
--- Facts untouched for 90 days are deleted by the nightly cleanup
+-- Facts untouched for 14 days are deleted by the nightly cleanup
 -- (cleanup_stale) — counters included; the dedup path refreshes updated_at
 -- on every re-observation, so live facts survive. Cross-user facts carry a
 -- «по словам @X, …» attribution prefix in the fact text.

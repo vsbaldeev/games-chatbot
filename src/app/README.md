@@ -128,7 +128,7 @@ Each class implements `JobManagerInterface.add_jobs(app)` and registers on `app.
 
 | Trigger | Job | Notes |
 |---|---|---|
-| daily 03:00 UTC | `cleanup_messages_job` | prunes `unified_messages` and `thread_history`, 60-day retention |
+| daily 03:00 UTC | `cleanup_messages_job` | prunes `unified_messages` and `thread_history` (60-day retention) and `user_memories` facts (14-day retention) |
 
 ### YtdlpUpdateJobManager
 
