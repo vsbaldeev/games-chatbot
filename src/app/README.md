@@ -75,7 +75,6 @@ handlers run.
 |---|---|---|---|
 | any `Update` | `register_sender_as_member` | `-1` | registers every active user in `chat_members`; no chat-type filter |
 | new chat member, groups only | `register_users_from_join_message` | `0` | registers each joined user in `chat_members` |
-| message reaction updated | `handle_reaction` | `0` | tracks emoji reactions → `user_stats`; no chat-type filter |
 
 ### CommandHandlerManager
 
@@ -104,7 +103,8 @@ Not registered by any manager above — PTB drops these silently, no error.
 
 | Update / trigger | Why ignored |
 |---|---|
-| any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` and `handle_reaction` still fire there, since neither filters by chat type |
+| any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` still fires there, since it has no chat-type filter |
+| message reaction (add/remove emoji) | no handler registered for `message_reaction` updates anywhere in the codebase |
 | document, location, contact, poll, dice, venue | no filter registered for these types anywhere in the codebase |
 
 ## Scheduled jobs (jobs.py)

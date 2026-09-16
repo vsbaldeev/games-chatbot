@@ -24,7 +24,6 @@ from src.achievements.store import (
     mark_and_get_new,
     set_message_author,
     get_message_author,
-    apply_reaction_counts,
 )
 from src.achievements.checker import (
     compute_earned,
@@ -50,7 +49,6 @@ __all__ = [
     "mark_and_get_new",
     "set_message_author",
     "get_message_author",
-    "apply_reaction_counts",
     # checker
     "compute_earned",
     "check_new_achievements",

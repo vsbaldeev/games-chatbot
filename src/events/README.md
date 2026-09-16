@@ -1,4 +1,4 @@
-Telegram event handlers for non-command updates: member tracking, reactions, and messages.
+Telegram event handlers for non-command updates: member tracking and messages.
 
 All handlers are registered by EventHandlerManager and MessageHandlerManager in src/app/handlers.py.
 
@@ -8,10 +8,6 @@ All handlers are registered by EventHandlerManager and MessageHandlerManager in 
 members.py
     register_sender_as_member(update)           — upsert user into chat_members on every update
     register_users_from_join_message(...)   — upsert joined users into chat_members
-
-reactions.py
-    handle_reaction(update)        — map Telegram reaction emoji to user_stats columns
-                                     (increment_stat only; counters feed roast material)
 
 messages.py
     handle_message(update)         — text: track stats (night, link, forward, emoji, long),
@@ -232,5 +228,4 @@ photo       photo_messages
 sticker     sticker_messages
 video       video_messages
 animation   animation_messages
-reactions   laugh_reactions, heart_reactions, fire_reactions, thumbsup_reactions
 ```

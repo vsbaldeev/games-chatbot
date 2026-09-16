@@ -7,8 +7,8 @@ achievement keys.
 
 Only the duel achievements survive: the passive-counter and silence achievements
 were retired because they tallied behaviour and mocked absence instead of driving
-engagement. The stat counters themselves are still tracked (see TRACKABLE_STATS)
-because the offence auto-roast consumes them.
+engagement. The remaining stat counters (see TRACKABLE_STATS) are still tracked
+for `roast_material.py`, currently unwired but kept as a reusable building block.
 """
 
 from dataclasses import dataclass
@@ -19,10 +19,6 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 
 TRACKABLE_STATS = {
-    "laugh_reactions",
-    "heart_reactions",
-    "fire_reactions",
-    "thumbsup_reactions",
     "emoji_messages",
     "sticker_messages",
     "forwarded_messages",

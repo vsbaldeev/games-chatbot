@@ -76,8 +76,7 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
     """Return the full stat row for a user in a chat, or {} if no row exists."""
     async with database.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT laugh_reactions, heart_reactions, fire_reactions, thumbsup_reactions,
-                      emoji_messages, sticker_messages, forwarded_messages,
+            """SELECT emoji_messages, sticker_messages, forwarded_messages,
                       link_messages, voice_messages, video_messages, video_note_messages,
                       photo_messages, night_messages, long_messages,
                       voice_max_duration, long_message_max,
@@ -88,10 +87,6 @@ async def get_user_stats(user_id: int, chat_id: int) -> dict[str, int]:
     if not row:
         return {}
     return {
-        "laugh_reactions":     row["laugh_reactions"],
-        "heart_reactions":     row["heart_reactions"],
-        "fire_reactions":      row["fire_reactions"],
-        "thumbsup_reactions":  row["thumbsup_reactions"],
         "emoji_messages":      row["emoji_messages"],
         "sticker_messages":    row["sticker_messages"],
         "forwarded_messages":  row["forwarded_messages"],
@@ -147,44 +142,3 @@ async def get_message_author(chat_id: int, message_id: int) -> tuple[int, str] |
             chat_id, message_id,
         )
     return (row["user_id"], row["username"]) if row else None
-
-
-async def apply_reaction_counts(
-    chat_id: int, message_id: int, new_counts: dict[str, int]
-) -> dict[str, int]:
-    """Persist the latest per-emoji reaction totals and return positive deltas per emoji."""
-    deltas: dict[str, int] = {}
-    now = int(time.time())
-    async with database.acquire() as conn:
-        async with conn.transaction():
-            rows = await conn.fetch(
-                "SELECT emoji, total_count FROM message_reaction_counts "
-                "WHERE chat_id = $1 AND message_id = $2",
-                chat_id, message_id,
-            )
-            previous = {row["emoji"]: row["total_count"] for row in rows}
-            for emoji, new_total in new_counts.items():
-                delta = max(0, new_total - previous.get(emoji, 0))
-                if delta > 0:
-                    deltas[emoji] = delta
-                await conn.execute(
-                    """INSERT INTO message_reaction_counts
-                           (chat_id, message_id, emoji, total_count, updated_at)
-                       VALUES ($1, $2, $3, $4, $5)
-                       ON CONFLICT (chat_id, message_id, emoji) DO UPDATE SET
-                           total_count = EXCLUDED.total_count,
-                           updated_at  = EXCLUDED.updated_at""",
-                    chat_id, message_id, emoji, new_total, now,
-                )
-            for emoji in previous:
-                if emoji not in new_counts:
-                    await conn.execute(
-                        """INSERT INTO message_reaction_counts
-                               (chat_id, message_id, emoji, total_count, updated_at)
-                           VALUES ($1, $2, $3, 0, $4)
-                           ON CONFLICT (chat_id, message_id, emoji) DO UPDATE SET
-                               total_count = 0,
-                               updated_at  = EXCLUDED.updated_at""",
-                        chat_id, message_id, emoji, now,
-                    )
-    return deltas

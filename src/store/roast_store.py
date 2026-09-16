@@ -1,8 +1,8 @@
 """
-Persistent store for roast event log and emoji reaction tracking.
+Persistent store for the roast event log.
 
-Captures which anchor type was used per roast and how users reacted,
-enabling future anchor-selection weighting based on engagement signals.
+Captures which anchor type was used per roast, and the round-robin
+target queue.
 """
 
 import random
@@ -26,29 +26,6 @@ async def log_roast(
             ON CONFLICT DO NOTHING
             """,
             message_id, chat_id, target_user_id, anchor_key, time.time(),
-        )
-
-
-async def is_roast_message(message_id: int, chat_id: int) -> bool:
-    async with database.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT 1 FROM roast_log WHERE message_id = $1 AND chat_id = $2",
-            message_id, chat_id,
-        )
-    return row is not None
-
-
-async def record_reaction(message_id: int, chat_id: int, emoji: str, delta: int) -> None:
-    """Upsert a reaction count delta; count floor is zero."""
-    async with database.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO roast_reactions (message_id, chat_id, emoji, count)
-            VALUES ($1, $2, $3, GREATEST(0, $4))
-            ON CONFLICT (message_id, chat_id, emoji)
-            DO UPDATE SET count = GREATEST(0, roast_reactions.count + $4)
-            """,
-            message_id, chat_id, emoji, delta,
         )
 
 
@@ -106,20 +83,3 @@ async def get_recent_modes(chat_id: int, user_id: int, limit: int) -> list[str]:
             chat_id, user_id, limit,
         )
     return [row["anchor_key"] for row in rows]
-
-
-async def get_anchor_stats(chat_id: int) -> dict[str, int]:
-    """Return total reaction counts per anchor key for a chat."""
-    async with database.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT rl.anchor_key, COALESCE(SUM(rr.count), 0) AS total
-            FROM roast_log rl
-            LEFT JOIN roast_reactions rr
-                ON rr.message_id = rl.message_id AND rr.chat_id = rl.chat_id
-            WHERE rl.chat_id = $1
-            GROUP BY rl.anchor_key
-            """,
-            chat_id,
-        )
-    return {row["anchor_key"]: int(row["total"]) for row in rows}

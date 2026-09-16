@@ -32,8 +32,6 @@ STAT_LABELS = {
     "forwarded_messages": "репостов накидал: {count}",
     "link_messages": "ссылок скинул: {count}",
     "photo_messages": "фоток выложил: {count}",
-    "laugh_reactions": "поймал 😂-реакций: {count}",
-    "fire_reactions": "поймал 🔥-реакций: {count}",
     "long_messages": "простыней написал: {count}",
 }
 
