@@ -37,10 +37,7 @@ class WorkerAgent:
         self.__worker_executor = worker_executor
 
     async def init(self) -> None:
-        """Build the worker executor from configuration.
-
-        Rebuilding resets middleware state so the slot returns to the primary model.
-        """
+        """Build the worker executor from configuration."""
         self.__worker_executor = WorkerAgent.__build_executor()
         logger.info("WorkerAgent initialized with model: %s", config.WORKER_MODEL_FALLBACKS[0])
 
@@ -78,10 +75,6 @@ class WorkerAgent:
         messages = result["messages"]
         tools_used = any(isinstance(message, ToolMessage) for message in messages)
         return messages[-1].content or "", tools_used
-
-    async def reset_model_index(self) -> None:
-        """Rebuild the executor, resetting middleware state to the primary model."""
-        await self.init()
 
     @staticmethod
     def __build_executor():

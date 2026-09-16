@@ -111,14 +111,30 @@ Not registered by any manager above — PTB drops these silently, no error.
 Each class implements `JobManagerInterface.add_jobs(app)` and registers on `app.job_queue`
 (APScheduler under the hood).
 
-```
-RolesJobManager          daily 14:00 UTC   weekly_roles_job        (exits early unless Sunday)
-                          + run_once catch-up on startup, for a Sunday run missed while down
-MemeJobManager           daily 15:00 UTC   daily_meme_job          (sends one fresh meme per chat)
-ResetModelJobManager     daily 00:05 UTC   reset_model_job         (resets LLM fallback index to 0)
-MessageCleanupJobManager daily 03:00 UTC   cleanup_messages_job    (prunes unified_messages and thread_history, 60-day retention)
-YtdlpUpdateJobManager    daily 03:30 UTC   ytdlp_update_job        (installs newer yt-dlp into /app/runtime-deps and restarts the bot gracefully)
-```
+### RolesJobManager
+
+| Trigger | Job | Notes |
+|---|---|---|
+| daily 14:00 UTC | `weekly_roles_job` | exits early unless the day is Sunday |
+| once, 30s after startup | `catch_up_roles_job` | recovers a missed Sunday run (e.g. the bot was down at 14:00 UTC) by comparing the newest stored tag timestamp against the last scheduled Sunday run; no-ops if already up to date |
+
+### MemeJobManager
+
+| Trigger | Job | Notes |
+|---|---|---|
+| daily 15:00 UTC | `daily_meme_job` | sends one fresh meme per chat |
+
+### MessageCleanupJobManager
+
+| Trigger | Job | Notes |
+|---|---|---|
+| daily 03:00 UTC | `cleanup_messages_job` | prunes `unified_messages` and `thread_history`, 60-day retention |
+
+### YtdlpUpdateJobManager
+
+| Trigger | Job | Notes |
+|---|---|---|
+| daily 03:30 UTC | `ytdlp_update_job` | installs newer yt-dlp into `/app/runtime-deps` and restarts the bot gracefully; scheduled after the cleanup job, in the chat's dead hours |
 
 ## Where the logic actually lives
 

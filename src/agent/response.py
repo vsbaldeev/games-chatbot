@@ -35,10 +35,7 @@ class ResponseAgent:
         self.__response_executor = response_executor
 
     async def init(self) -> None:
-        """Build the response executor from configuration.
-
-        Rebuilding resets middleware state so the slot returns to the primary model.
-        """
+        """Build the response executor from configuration."""
         self.__response_executor = ResponseAgent.__build_executor()
         logger.info("ResponseAgent initialized with model: %s", config.RESPONSE_MODEL_FALLBACKS[0])
 
@@ -75,10 +72,6 @@ class ResponseAgent:
         if usage_sink is not None and last_message.usage_metadata:
             usage_sink.update(last_message.usage_metadata)
         return last_message.content or ""
-
-    async def reset_model_index(self) -> None:
-        """Rebuild the executor, resetting middleware state to the primary model."""
-        await self.init()
 
     @staticmethod
     def __build_executor():

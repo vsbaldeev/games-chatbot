@@ -11,7 +11,6 @@ from src.agent import worker_agent, response_agent
 from src.app.jobs import (
     MemeJobManager,
     MessageCleanupJobManager,
-    ResetModelJobManager,
     RolesJobManager,
     YtdlpUpdateJobManager,
 )
@@ -78,7 +77,6 @@ def main() -> None:
 
     job_managers = (
         RolesJobManager(),
-        ResetModelJobManager(),
         MessageCleanupJobManager(),
         MemeJobManager(),
         YtdlpUpdateJobManager(),

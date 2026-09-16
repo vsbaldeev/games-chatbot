@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 
 from telegram.ext import Application
 
-from src.jobs.agent import reset_model_job
 from src.jobs.cleanup import cleanup_messages_job
 from src.jobs.meme import daily_meme_job
 from src.jobs.roles import CATCH_UP_DELAY_SECONDS, ROLES_RUN_TIME, catch_up_roles_job, weekly_roles_job
@@ -27,11 +26,6 @@ class RolesJobManager(JobManagerInterface):
 class MemeJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
         app.job_queue.run_daily(daily_meme_job, time=datetime.time(hour=15, minute=0, tzinfo=datetime.timezone.utc))
-
-
-class ResetModelJobManager(JobManagerInterface):
-    def add_jobs(self, app: Application) -> None:
-        app.job_queue.run_daily(reset_model_job, time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc))
 
 
 class MessageCleanupJobManager(JobManagerInterface):
