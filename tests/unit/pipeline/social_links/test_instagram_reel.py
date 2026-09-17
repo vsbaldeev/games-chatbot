@@ -32,6 +32,7 @@ class TestExtract:
 
 
 DOWNLOAD_PATCH_TARGET = "src.pipeline.social_links.instagram_reel.downloads.download_reel"
+SUMMARIZE_PATCH_TARGET = "src.pipeline.social_links.instagram_reel.summarize_comments"
 
 
 class TestFetch:
@@ -40,32 +41,36 @@ class TestFetch:
             "description": "гвоздь молотком в бетон",
             "comments": [{"text": "дизлайк, техника безопасности", "like_count": 12}],
         }
-        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))):
+        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="[Реакция комментаторов]:\nхвалят технику")):
             result = await handler.fetch("https://www.instagram.com/reel/Cx7AbCdEfG/")
         assert result is not None
         assert result["video_bytes"] == b"video bytes"
         assert "гвоздь молотком в бетон" in result["content_block"]
-        assert "(12 лайков)" in result["content_block"]
+        assert "хвалят технику" in result["content_block"]
 
     async def test_successful_download_with_no_comments_is_caption_only(self, handler):
         info = {"description": "шаурма на 200 человек"}
-        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))):
+        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="")):
             result = await handler.fetch("https://www.instagram.com/reel/Cx7AbCdEfG/")
         assert result is not None
         assert result["video_bytes"] == b"video bytes"
-        assert "Топ-комментарии" not in result["content_block"]
+        assert "Реакция комментаторов" not in result["content_block"]
 
     async def test_no_caption_no_comments_returns_none(self, handler):
-        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", {}))):
+        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", {}))), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="")):
             result = await handler.fetch("https://www.instagram.com/reel/Cx7AbCdEfG/")
         assert result is None
 
     async def test_no_caption_falls_back_to_comments_only(self, handler):
         info = {"comments": [{"text": "дизлайк, техника безопасности", "like_count": 12}]}
-        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))):
+        with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=(b"video bytes", info))), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="[Реакция комментаторов]:\nхвалят технику")):
             result = await handler.fetch("https://www.instagram.com/reel/Cx7AbCdEfG/")
         assert result is not None
-        assert "(12 лайков)" in result["content_block"]
+        assert "хвалят технику" in result["content_block"]
 
     async def test_download_failure_returns_none(self, handler):
         with patch(DOWNLOAD_PATCH_TARGET, new=AsyncMock(return_value=None)):

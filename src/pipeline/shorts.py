@@ -36,8 +36,6 @@ SHORTS_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-MAX_COMMENTS = 10             # top-level comments fetched for audience reaction
-COMMENT_CHAR_LIMIT = 200      # truncate each comment before prompting
 TRANSCRIPT_CHAR_LIMIT = 2000  # cap speech-dense 3-min shorts before prompting
 
 SHORTS_DAILY_CAP = 50               # summaries per chat per sliding 24 h window

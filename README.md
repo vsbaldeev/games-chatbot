@@ -26,9 +26,11 @@ Tracks per-user stats, extracts long-term memories, and routes every message thr
 a typed LangGraph pipeline. YouTube Shorts, Instagram Reels, and long-form YouTube
 links posted in the chat are watched for everyone: the bot downloads the clip
 (Shorts and Reels only — long-form YouTube never carries video), transcribes and
-looks at it (Shorts) or reads its title/caption and top comments (Reels and
-long-form YouTube), and replies with a single message — the video with a 1–2
-sentence summary and comment-reaction recap as its caption, or, when there's no
+looks at it (Shorts) or reads its title/caption and a short in-character
+summary of top comments (Reels and long-form YouTube — never quoted
+verbatim, src/pipeline/comment_summary.py), and replies with a single
+message — the video with a 1–2 sentence summary and comment-reaction recap
+as its caption, or, when there's no
 video, a plain text message with a link preview. If the sender's message was
 nothing but the link, the bot deletes it once its own message has gone out and
 credits the sender inside the caption ("Скинул @username" + the link + the

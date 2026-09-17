@@ -37,6 +37,7 @@ class TestExtract:
 
 
 EXTRACT_INFO_PATCH_TARGET = "src.pipeline.social_links.youtube_video.downloads.fetch_youtube_video"
+SUMMARIZE_PATCH_TARGET = "src.pipeline.social_links.youtube_video.summarize_comments"
 
 
 class TestFetch:
@@ -46,17 +47,19 @@ class TestFetch:
             "description": "Двухчасовой разбор про майнкрафт-лаву.",
             "comments": [{"text": "наконец кто-то это объяснил", "like_count": 30}],
         }
-        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)):
+        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="[Реакция комментаторов]:\nвсе благодарят")):
             result = await handler.fetch("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         assert result is not None
         assert result["video_bytes"] is None
         assert "Двухчасовой разбор про майнкрафт-лаву." in result["content_block"]
-        assert "(30 лайков)" in result["content_block"]
+        assert "все благодарят" in result["content_block"]
 
     async def test_description_at_limit_is_untouched(self, handler):
         description = "a" * SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT
         info = {"description": description}
-        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)):
+        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="")):
             result = await handler.fetch("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         assert description in result["content_block"]
         assert "…" not in result["content_block"]
@@ -64,7 +67,8 @@ class TestFetch:
     async def test_description_over_limit_is_truncated(self, handler):
         long_description = "a" * (SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT + 1000)
         info = {"description": long_description}
-        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)):
+        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="")):
             result = await handler.fetch("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         expected = "a" * SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT + "…"
         assert expected in result["content_block"]
@@ -76,14 +80,16 @@ class TestFetch:
             "description": "",
             "comments": [{"text": "живое обсуждение", "like_count": 5}],
         }
-        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)):
+        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value=info)), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="[Реакция комментаторов]:\nбурно обсуждают")):
             result = await handler.fetch("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         assert result is not None
         assert "Только заголовок" in result["content_block"]
-        assert "живое обсуждение" in result["content_block"]
+        assert "бурно обсуждают" in result["content_block"]
 
     async def test_no_title_and_no_description_returns_none(self, handler):
-        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value={})):
+        with patch(EXTRACT_INFO_PATCH_TARGET, new=AsyncMock(return_value={})), \
+             patch(SUMMARIZE_PATCH_TARGET, new=AsyncMock(return_value="")):
             result = await handler.fetch("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         assert result is None
 

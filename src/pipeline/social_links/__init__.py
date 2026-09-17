@@ -24,8 +24,6 @@ from typing import Protocol, TypedDict
 
 from src.utils.ttl_gate import TtlGate
 
-SOCIAL_LINK_MAX_COMMENTS = 10                  # top-level comments surfaced per handler
-SOCIAL_LINK_COMMENT_CHAR_LIMIT = 200           # truncate each comment before prompting
 SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT = 2000      # caps YouTube description length
 SOCIAL_LINK_DEDUP_WINDOW_SECONDS = 24 * 3600   # same item in the same chat -> one summary
 
@@ -114,34 +112,6 @@ def is_bare_link_message(text: str | None, pattern: re.Pattern) -> bool:
     if not text:
         return False
     return not drop_platform_links(text, pattern).strip()
-
-
-def render_comment_lines(comments: list[dict], max_comments: int, char_limit: int) -> str:
-    """Render top comments (text + like_count) as a labelled block.
-
-    Shared by instagram_reel.py and youtube_video.py, whose yt-dlp comment
-    dicts have the same ``text``/``like_count`` shape.
-
-    Args:
-        comments: Comment dicts with ``text`` and ``like_count`` keys.
-        max_comments: Maximum number of comments to include.
-        char_limit: Truncate each comment's text beyond this length.
-
-    Returns:
-        A ``[Топ-комментарии]`` block, or "" when there is nothing usable.
-    """
-    lines = []
-    for comment in comments[:max_comments]:
-        text = (comment.get("text") or "").strip()
-        if not text:
-            continue
-        if len(text) > char_limit:
-            text = text[:char_limit] + "…"
-        like_count = comment.get("like_count") or 0
-        lines.append(f"- ({like_count} лайков) {text}")
-    if not lines:
-        return ""
-    return "\n".join(["[Топ-комментарии]:", *lines])
 
 
 from src.pipeline.social_links import instagram_reel, youtube_video  # noqa: E402

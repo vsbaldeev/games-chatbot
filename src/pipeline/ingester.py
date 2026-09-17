@@ -62,6 +62,7 @@ from src import config
 from src.agent.vision import make_vision_llm
 from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
 from src.pipeline import shorts, social_links
+from src.pipeline.comment_summary import summarize_comments
 from src.pipeline.state import BotState
 from src.store import sticker_descriptions, unified_messages
 
@@ -581,30 +582,6 @@ async def transcribe_video(file_id: str, media_type: str, bot) -> tuple[bool | N
     return is_real_person, compose_video_content(transcript, frame_descriptions)
 
 
-def compose_comments_block(comments: list[dict]) -> str:
-    """Render top YouTube comments as a labelled audience-reaction block.
-
-    Args:
-        comments: Comment dicts from yt-dlp's info dict (already top-sorted).
-
-    Returns:
-        A ``[Топ-комментарии зрителей]`` block with like counts, or ``""``
-        when there are no usable comments (missing or disabled).
-    """
-    lines = []
-    for comment in comments[:shorts.MAX_COMMENTS]:
-        text = (comment.get("text") or "").strip()
-        if not text:
-            continue
-        if len(text) > shorts.COMMENT_CHAR_LIMIT:
-            text = text[:shorts.COMMENT_CHAR_LIMIT] + "…"
-        like_count = comment.get("like_count") or 0
-        lines.append(f"- ({like_count} лайков) {text}")
-    if not lines:
-        return ""
-    return "\n".join(["[Топ-комментарии зрителей]:", *lines])
-
-
 def compose_short_header(info: dict) -> str:
     """Build the metadata header line for a summarized Short.
 
@@ -667,7 +644,7 @@ async def summarize_youtube_short(url: str) -> tuple[str, bytes | None]:
         compose_short_header(info or {}),
         compose_video_content(transcript, frame_descriptions),
     ]
-    comments_block = compose_comments_block((info or {}).get("comments") or [])
+    comments_block = await summarize_comments((info or {}).get("comments"))
     if comments_block:
         parts.append(comments_block)
     return "\n".join(parts), video_bytes

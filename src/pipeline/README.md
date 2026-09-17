@@ -101,11 +101,13 @@ ingester (current message, should_respond=True only)
     │     src/downloads/README.md for the yt-dlp mechanics: PO-token
     │     wiring, JS challenge solving, player-client pinning — none of
     │     which lives in the bot process) and fed through the same
-    │     Whisper + frame pipeline as Telegram videos, plus the top 10
-    │     comments (top-sorted, ≤200 chars each) as audience reaction;
-    │     transcript capped at 2000 chars
+    │     Whisper + frame pipeline as Telegram videos, plus a short
+    │     in-character summary of the top 10 comments (src.pipeline.
+    │     comment_summary.summarize_comments — one TAG_MODEL call, never
+    │     quoted verbatim) as audience reaction; transcript capped at
+    │     2000 chars
     │     processed_text = user text + "\n\n[YouTube Shorts «title», канал X,
-    │     N сек]\n[Аудио]: …\n[Видео 1/3]: …\n[Топ-комментарии зрителей]: …"
+    │     N сек]\n[Аудио]: …\n[Видео 1/3]: …\n[Реакция комментаторов]: …"
     │     the stored unified_messages row keeps the bare user text: the
     │     material belongs to this run's prompt, and writing it into chat
     │     content made it resurface as recent history in the *next* link's
@@ -121,8 +123,8 @@ ingester (current message, should_respond=True only)
     │     trigger="social_link": summarize_social_link dispatches to the
     │     matched handler (src.pipeline.social_links — instagram_reel or
     │     youtube_video) for a metadata-only fetch: no transcript, no
-    │     vision, just title/caption + top comments (≤10, ≤200 chars each)
-    │     via the download-service sidecar (kind="youtube_video"/
+    │     vision, just title/caption + the same comment_summary reaction
+    │     block via the download-service sidecar (kind="youtube_video"/
     │     "instagram_reel"); description capped at 2000 chars
     │     processed_text = user text + the handler's labelled block
     │     ("[Instagram Reel]…" / "[YouTube «title»]…")

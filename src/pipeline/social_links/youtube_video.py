@@ -13,13 +13,11 @@ in this process — see ``download-service/youtube_video.py``.
 import re
 
 from src import downloads, log
+from src.pipeline.comment_summary import summarize_comments
 from src.pipeline.social_links import (
-    SOCIAL_LINK_COMMENT_CHAR_LIMIT,
     SOCIAL_LINK_DEDUP_WINDOW_SECONDS,
     SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT,
-    SOCIAL_LINK_MAX_COMMENTS,
     SocialLinkContent,
-    render_comment_lines,
 )
 from src.utils.ttl_gate import TtlGate
 
@@ -83,17 +81,19 @@ class YoutubeVideoHandler:
         if info is None:
             logger.warning("YouTube metadata extraction returned nothing for %s", url)
             return None
-        content_block = self.__compose(info)
+        comments_block = await summarize_comments(info.get("comments"))
+        content_block = self.__compose(info, comments_block)
         if not content_block:
             logger.warning("YouTube metadata had no usable title/description for %s", url)
             return None
         return {"content_block": content_block, "video_bytes": None}
 
-    def __compose(self, info: dict) -> str:
+    def __compose(self, info: dict, comments_block: str) -> str:
         """Build the labelled content block from the download service's info dict.
 
         Args:
             info: Info dict returned by the download service (metadata only).
+            comments_block: Pre-computed comment summary block (possibly "").
 
         Returns:
             Labelled block (header + description, truncated to
@@ -110,9 +110,6 @@ class YoutubeVideoHandler:
             if len(description) > SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT:
                 description = description[:SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT] + "…"
             parts.append(description)
-        comments_block = render_comment_lines(
-            info.get("comments") or [], SOCIAL_LINK_MAX_COMMENTS, SOCIAL_LINK_COMMENT_CHAR_LIMIT
-        )
         if comments_block:
             parts.append(comments_block)
         return "\n".join(parts)
