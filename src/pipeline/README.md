@@ -94,12 +94,16 @@ the context builder lazily processes media found in reply chains.
 ```
 ingester (current message, should_respond=True only)
     ├─ text       → processed_text = raw_text
-    │     trigger="youtube_short": the short is downloaded via yt-dlp
-    │     (in-process Python API, run_in_executor; muxed 360p mp4, no ffmpeg;
-    │     limits: ≤180s, ≤25MB (Groq Whisper cap), 90s total timeout) and fed
-    │     through the same Whisper + frame pipeline as Telegram videos, plus
-    │     the top 10 comments (top-sorted, ≤200 chars each) as audience
-    │     reaction; transcript capped at 2000 chars
+    │     trigger="youtube_short": the short is downloaded via the
+    │     download-service sidecar (POST /download, kind="youtube_short",
+    │     90s client timeout; muxed 360p mp4, no ffmpeg; limits: ≤180s,
+    │     ≤25MB (Groq Whisper cap) — see download-service/README.md and
+    │     src/downloads/README.md for the yt-dlp mechanics: PO-token
+    │     wiring, JS challenge solving, player-client pinning — none of
+    │     which lives in the bot process) and fed through the same
+    │     Whisper + frame pipeline as Telegram videos, plus the top 10
+    │     comments (top-sorted, ≤200 chars each) as audience reaction;
+    │     transcript capped at 2000 chars
     │     processed_text = user text + "\n\n[YouTube Shorts «title», канал X,
     │     N сек]\n[Аудио]: …\n[Видео 1/3]: …\n[Топ-комментарии зрителей]: …"
     │     the stored unified_messages row keeps the bare user text: the
@@ -114,42 +118,12 @@ ingester (current message, should_respond=True only)
     │     bytes are also kept in youtube_short_video, delivered as one
     │     message together with the summary caption (see src/events/README.md)
     │     — same as Instagram's social_link_video
-    │     PO tokens for YouTube bot-detection come automatically from the
-    │     pot-provider docker-compose sidecar via the bgutil yt-dlp plugin;
-    │     yt-dlp's own quiet/no_warnings options would otherwise silently
-    │     discard PO-token/player-client failures (the actual reason a
-    │     format goes missing), so YoutubeDL is given a logger
-    │     (shorts.YtdlpLogger) — YoutubeDL checks for one before quiet/
-    │     no_warnings, so it bypasses that suppression and routes yt-dlp's
-    │     internal warnings through this module's own logger instead
-    │     yt-dlp also needs a JS runtime (deno, installed in the Dockerfile)
-    │     to solve YouTube's signature/n-parameter challenges — without one
-    │     it silently degrades to non-JS player clients missing many
-    │     formats, including format 18 (SHORT_FORMAT's pin). Deno alone is
-    │     not sufficient either: it also needs the yt-dlp-ejs package (the
-    │     actual challenge-solving script, exact-pinned to yt-dlp's own
-    │     version) — requirements.txt, entrypoint.sh and
-    │     src/jobs/ytdlp_update.py all install yt-dlp with its "default"
-    │     extra so this stays in sync on every auto-update instead of
-    │     silently drifting apart; even with both,
-    │     yt-dlp's own default client selection has been observed picking a
-    │     single client with no format 18 at all, failing deterministically
-    │     — SHORTS_PLAYER_CLIENTS pins an explicit client set instead of
-    │     trusting that shifting default. The pin itself already needed
-    │     revising once: a token-free-looking set (android_vr/android/ios)
-    │     broke again within hours of a yt-dlp self-update, because the
-    │     bgutil PO-token provider this module wires up can only ever
-    │     authenticate WEBPO_CLIENTS (web/mweb/tv and variants) — never
-    │     those three — so it was never actually usable for them regardless
-    │     of the sidecar's health. Now pinned to web/mweb/tv (+ android_vr
-    │     kept as a bonus) so the docker-compose PO-token pipeline is
-    │     actually in the loop. All of this was only diagnosable once
-    │     YtdlpLogger surfaced the real warnings
     │     trigger="social_link": summarize_social_link dispatches to the
     │     matched handler (src.pipeline.social_links — instagram_reel or
     │     youtube_video) for a metadata-only fetch: no transcript, no
     │     vision, just title/caption + top comments (≤10, ≤200 chars each)
-    │     via yt-dlp info-extraction; description capped at 2000 chars
+    │     via the download-service sidecar (kind="youtube_video"/
+    │     "instagram_reel"); description capped at 2000 chars
     │     processed_text = user text + the handler's labelled block
     │     ("[Instagram Reel]…" / "[YouTube «title»]…")
     │     the stored unified_messages row keeps the bare user text, same as

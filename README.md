@@ -66,6 +66,8 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/tts/](src/tts/README.md) | Text-to-speech — local Silero v5 Russian synthesis for voice-in-kind replies |
 | [src/imagegen/](src/imagegen/README.md) | HTTP client for the imagegen service — never-raise, photo posts degrade to text |
 | [imagegen-service/](imagegen-service/README.md) | Self-hosted CPU image generation — FastAPI + diffusers + LCM-LoRA, separate container |
+| [src/downloads/](src/downloads/README.md) | HTTP client for the download service — never-raise, Shorts/Reel/YouTube summaries degrade to silence |
+| [download-service/](download-service/README.md) | Self-hosted yt-dlp downloads — FastAPI, separate container, self-updating |
 | [src/config/](src/config/) | Configuration — credentials, model registry ([models.py](src/config/models.py)), and every LLM prompt text ([prompts.py](src/config/prompts.py)) |
 | [alembic/](alembic/) | Database schema migrations (Alembic) — the sole owner of the schema |
 
@@ -89,13 +91,13 @@ Image gen    Stable Diffusion 1.5 (DreamShaper 8), DPM++ 2M Karras 20 steps, sel
 Vision       Groq qwen/qwen3.8-27b (reasoning disabled — thinking would eat the whole token budget) → OpenRouter qwen/qwen3-vl-32b-instruct (cross-provider fallback; make_vision_llm)
 Security     Groq llama-prompt-guard-2-86m
 Video frames PyAV (in-process, no subprocess)
-Shorts DL    yt-dlp (in-process Python API; self-updates on start + daily check)
-PO tokens    bgutil-ytdlp-pot-provider sidecar (defeats YouTube bot-detection on VPS IPs)
+Shorts DL    yt-dlp, self-hosted in download-service/ (self-updates on start + daily check; restarts only that container)
+PO tokens    bgutil-ytdlp-pot-provider sidecar (defeats YouTube bot-detection on VPS IPs; consumed by download-service)
 Game data    IGDB (Twitch OAuth), Steam public API, psdeals.net RSS
 Media data   TMDB, AniList GraphQL, OpenCritic
 Web search   Tavily (falls back to DuckDuckGo)
 Storage      PostgreSQL + pgvector + asyncpg (connection pool, min 2 / max 10)
-Hosting      VPS / Docker Compose (bot + postgres + pot-provider containers)
+Hosting      VPS / Docker Compose (bot + postgres + pot-provider + download-service + imagegen containers)
 ```
 
 ## Running
@@ -227,15 +229,17 @@ and **admin rights** with `can_manage_tags` for weekly member roles and
 ### Shorts summaries are self-maintaining
 
 The YouTube pieces rot on purpose (YouTube fights downloaders), so all of the
-maintenance is automated: the `pot-provider` sidecar generates the PO tokens
-YouTube demands from datacenter IPs, `entrypoint.sh` upgrades yt-dlp into
-`/app/runtime-deps` on every container start, and a daily 03:30 UTC job installs
-newer yt-dlp releases and restarts the bot gracefully. Nothing to configure — no
-cookies, no extra env vars. A single Short occasionally hits YouTube's
-intermittent CDN 403 (a signed download URL that fails once and succeeds on
-re-resolve) — `shorts.py` retries that specific signal a few times before
-giving up. If Shorts summaries ever go silent anyway,
-`docker compose logs bot | grep -i shorts` shows which stage is failing.
+maintenance is automated and scoped to the `download-service` container: the
+`pot-provider` sidecar generates the PO tokens YouTube demands from
+datacenter IPs, `download-service/entrypoint.sh` upgrades yt-dlp on every
+container start, and a daily 03:30 UTC job installs newer yt-dlp releases
+and restarts `download-service` gracefully — never the bot. Nothing to
+configure — no cookies, no extra env vars. A single Short occasionally hits
+YouTube's intermittent CDN 403 (a signed download URL that fails once and
+succeeds on re-resolve) — `download-service/shorts.py` retries that specific
+signal a few times before giving up. If Shorts summaries ever go silent
+anyway, `docker compose logs download-service | grep -i shorts` shows which
+stage is failing.
 
 ## BotFather commands
 

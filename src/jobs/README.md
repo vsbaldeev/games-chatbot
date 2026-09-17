@@ -6,7 +6,6 @@ Job managers live in src/app/jobs.py. Implementations live here, one file per jo
 
 ```
 03:00 UTC        cleanup_messages_job   cleanup.py      prune unified_messages and thread_history rows older than 60 days, and user_memories facts older than 14 days
-03:30 UTC        ytdlp_update_job       ytdlp_update.py install newer yt-dlp into /app/runtime-deps and restart the bot gracefully (SIGTERM + docker restart policy); no-op outside the container or when current
 14:00 UTC        weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
 15:00 UTC        daily_meme_job         meme.py         fan out memes.sender.send_meme over every chat (un-anchored, vision-vetted, no caption)
 ```
