@@ -56,6 +56,12 @@ OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 # canned in-character excuse.
 IMAGEGEN_URL: str = os.getenv("IMAGEGEN_URL", "")
 
+# Base URL of the self-hosted download service (download-service/) that
+# owns all yt-dlp downloads (YouTube Shorts, Instagram Reels, long-form
+# YouTube metadata). Empty disables all three — links then fall through to
+# normal routing.
+DOWNLOAD_SERVICE_URL: str = os.getenv("DOWNLOAD_SERVICE_URL", "")
+
 # Local path of the Silero TTS model file. Downloaded on first start when
 # missing; the Docker image pre-bakes it (see Dockerfile).
 TTS_MODEL_PATH: str = os.getenv("TTS_MODEL_PATH", ".cache/silero/v5_ru.pt")
