@@ -31,6 +31,12 @@ class TestDownloadDispatch:
             response = client.post("/download", json={"url": "https://x", "kind": "youtube_short"})
         assert response.status_code == 502
 
+    def test_instagram_reel_kind_calls_instagram_reel_download(self):
+        with patch("main.instagram_reel.download_reel", return_value=(b"video", {"description": "x"})) as mock_download:
+            response = client.post("/download", json={"url": "https://x", "kind": "instagram_reel"})
+        mock_download.assert_called_once_with("https://x")
+        assert response.status_code == 200
+
     def test_unknown_kind_returns_422(self):
         response = client.post("/download", json={"url": "https://x", "kind": "bogus"})
         assert response.status_code == 422

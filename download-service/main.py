@@ -15,6 +15,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+import instagram_reel
 import shorts
 from ytdlp_update import check_and_update
 
@@ -87,7 +88,7 @@ class DownloadRequest(BaseModel):
     """
 
     url: str
-    kind: Literal["youtube_short"]
+    kind: Literal["youtube_short", "instagram_reel"]
 
 
 class DownloadResponse(BaseModel):
@@ -108,6 +109,7 @@ class DownloadResponse(BaseModel):
 # tests reaches the actual call instead of a reference captured at import.
 DOWNLOADERS = {
     "youtube_short": (shorts, "download_short"),
+    "instagram_reel": (instagram_reel, "download_reel"),
 }
 
 
