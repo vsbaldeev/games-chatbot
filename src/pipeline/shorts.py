@@ -1,5 +1,5 @@
 """
-YouTube Shorts link detection and download.
+YouTube Shorts link detection and download-service dispatch.
 
 The router consults :func:`extract_shorts_url` and the two gates below to
 decide whether a text message triggers an automatic Shorts summary; the
@@ -16,51 +16,17 @@ link costs zero downloads and zero LLM tokens):
   * ``under_daily_cap`` — at most ``SHORTS_DAILY_CAP`` summaries per chat
     per sliding 24 h window, bounding the Whisper/vision token spend.
 
-YouTube bot-detection («Sign in to confirm you're not a bot») on server IPs
-is handled automatically by the bgutil PO-token provider: the
-``bgutil-ytdlp-pot-provider`` plugin is auto-discovered by yt-dlp at import
-and fetches tokens from the ``pot-provider`` docker-compose sidecar (see
-``docker-compose.yml``). If the sidecar is down, yt-dlp proceeds without a
-token — degraded, never fatal.
-
-yt-dlp also needs a JS runtime (deno, installed in the Dockerfile) to solve
-YouTube's signature/n-parameter challenges; without one it silently falls
-back to non-JS player clients. Deno alone is necessary but not sufficient:
-yt-dlp still needs the actual challenge-solving *script* to run in it,
-which it will only fetch itself at runtime from GitHub/npm if
-``--remote-components`` is passed (running arbitrary fetched JS on every
-extraction — not something to enable). The safe alternative is the
-``yt-dlp-ejs`` PyPI package, which bundles that script locally and is
-exact-pinned by yt-dlp to match its own version; ``requirements.txt``
-pulls it in via yt-dlp's ``default`` extra, and ``entrypoint.sh`` /
-``src/jobs/ytdlp_update.py`` install with the same extra so it never
-drifts out of sync on an auto-update. Without it, deno sits idle
-("challenge solver script ... skipped") and formats needing the n-challenge
-solved silently disappear.
-
-That JS-runtime story alone also turned out not to be the whole one:
-even with deno (and yt-dlp-ejs) present, yt-dlp's own default
-client-selection has been observed picking a single client ("visionos")
-whose formats list has no format 18 at all, failing deterministically
-rather than flakily. ``SHORTS_PLAYER_CLIENTS`` pins an explicit client set
-instead of trusting that shifting default — see its comment for why the
-set itself has already needed revising once, and why it is pinned to the
-same client family (WEBPO_CLIENTS) the bgutil provider above actually
-supports, rather than clients that merely looked token-free at the time.
-All of this was only diagnosable via :class:`YtdlpLogger` below — yt-dlp's
-own ``quiet``/``no_warnings`` options were discarding the warnings that
-actually named each cause.
+The actual yt-dlp download (PO-token wiring, JS challenge solving,
+player-client pinning, transient-flake retries) lives in the
+``download-service`` sidecar, not in this process — see
+``download-service/shorts.py`` and its README for the mechanics, and
+``src/downloads/README.md`` for the client contract. This module only
+detects links, enforces the cost gates, and hands the URL to the client.
 """
 
-import asyncio
-import os
 import re
-import tempfile
-import time
 
-import yt_dlp
-
-from src import log
+from src import downloads, log
 from src.utils.ttl_gate import TtlGate
 
 logger = log.get_logger(__name__)
@@ -70,79 +36,12 @@ SHORTS_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-MAX_SHORT_DURATION_SECONDS = 180              # Shorts hard cap since 2024
-MAX_SHORT_FILESIZE_BYTES = 25 * 1024 * 1024   # Groq Whisper upload limit
-DOWNLOAD_TIMEOUT_SECONDS = 90
-SOCKET_TIMEOUT_SECONDS = 30
-
 MAX_COMMENTS = 10             # top-level comments fetched for audience reaction
 COMMENT_CHAR_LIMIT = 200      # truncate each comment before prompting
 TRANSCRIPT_CHAR_LIMIT = 2000  # cap speech-dense 3-min shorts before prompting
 
 SHORTS_DAILY_CAP = 50               # summaries per chat per sliding 24 h window
 DEDUP_WINDOW_SECONDS = 24 * 3600    # same video id in the same chat → one summary
-
-# The bgutil PO-token provider sidecar on the docker-compose network.
-POT_PROVIDER_URL = "http://pot-provider:4416"
-
-# Muxed-only selection: format 18 (360p mp4, audio+video in one file) exists
-# on virtually every YouTube video; "b" = best pre-muxed fallback. No DASH
-# merge → no ffmpeg binary needed in the image.
-SHORT_FORMAT = "18/b[ext=mp4][filesize<25M]/b[filesize<25M]"
-
-# yt-dlp auto-selects which of YouTube's several player clients to query,
-# and that default has been observed (2026-08-26, via YtdlpLogger below)
-# picking a single client — "visionos" — whose formats list has no format
-# 18 at all, failing every attempt deterministically rather than flakily.
-# yt-dlp's default client set shifts often as it reacts to YouTube's bot
-# countermeasures (yt-dlp itself self-updates daily — see
-# YtdlpUpdateJobManager — so "shifts" means "can change again tomorrow"),
-# so instead of trusting whatever it currently prefers, pin an explicit set.
-#
-# First attempt (2026-08-26) pinned android_vr/android/ios because they
-# looked token-free at the time. That broke again within hours: a yt-dlp
-# self-update added a GVS PO-token requirement to android_vr, and YouTube's
-# ongoing SABR-only rollout (yt-dlp issue #12482) started stripping URLs
-# from android/ios formats entirely. The deeper problem: the bgutil
-# PO-token provider this module already wires up (POT_PROVIDER_URL below)
-# can only ever serve WEBPO_CLIENTS — WEB/MWEB/TVHTML5 and their variants
-# (see yt_dlp.extractor.youtube.pot.utils.WEBPO_CLIENTS) — never android/
-# ios/android_vr, no matter how healthy the sidecar is. Picking non-web
-# clients meant never actually using the token pipeline this bot already
-# runs a docker-compose service for.
-#
-# Pinned to web/mweb (WEBPO_CLIENTS members, so the existing pot-provider
-# sidecar can actually authenticate them), plus tv (currently no GVS
-# requirement at all, per INNERTUBE_CLIENTS, so a free extra chance) and
-# android_vr kept from the first attempt (still lists format 18's URL —
-# whether the missing-GVS-token 403 actually fires may not be universal
-# or fully rolled out, so it costs little to leave in the merged set).
-# UNVERIFIED against a real PO token specifically: the JS challenge-solving
-# side (deno + yt-dlp-ejs, see the module docstring) is now confirmed
-# working locally with no warnings, but there is no way to reach the
-# docker-compose-only pot-provider sidecar or confirm web/mweb still offer
-# a muxed (non-DASH) format at all, outside of production — watch real
-# logs after deploy. If every client here still fails, the remaining
-# options are a manually supplied po_token or accepting some links fail.
-SHORTS_PLAYER_CLIENTS = ["web", "mweb", "tv", "android_vr"]
-
-# Two known intermittent, per-request YouTube extraction flakes that
-# self-heal on a re-request moments later — neither is a per-video block:
-#   * a signed CDN URL for the chosen format 403s (see yt-dlp issue #17395)
-#   * one of SHORTS_PLAYER_CLIENTS times out for this one request, so the
-#     merged formats list comes back without format 18 and format
-#     selection fails with "Requested format is not available" — the
-#     deterministic version of this (yt-dlp defaulting to a single client
-#     that never has format 18) is what SHORTS_PLAYER_CLIENTS above fixes;
-#     this retry stays as defense-in-depth for a genuine one-off timeout
-#     on one of the pinned clients
-# Bounded retry only for these exact signals; every other failure (private,
-# age-gated, removed, ...) still fails fast with no retry.
-SHORTS_CDN_403_SIGNAL = "unable to download video data: HTTP Error 403"
-SHORTS_FORMAT_UNAVAILABLE_SIGNAL = "Requested format is not available"
-SHORTS_TRANSIENT_RETRY_SIGNALS = (SHORTS_CDN_403_SIGNAL, SHORTS_FORMAT_UNAVAILABLE_SIGNAL)
-SHORTS_TRANSIENT_RETRY_ATTEMPTS = 3
-SHORTS_TRANSIENT_RETRY_BACKOFF_SECONDS = 3
 
 # Repost gate: (chat_id, video_id) recorded on first trigger, reposts within
 # the window fall through to the normal routing decision.
@@ -206,156 +105,15 @@ def under_daily_cap(chat_id: int) -> bool:
     return True
 
 
-class YtdlpLogger:
-    """Routes yt-dlp's internal diagnostics through this module's logger.
-
-    Passing an object here (``ydl_opts["logger"]``) makes yt-dlp deliver
-    every warning/error to it instead of stdout/stderr — and, critically,
-    ``YoutubeDL.report_warning``/``to_stderr`` check for a logger *before*
-    checking ``quiet``/``no_warnings``, so this bypasses that suppression
-    entirely. Without it, a PO-token failure or a player-client error (the
-    actual reason format 18 goes missing from the merged list) is silently
-    discarded, leaving only the final, contextless "Requested format is not
-    available" — quiet/no_warnings are still set for stdout hygiene, but
-    diagnosis needs what they were swallowing.
-    """
-
-    def debug(self, message: str) -> None:
-        logger.debug("yt-dlp: %s", message)
-
-    def warning(self, message: str) -> None:
-        logger.warning("yt-dlp: %s", message)
-
-    def error(self, message: str) -> None:
-        logger.error("yt-dlp: %s", message)
-
-
-def build_ydl_opts(target_dir: str) -> dict:
-    """Assemble yt-dlp options for downloading one Short into a directory.
-
-    Args:
-        target_dir: Directory the muxed mp4 is written into.
-
-    Returns:
-        Options dict for ``yt_dlp.YoutubeDL``: muxed-only format, a pinned
-        player-client set (``SHORTS_PLAYER_CLIENTS``), duration and filesize
-        guards, top-comments fetching, the PO-token provider address for the
-        bgutil plugin, and a logger that surfaces internal yt-dlp warnings
-        (PO-token/player-client failures) instead of silently dropping them.
-    """
-    return {
-        "format": SHORT_FORMAT,
-        "outtmpl": os.path.join(target_dir, "short.%(ext)s"),
-        "logger": YtdlpLogger(),
-        "quiet": True,
-        "noprogress": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "socket_timeout": SOCKET_TIMEOUT_SECONDS,
-        "max_filesize": MAX_SHORT_FILESIZE_BYTES,
-        "match_filter": yt_dlp.utils.match_filter_func(
-            f"duration <= {MAX_SHORT_DURATION_SECONDS}"
-        ),
-        "getcomments": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": SHORTS_PLAYER_CLIENTS,
-                "comment_sort": ["top"],
-                # Fields: max-comments, max-parents, max-replies — one list
-                # element per field (the Python-API equivalent of the CLI's
-                # comma-separated syntax). No replies: reactions live in the
-                # top-level comments, and one page keeps the fetch fast.
-                "max_comments": [str(MAX_COMMENTS), str(MAX_COMMENTS), "0"],
-            },
-            "youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]},
-        },
-    }
-
-
-def extract_info_retrying_transient_errors(ydl: yt_dlp.YoutubeDL, url: str) -> dict:
-    """Run ``extract_info``, retrying only YouTube's known transient flakes.
-
-    Args:
-        ydl: Open ``YoutubeDL`` instance to extract with.
-        url: Canonical Shorts URL.
-
-    Returns:
-        yt-dlp's info dict.
-
-    Raises:
-        yt_dlp.utils.DownloadError: A transient flake persisted through all
-            retries, or the failure was some other error (private,
-            age-gated, removed, ...) that is never retried.
-    """
-    last_error = None
-    for attempt in range(SHORTS_TRANSIENT_RETRY_ATTEMPTS):
-        try:
-            return ydl.extract_info(url, download=True)
-        except yt_dlp.utils.DownloadError as err:
-            if not any(signal in str(err) for signal in SHORTS_TRANSIENT_RETRY_SIGNALS):
-                raise
-            last_error = err
-            if attempt < SHORTS_TRANSIENT_RETRY_ATTEMPTS - 1:
-                time.sleep(SHORTS_TRANSIENT_RETRY_BACKOFF_SECONDS)
-    raise last_error
-
-
-def download_short_sync(url: str, target_dir: str) -> tuple[bytes, dict]:
-    """Download one YouTube Short into ``target_dir`` (blocking).
-
-    Args:
-        url: Canonical Shorts URL.
-        target_dir: Directory to download the muxed mp4 into.
-
-    Returns:
-        Tuple of the downloaded video bytes and yt-dlp's info dict (title,
-        channel, duration, comments, …).
-
-    Raises:
-        yt_dlp.utils.DownloadError: On extraction or download failure.
-        FileNotFoundError: When the duration/filesize guards rejected the
-            video, so no file was produced.
-    """
-    with yt_dlp.YoutubeDL(build_ydl_opts(target_dir)) as ydl:
-        info = extract_info_retrying_transient_errors(ydl, url)
-    requested = (info or {}).get("requested_downloads") or []
-    filepath = requested[0].get("filepath") if requested else None
-    if not filepath or not os.path.exists(filepath):
-        raise FileNotFoundError(
-            f"Short rejected by duration/filesize guard or not downloaded: {url}"
-        )
-    with open(filepath, "rb") as video_file:
-        return video_file.read(), info
-
-
 async def download_short(url: str) -> tuple[bytes, dict] | None:
-    """Download one YouTube Short without blocking the event loop.
-
-    Runs :func:`download_short_sync` in the default executor inside a
-    temporary directory, bounded by ``DOWNLOAD_TIMEOUT_SECONDS``.
+    """Download one YouTube Short via the download-service sidecar.
 
     Args:
         url: Canonical Shorts URL.
 
     Returns:
-        ``(video_bytes, info_dict)`` on success, ``None`` on any failure
-        (download error, duration/filesize rejection, timeout) — logged,
-        never raised, so the pipeline degrades to silence.
+        ``(video_bytes, info_dict)`` on success, ``None`` on any failure —
+        the download service already degrades every internal error
+        (extraction, timeout, duration/filesize rejection) to ``None``.
     """
-    loop = asyncio.get_event_loop()
-    try:
-        # ignore_cleanup_errors: on timeout the executor thread may still be
-        # writing into the directory while it is being removed.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as target_dir:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, download_short_sync, url, target_dir),
-                timeout=DOWNLOAD_TIMEOUT_SECONDS,
-            )
-    except asyncio.TimeoutError:
-        logger.warning("Shorts download timed out after %ss: %s", DOWNLOAD_TIMEOUT_SECONDS, url)
-    except Exception as err:
-        # Persistent failures here usually mean YouTube bot-detection or a
-        # stale yt-dlp extractor — both self-heal (PO-token sidecar, daily
-        # yt-dlp self-update), but the log makes the failing stage visible.
-        logger.warning("Shorts download failed for %s: %s", url, err)
-    return None
+    return await downloads.download_short(url)

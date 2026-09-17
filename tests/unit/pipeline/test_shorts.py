@@ -1,88 +1,52 @@
-"""shorts.py tests — the intermittent transient-flake retry around extract_info."""
+"""shorts.py tests — link detection, cost gates, and the download-service dispatch."""
 
-import logging
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
-import yt_dlp
-
-from src.pipeline.shorts import (
-    SHORTS_PLAYER_CLIENTS,
-    SHORTS_TRANSIENT_RETRY_ATTEMPTS,
-    YtdlpLogger,
-    build_ydl_opts,
-    extract_info_retrying_transient_errors,
-)
-
-SLEEP_PATCH_TARGET = "src.pipeline.shorts.time.sleep"
-
-CDN_403_ERROR = yt_dlp.utils.DownloadError(
-    "ERROR: unable to download video data: HTTP Error 403: Forbidden"
-)
-
-FORMAT_UNAVAILABLE_ERROR = yt_dlp.utils.DownloadError(
-    "ERROR: Requested format is not available. Use --list-formats for a list "
-    "of available formats"
-)
+from src.pipeline import shorts
 
 
-class TestExtractInfoRetryingTransientErrors:
-    @pytest.mark.parametrize("transient_error", [CDN_403_ERROR, FORMAT_UNAVAILABLE_ERROR])
-    def test_retries_transient_error_then_succeeds(self, transient_error):
-        ydl = Mock()
-        ydl.extract_info.side_effect = [transient_error, {"id": "abc"}]
-        with patch(SLEEP_PATCH_TARGET):
-            info = extract_info_retrying_transient_errors(ydl, "https://example.com/shorts/abc")
-        assert info == {"id": "abc"}
-        assert ydl.extract_info.call_count == 2
+class TestExtractVideoId:
+    def test_no_link_returns_none(self):
+        assert shorts.extract_video_id("no links here") is None
 
-    @pytest.mark.parametrize("transient_error", [CDN_403_ERROR, FORMAT_UNAVAILABLE_ERROR])
-    def test_gives_up_after_max_attempts(self, transient_error):
-        ydl = Mock()
-        ydl.extract_info.side_effect = transient_error
-        with patch(SLEEP_PATCH_TARGET):
-            with pytest.raises(yt_dlp.utils.DownloadError):
-                extract_info_retrying_transient_errors(ydl, "https://example.com/shorts/abc")
-        assert ydl.extract_info.call_count == SHORTS_TRANSIENT_RETRY_ATTEMPTS
+    def test_extracts_id_from_shorts_url(self):
+        assert shorts.extract_video_id("check https://www.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
 
-    def test_does_not_retry_unrelated_download_errors(self):
-        ydl = Mock()
-        private_video_error = yt_dlp.utils.DownloadError("ERROR: Private video")
-        ydl.extract_info.side_effect = private_video_error
-        with patch(SLEEP_PATCH_TARGET) as mock_sleep:
-            with pytest.raises(yt_dlp.utils.DownloadError):
-                extract_info_retrying_transient_errors(ydl, "https://example.com/shorts/abc")
-        assert ydl.extract_info.call_count == 1
-        mock_sleep.assert_not_called()
+    def test_extracts_id_from_mobile_host(self):
+        assert shorts.extract_video_id("https://m.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
 
 
-class TestYtdlpLoggerSurfacesInternalDiagnostics:
-    """Without a custom logger, yt-dlp's quiet/no_warnings options silently
-    discard PO-token/player-client failures — the actual reason a format
-    goes missing — leaving only the final, contextless format-selection
-    error. YtdlpLogger routes those through this module's own logger instead."""
+class TestExtractShortsUrl:
+    def test_no_link_returns_none(self):
+        assert shorts.extract_shorts_url("no links here") is None
 
-    def test_warning_is_forwarded_to_the_module_logger(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="src.pipeline.shorts"):
-            YtdlpLogger().warning("Error reaching POST /get_pot (caused by TransportError)")
-        assert "Error reaching POST /get_pot" in caplog.text
+    def test_canonicalises_tracking_params_and_mobile_host(self):
+        url = shorts.extract_shorts_url("https://m.youtube.com/shorts/dQw4w9WgXcQ?si=abc123")
+        assert url == "https://www.youtube.com/shorts/dQw4w9WgXcQ"
 
-    def test_debug_is_forwarded_to_the_module_logger(self, caplog):
-        with caplog.at_level(logging.DEBUG, logger="src.pipeline.shorts"):
-            YtdlpLogger().debug("Generating POT via HTTP server")
-        assert "Generating POT via HTTP server" in caplog.text
 
-    def test_build_ydl_opts_wires_the_logger_bypassing_quiet_suppression(self):
-        """A YoutubeDL logger is checked before quiet/no_warnings, so setting
-        it is what actually makes warnings surface despite those flags."""
-        opts = build_ydl_opts("/tmp/whatever")
-        assert isinstance(opts["logger"], YtdlpLogger)
-        assert opts["quiet"] is True
-        assert opts["no_warnings"] is True
+class TestUnderDailyCap:
+    def test_within_cap_returns_true(self):
+        assert shorts.under_daily_cap(chat_id=910001) is True
 
-    def test_build_ydl_opts_pins_the_player_client_set(self):
-        """yt-dlp's own default client selection has been observed picking a
-        single client with no format 18 at all — pinning a known-good set
-        is what actually fixes that, not just diagnoses it."""
-        opts = build_ydl_opts("/tmp/whatever")
-        assert opts["extractor_args"]["youtube"]["player_client"] == SHORTS_PLAYER_CLIENTS
+    def test_exhausted_cap_returns_false(self):
+        chat_id = 910002
+        for _ in range(shorts.SHORTS_DAILY_CAP):
+            assert shorts.under_daily_cap(chat_id) is True
+        assert shorts.under_daily_cap(chat_id) is False
+
+
+DOWNLOAD_SHORT_TARGET = "src.pipeline.shorts.downloads.download_short"
+
+
+class TestDownloadShort:
+    async def test_delegates_to_the_download_service_client(self):
+        with patch(DOWNLOAD_SHORT_TARGET, new=AsyncMock(return_value=(b"video bytes", {"id": "abc"}))) as mock_download:
+            result = await shorts.download_short("https://www.youtube.com/shorts/abc")
+        mock_download.assert_awaited_once_with("https://www.youtube.com/shorts/abc")
+        assert result == (b"video bytes", {"id": "abc"})
+
+    async def test_none_on_service_failure(self):
+        with patch(DOWNLOAD_SHORT_TARGET, new=AsyncMock(return_value=None)):
+            result = await shorts.download_short("https://www.youtube.com/shorts/abc")
+        assert result is None
