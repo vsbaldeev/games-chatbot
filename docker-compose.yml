@@ -21,8 +21,9 @@ services:
 
   # Generates YouTube PO tokens so yt-dlp survives «Sign in to confirm you're
   # not a bot» on datacenter IPs. The bgutil-ytdlp-pot-provider plugin inside
-  # the bot fetches tokens from it automatically (src/pipeline/shorts.py).
-  # `latest` is deliberate: the provider must track YouTube-side changes.
+  # download-service fetches tokens from it automatically
+  # (download-service/shorts.py). `latest` is deliberate: the provider must
+  # track YouTube-side changes.
   pot-provider:
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     restart: unless-stopped
@@ -52,6 +53,21 @@ services:
         max-size: "10m"
         max-file: "2"
 
+  # Self-hosted yt-dlp downloads for YouTube Shorts, Instagram Reels, and
+  # long-form YouTube metadata (download-service/). A yt-dlp version bump
+  # restarts only this container — the bot, its Telegram connection, and
+  # every other feature stay up.
+  download-service:
+    build: ./download-service
+    restart: unless-stopped
+    mem_limit: 512m
+    memswap_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   bot:
     build: .
     image: games-chatbot
@@ -60,6 +76,7 @@ services:
     environment:
       DATABASE_URL: postgresql://chatbot:${POSTGRES_PASSWORD}@postgres:5432/chatbot
       IMAGEGEN_URL: http://imagegen:8000
+      DOWNLOAD_SERVICE_URL: http://download-service:8000
       LOG_LEVEL: DEBUG
       # Container stdout is not a tty; force ANSI colors so `docker compose
       # logs` renders them in a terminal.
@@ -77,10 +94,15 @@ services:
       # Same: photo posts degrade to text stories when imagegen is down.
       imagegen:
         condition: service_started
+      # Same: Shorts/Reel/YouTube summaries degrade to silence when the
+      # download service is down — everything else works.
+      download-service:
+        condition: service_started
     # 2g: CPU torch + the resident Silero TTS model do not fit in the old
     # 800m cap. Budget on the 8GB host: OS+Docker ~1.2g, postgres 1g,
-    # pot-provider 256m, bot 2g, imagegen 3g peak — ~7.5g worst case, and
-    # the imagegen peak only exists during the two weekly generations.
+    # pot-provider 256m, download-service 512m, bot 2g, imagegen 3g peak —
+    # ~8g worst case, and the imagegen peak only exists during the two
+    # weekly generations.
     mem_limit: 2g
     memswap_limit: 2g
     # Bumped 2026-08-20 for the Tier 1.2 DEBUG capture week (see
