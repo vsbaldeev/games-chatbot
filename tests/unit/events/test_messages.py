@@ -301,3 +301,68 @@ class TestSendLimitNoticeWithNotification:
             await send_limit_notice(msg, 900007, RATE_LIMIT_NOTICE, notification_msg=notification)
         assert notification.edit_text.await_count == 2
         msg.set_reaction.assert_not_called()
+
+
+LLM_LOG_PATCH_TARGET = "src.events.messages.llm_log.insert_call"
+PROMPT_ENSURE_PATCH_TARGET = "src.events.messages.llm_system_prompts.ensure"
+FEEDBACK_REGISTER_PATCH_TARGET = "src.events.messages.message_feedback.register"
+
+
+class TestDeliverAndRecordFeedbackCapture:
+    async def test_writes_llm_log_and_registers_feedback_when_trace_present(self):
+        msg = make_msg()
+        incoming = make_incoming(username="vasya", message_id=55, user_id=42)
+        trace = {
+            "history_messages": [], "user_prompt": "vasya: привет", "raw_response": "Привет!",
+            "model": "test-model", "input_tokens": 10, "output_tokens": 2, "latency_ms": 500,
+            "response": "Привет!", "language_corrected": False,
+        }
+        state = make_state(
+            incoming, response_trigger="explicit", filter_verdict="MEANINGFUL", response_trace=trace,
+        )
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(PROMPT_ENSURE_PATCH_TARGET, AsyncMock(return_value="deadbeef")) as ensure, \
+             patch(LLM_LOG_PATCH_TARGET, AsyncMock()) as insert_call, \
+             patch(FEEDBACK_REGISTER_PATCH_TARGET, AsyncMock()) as register:
+            await deliver_and_record(state, msg, bot_id=999, response_text="Привет!")
+
+        ensure.assert_awaited_once()
+        log_kwargs = insert_call.await_args.kwargs
+        assert log_kwargs["chat_id"] == msg.chat_id
+        assert log_kwargs["bot_message_id"] == 999
+        assert log_kwargs["user_message_id"] == 55
+        assert log_kwargs["user_id"] == 42
+        assert log_kwargs["trigger"] == "explicit"
+        assert log_kwargs["filter_verdict"] == "MEANINGFUL"
+        assert log_kwargs["system_prompt_sha"] == "deadbeef"
+        assert log_kwargs["response"] == "Привет!"
+
+        register_kwargs = register.await_args.kwargs
+        assert register_kwargs["chat_id"] == msg.chat_id
+        assert register_kwargs["message_id"] == 999
+        assert register_kwargs["source"] == "pipeline"
+        assert register_kwargs["trigger"] == "explicit"
+        assert register_kwargs["filter_verdict"] == "MEANINGFUL"
+
+    async def test_no_trace_skips_llm_log_but_still_registers_feedback(self):
+        msg = make_msg()
+        incoming = make_incoming()
+        state = make_state(incoming, response_trigger="youtube_short", response_trace=None)
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(LLM_LOG_PATCH_TARGET, AsyncMock()) as insert_call, \
+             patch(FEEDBACK_REGISTER_PATCH_TARGET, AsyncMock()) as register:
+            await deliver_and_record(state, msg, bot_id=999, response_text="caption text")
+        insert_call.assert_not_awaited()
+        register.assert_awaited_once()
+
+    async def test_feedback_capture_failure_does_not_raise(self):
+        msg = make_msg()
+        incoming = make_incoming()
+        state = make_state(incoming, response_trigger="explicit", response_trace={
+            "history_messages": [], "user_prompt": "x", "raw_response": "y", "model": None,
+            "input_tokens": None, "output_tokens": None, "latency_ms": 1,
+            "response": "y", "language_corrected": False,
+        })
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(PROMPT_ENSURE_PATCH_TARGET, AsyncMock(side_effect=RuntimeError("db down"))):
+            await deliver_and_record(state, msg, bot_id=999, response_text="y")  # must not raise

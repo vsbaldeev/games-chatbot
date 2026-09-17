@@ -27,14 +27,14 @@ from src.events.link_repost import AmbiguousDeliveryError, deliver_link_message,
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
-from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES
+from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES, RESPONSE_PROMPT
 from src.events.sending import edit_and_store, send_and_store
 from src.events.voice_reply import try_send_voice_reply
 from src.group_profile.profile import run_group_profile
 from src.life import selfie
 from src.memes.sender import send_meme
 from src.pipeline.router import is_explicitly_addressed
-from src.store import unified_messages
+from src.store import llm_log, llm_system_prompts, message_feedback, unified_messages
 from src.utils.ttl_gate import TtlGate
 
 PIPELINE = build_pipeline(worker_agent, response_agent)
@@ -316,7 +316,8 @@ def build_context_length_notice(msg) -> str:
 
 
 async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) -> None:
-    """Deliver the pipeline response and store the sent message.
+    """Deliver the pipeline response, store the sent message, and persist its
+    feedback-tracking row and (when the response LLM ran) its trace.
 
     Args:
         final_state: Final pipeline state (drives the delivery mode). For a
@@ -340,6 +341,46 @@ async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) 
         reply_to_msg_id=anchored_to,
         link_material=link_material,
     )
+    await _record_feedback(final_state, msg, sent_id)
+
+
+async def _record_feedback(final_state, msg, sent_id: int) -> None:
+    """Best-effort: persist the LLM trace (if one exists) and register the
+    message for reaction/reply feedback tracking. Never raises — a metrics
+    write must not affect message delivery."""
+    trigger = final_state.get("response_trigger") or "-"
+    filter_verdict = final_state.get("filter_verdict") or "-"
+    trace = final_state.get("response_trace")
+    try:
+        if trace is not None:
+            system_prompt_sha = await llm_system_prompts.ensure(RESPONSE_PROMPT)
+            await llm_log.insert_call(
+                chat_id=msg.chat_id,
+                bot_message_id=sent_id,
+                user_message_id=msg.message_id,
+                user_id=final_state["incoming"]["user_id"],
+                trigger=trigger,
+                filter_verdict=filter_verdict,
+                system_prompt_sha=system_prompt_sha,
+                history_messages=trace["history_messages"],
+                user_prompt=trace["user_prompt"],
+                raw_response=trace["raw_response"],
+                language_corrected=trace["language_corrected"],
+                response=trace["response"],
+                model=trace["model"],
+                input_tokens=trace["input_tokens"],
+                output_tokens=trace["output_tokens"],
+                latency_ms=trace["latency_ms"],
+            )
+    except Exception as err:
+        logger.warning("Failed to store LLM trace for message %s: %s", sent_id, err)
+    try:
+        await message_feedback.register(
+            chat_id=msg.chat_id, message_id=sent_id, source="pipeline",
+            trigger=trigger, filter_verdict=filter_verdict,
+        )
+    except Exception as err:
+        logger.warning("Failed to register feedback tracking for message %s: %s", sent_id, err)
 
 
 def launch_selfie_task(bot, chat_id: int, reply_to_msg_id: int, final_state: BotState) -> None:
