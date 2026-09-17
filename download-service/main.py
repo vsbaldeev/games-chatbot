@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 import instagram_reel
 import shorts
+import youtube_video
 from ytdlp_update import check_and_update
 
 logger = logging.getLogger("download-service")
@@ -88,7 +89,7 @@ class DownloadRequest(BaseModel):
     """
 
     url: str
-    kind: Literal["youtube_short", "instagram_reel"]
+    kind: Literal["youtube_short", "instagram_reel", "youtube_video"]
 
 
 class DownloadResponse(BaseModel):
@@ -110,6 +111,7 @@ class DownloadResponse(BaseModel):
 DOWNLOADERS = {
     "youtube_short": (shorts, "download_short"),
     "instagram_reel": (instagram_reel, "download_reel"),
+    "youtube_video": (youtube_video, "fetch_metadata"),
 }
 
 

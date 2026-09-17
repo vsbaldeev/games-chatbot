@@ -37,6 +37,12 @@ class TestDownloadDispatch:
         mock_download.assert_called_once_with("https://x")
         assert response.status_code == 200
 
+    def test_youtube_video_kind_returns_null_video_bytes(self):
+        with patch("main.youtube_video.fetch_metadata", return_value=(None, {"title": "x"})):
+            response = client.post("/download", json={"url": "https://x", "kind": "youtube_video"})
+        assert response.status_code == 200
+        assert response.json()["video_bytes_base64"] is None
+
     def test_unknown_kind_returns_422(self):
         response = client.post("/download", json={"url": "https://x", "kind": "bogus"})
         assert response.status_code == 422
