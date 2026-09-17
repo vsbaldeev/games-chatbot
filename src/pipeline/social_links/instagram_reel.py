@@ -1,26 +1,20 @@
-"""Instagram Reel link detection and anonymous yt-dlp fetch.
+"""Instagram Reel link detection and download-service dispatch.
 
 Best-effort, no authentication: Instagram aggressively blocks anonymous
 scraping, so any failure (blocked, private, deleted, timeout) degrades to
 None — the message falls through to normal routing, same philosophy as a
-gated YouTube Shorts repost. Instagram's access check is flaky rather than a
-hard per-post block (observed: different anonymous requests to the same
-network get through inconsistently), so that specific failure signature gets
-a few bounded retries; every other failure (private, deleted, unsupported)
-still fails fast with no retry. Comments are rarely available via yt-dlp
+gated YouTube Shorts repost. Comments are rarely available via yt-dlp
 without an authenticated session; when present they are surfaced, when
 absent the content block is caption-only.
+
+The actual yt-dlp download (curl-cffi impersonation, the access-gate retry)
+lives in the ``download-service`` sidecar, not in this process — see
+``download-service/instagram_reel.py`` and its README for the mechanics.
 """
 
-import asyncio
-import os
 import re
-import tempfile
-import time
 
-import yt_dlp
-
-from src import log
+from src import downloads, log
 from src.pipeline.social_links import (
     SOCIAL_LINK_COMMENT_CHAR_LIMIT,
     SOCIAL_LINK_DEDUP_WINDOW_SECONDS,
@@ -37,25 +31,14 @@ INSTAGRAM_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-DOWNLOAD_TIMEOUT_SECONDS = 60
-SOCKET_TIMEOUT_SECONDS = 20
-MAX_FILESIZE_BYTES = 50 * 1024 * 1024  # Telegram Bot API upload cap
-
-# Instagram's own access-check API ("get_ruling_for_content") withholds the
-# CSRF token an anonymous request needs inconsistently, not per-post — the
-# same request retried moments later can succeed. Bounded retry only for
-# this exact signature; every other yt-dlp failure still fails fast.
-INSTAGRAM_ACCESS_GATE_SIGNAL = "Instagram sent an empty media response"
-INSTAGRAM_ACCESS_RETRY_ATTEMPTS = 3
-INSTAGRAM_ACCESS_RETRY_BACKOFF_SECONDS = 3
-
-# Own cap, not shared with youtube_video: only Instagram fetches hit
-# yt-dlp's flaky anonymous access gate, so only Instagram gets throttled.
+# Own cap, not shared with youtube_video: only Instagram fetches hit the
+# download service's flaky anonymous access gate, so only Instagram gets
+# throttled.
 INSTAGRAM_REEL_DAILY_CAP = 30  # summaries per chat per sliding 24h window
 
 
 class InstagramReelHandler:
-    """Downloads an Instagram Reel anonymously; caption + comments, best effort."""
+    """Downloads an Instagram Reel via the download service; caption + comments, best effort."""
 
     name = "instagram_reel"
     pattern = INSTAGRAM_URL_RE
@@ -84,17 +67,16 @@ class InstagramReelHandler:
         return reel_id, f"https://www.instagram.com/reel/{reel_id}/"
 
     async def fetch(self, url: str) -> SocialLinkContent | None:
-        """Anonymously download the Reel and compose caption + comments.
+        """Fetch the Reel via the download service and compose caption + comments.
 
         Args:
             url: Canonical Reel URL.
 
         Returns:
             SocialLinkContent with the downloaded video bytes attached, or
-            None on any failure — never authenticated, retried only for
-            Instagram's transient access-gate error.
+            None on any failure.
         """
-        downloaded = await self.__download(url)
+        downloaded = await downloads.download_reel(url)
         if downloaded is None:
             logger.warning("Instagram Reel download returned nothing for %s", url)
             return None
@@ -105,107 +87,11 @@ class InstagramReelHandler:
             return None
         return {"content_block": content_block, "video_bytes": video_bytes}
 
-    def __build_ydl_opts(self, target_dir: str) -> dict:
-        """Assemble yt-dlp options for an anonymous, filesize-capped download.
-
-        Args:
-            target_dir: Directory the downloaded file is written into.
-
-        Returns:
-            Options dict for ``yt_dlp.YoutubeDL``.
-        """
-        return {
-            "format": f"b[filesize<{MAX_FILESIZE_BYTES}]/b",
-            "outtmpl": os.path.join(target_dir, "reel.%(ext)s"),
-            "quiet": True,
-            "noprogress": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "socket_timeout": SOCKET_TIMEOUT_SECONDS,
-            "max_filesize": MAX_FILESIZE_BYTES,
-        }
-
-    def __download_sync(self, url: str, target_dir: str) -> tuple[bytes, dict]:
-        """Download one Reel into ``target_dir`` (blocking).
-
-        Args:
-            url: Canonical Reel URL.
-            target_dir: Directory to download the video into.
-
-        Returns:
-            Tuple of the downloaded video bytes and yt-dlp's info dict.
-
-        Raises:
-            FileNotFoundError: When the filesize guard rejected the video or
-                nothing was downloaded.
-        """
-        with yt_dlp.YoutubeDL(self.__build_ydl_opts(target_dir)) as ydl:
-            info = self.__extract_info(ydl, url)
-        requested = (info or {}).get("requested_downloads") or []
-        filepath = requested[0].get("filepath") if requested else None
-        if not filepath or not os.path.exists(filepath):
-            raise FileNotFoundError(f"Reel rejected by filesize guard or not downloaded: {url}")
-        with open(filepath, "rb") as video_file:
-            return video_file.read(), info
-
-    def __extract_info(self, ydl: yt_dlp.YoutubeDL, url: str) -> dict:
-        """Run ``extract_info``, retrying only Instagram's access-gate error.
-
-        Args:
-            ydl: Open ``YoutubeDL`` instance to extract with.
-            url: Canonical Reel URL.
-
-        Returns:
-            yt-dlp's info dict.
-
-        Raises:
-            yt_dlp.utils.DownloadError: The access gate persisted through all
-                retries, or the failure was some other error (private,
-                deleted, unsupported) that is never retried.
-        """
-        last_error = None
-        for attempt in range(INSTAGRAM_ACCESS_RETRY_ATTEMPTS):
-            try:
-                return ydl.extract_info(url, download=True)
-            except yt_dlp.utils.DownloadError as err:
-                if INSTAGRAM_ACCESS_GATE_SIGNAL not in str(err):
-                    raise
-                last_error = err
-                if attempt < INSTAGRAM_ACCESS_RETRY_ATTEMPTS - 1:
-                    time.sleep(INSTAGRAM_ACCESS_RETRY_BACKOFF_SECONDS)
-        raise last_error
-
-    async def __download(self, url: str) -> tuple[bytes, dict] | None:
-        """Download without blocking the event loop; None on any failure.
-
-        Args:
-            url: Canonical Reel URL.
-
-        Returns:
-            ``(video_bytes, info_dict)`` on success, None on any failure
-            (download error, filesize rejection, timeout) — logged, never
-            raised.
-        """
-        loop = asyncio.get_event_loop()
-        try:
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as target_dir:
-                return await asyncio.wait_for(
-                    loop.run_in_executor(None, self.__download_sync, url, target_dir),
-                    timeout=DOWNLOAD_TIMEOUT_SECONDS,
-                )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Instagram Reel download timed out after %ss: %s", DOWNLOAD_TIMEOUT_SECONDS, url
-            )
-        except Exception as err:
-            logger.warning("Instagram Reel download failed for %s: %s", url, err)
-        return None
-
     def __compose(self, info: dict) -> str:
-        """Build the labelled content block from yt-dlp's info dict.
+        """Build the labelled content block from the download service's info dict.
 
         Args:
-            info: yt-dlp info dict of the downloaded Reel.
+            info: Info dict returned by the download service.
 
         Returns:
             Labelled block (header + caption and/or comments), or "" when
