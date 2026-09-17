@@ -1,19 +1,18 @@
-"""Long-form YouTube video link detection and metadata-only fetch.
+"""Long-form YouTube video link detection and download-service metadata fetch.
 
 Regular (non-Shorts) YouTube links: youtube.com/watch?v=... and youtu.be/...
 short links. Deliberately lighter than shorts.py's flow — no video/audio
-download, no transcript — just yt-dlp's info-extraction (download=False)
+download, no transcript — just the download service's metadata-only fetch
 for the video's description and top comments. No duration cap: cost is one
 metadata request regardless of video length.
+
+The actual yt-dlp extraction lives in the ``download-service`` sidecar, not
+in this process — see ``download-service/youtube_video.py``.
 """
 
-import asyncio
 import re
 
-import yt_dlp
-
-from src import log
-from src.pipeline.shorts import POT_PROVIDER_URL
+from src import downloads, log
 from src.pipeline.social_links import (
     SOCIAL_LINK_COMMENT_CHAR_LIMIT,
     SOCIAL_LINK_DEDUP_WINDOW_SECONDS,
@@ -33,11 +32,9 @@ YOUTUBE_VIDEO_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-FETCH_TIMEOUT_SECONDS = 30
-
 
 class YoutubeVideoHandler:
-    """Fetches a long-form YouTube video's description + top comments, no download."""
+    """Fetches a long-form YouTube video's description + top comments via the download service."""
 
     name = "youtube_video"
     pattern = YOUTUBE_VIDEO_URL_RE
@@ -72,7 +69,7 @@ class YoutubeVideoHandler:
         return video_id, f"https://www.youtube.com/watch?v={video_id}"
 
     async def fetch(self, url: str) -> SocialLinkContent | None:
-        """Fetch the video's description + top comments, no download.
+        """Fetch the video's description + top comments via the download service.
 
         Args:
             url: Canonical watch URL.
@@ -82,7 +79,7 @@ class YoutubeVideoHandler:
             any extraction failure or when both title and description are
             empty.
         """
-        info = await self.__extract_info(url)
+        info = await downloads.fetch_youtube_video(url)
         if info is None:
             logger.warning("YouTube metadata extraction returned nothing for %s", url)
             return None
@@ -92,59 +89,11 @@ class YoutubeVideoHandler:
             return None
         return {"content_block": content_block, "video_bytes": None}
 
-    def __build_ydl_opts(self) -> dict:
-        """yt-dlp options for a metadata-only fetch: no download, top comments."""
-        return {
-            "quiet": True,
-            "noprogress": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "skip_download": True,
-            "getcomments": True,
-            "extractor_args": {
-                "youtube": {
-                    "comment_sort": ["top"],
-                    "max_comments": [
-                        str(SOCIAL_LINK_MAX_COMMENTS), str(SOCIAL_LINK_MAX_COMMENTS), "0",
-                    ],
-                },
-                "youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]},
-            },
-        }
-
-    def __extract_info_sync(self, url: str) -> dict:
-        """Blocking metadata-only extraction, run off the event loop."""
-        with yt_dlp.YoutubeDL(self.__build_ydl_opts()) as ydl:
-            return ydl.extract_info(url, download=False) or {}
-
-    async def __extract_info(self, url: str) -> dict | None:
-        """Run the extraction without blocking the event loop; None on failure.
-
-        Args:
-            url: Canonical watch URL.
-
-        Returns:
-            yt-dlp's info dict, or None on timeout or any extraction error.
-        """
-        loop = asyncio.get_event_loop()
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, self.__extract_info_sync, url),
-                timeout=FETCH_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "YouTube metadata fetch timed out after %ss: %s", FETCH_TIMEOUT_SECONDS, url
-            )
-        except Exception as err:
-            logger.warning("YouTube metadata fetch failed for %s: %s", url, err)
-        return None
-
     def __compose(self, info: dict) -> str:
-        """Build the labelled content block from yt-dlp's info dict.
+        """Build the labelled content block from the download service's info dict.
 
         Args:
-            info: yt-dlp info dict (metadata only, no download).
+            info: Info dict returned by the download service (metadata only).
 
         Returns:
             Labelled block (header + description, truncated to

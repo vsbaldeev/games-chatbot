@@ -1,10 +1,9 @@
-"""YoutubeVideoHandler tests — long-form link detection and metadata-only fetch."""
+"""YoutubeVideoHandler tests — long-form link detection and download-service dispatch."""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.pipeline import shorts
 from src.pipeline.social_links import SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT
 from src.pipeline.social_links.youtube_video import YoutubeVideoHandler
 
@@ -37,17 +36,7 @@ class TestExtract:
         assert handler.extract("https://www.youtube.com/shorts/dQw4w9WgXcQ") is None
 
 
-class TestBuildYdlOpts:
-    def test_opts_include_pot_provider_arg(self, handler):
-        opts = handler._YoutubeVideoHandler__build_ydl_opts()
-        assert opts["extractor_args"]["youtubepot-bgutilhttp"]["base_url"] == [
-            shorts.POT_PROVIDER_URL
-        ]
-
-
-EXTRACT_INFO_PATCH_TARGET = (
-    "src.pipeline.social_links.youtube_video.YoutubeVideoHandler._YoutubeVideoHandler__extract_info"
-)
+EXTRACT_INFO_PATCH_TARGET = "src.pipeline.social_links.youtube_video.downloads.fetch_youtube_video"
 
 
 class TestFetch:
