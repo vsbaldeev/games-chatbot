@@ -12,7 +12,6 @@ from src.app.jobs import (
     MemeJobManager,
     MessageCleanupJobManager,
     RolesJobManager,
-    YtdlpUpdateJobManager,
 )
 from src.store import db as database
 from src.tts import speech_service
@@ -79,7 +78,6 @@ def main() -> None:
         RolesJobManager(),
         MessageCleanupJobManager(),
         MemeJobManager(),
-        YtdlpUpdateJobManager(),
     )
     for job_manager in job_managers:
         job_manager.add_jobs(app)
