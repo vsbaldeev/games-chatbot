@@ -26,7 +26,7 @@ from src.agent.middleware import ainvoke_with_backoff, strip_thinking
 from src.config.prompts import SELFIE_SCENE_SYSTEM
 from src.events.sending import send_and_store
 from src.life.photo import generate_best_photo
-from src.store import unified_messages
+from src.store import message_feedback, unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -115,7 +115,7 @@ async def send_excuse(bot, chat_id: int, reply_to_msg_id: int) -> None:
         reply_to_msg_id: The requesting message to anchor the excuse to.
     """
     await send_and_store(
-        bot, chat_id, random.choice(SELFIE_FAILED_REPLIES), reply_to=reply_to_msg_id
+        bot, chat_id, random.choice(SELFIE_FAILED_REPLIES), source="selfie", reply_to=reply_to_msg_id
     )
 
 
@@ -151,6 +151,10 @@ async def send_and_record_photo(bot, chat_id: int, reply_to_msg_id: int, photo_p
         reply_to_msg_id=reply_to_msg_id,
         file_id=sent.photo[-1].file_id if sent.photo else None,
     )
+    try:
+        await message_feedback.register(chat_id=chat_id, message_id=sent.message_id, source="selfie")
+    except Exception as err:
+        logger.warning("Failed to register feedback tracking for selfie %s: %s", sent.message_id, err)
 
 
 async def deliver_selfie(

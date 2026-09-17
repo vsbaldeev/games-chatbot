@@ -20,7 +20,7 @@ from src import achievements, config, log
 from src.agent import ainvoke_with_backoff
 from src.agent.language import normalize_homoglyphs
 from src.config.prompts import ROLES_SYSTEM_PROMPT, TAG_MAX_CHARS
-from src.store import unified_messages, user_tags
+from src.store import message_feedback, unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users
 from src.utils.anon_map import anonymise
 from src.utils.llm_json import load_json_object
@@ -307,6 +307,10 @@ async def announce_roles(
         )
     except Exception as error:
         logger.warning("Failed to record roles announcement for chat %s: %s", chat_id, error)
+    try:
+        await message_feedback.register(chat_id=chat_id, message_id=sent.message_id, source="roles")
+    except Exception as error:
+        logger.warning("Failed to register feedback tracking for chat %s: %s", chat_id, error)
 
 
 async def set_member_tag(

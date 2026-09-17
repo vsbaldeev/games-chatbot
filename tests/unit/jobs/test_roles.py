@@ -244,6 +244,16 @@ class TestRolesAnnouncementIsBroadcast:
         roles_map = {1: {"role": "Геймер", "reason": "тащит ноутбук и геймпад"}}
         with patch(
             "src.jobs.roles.unified_messages.insert", new_callable=AsyncMock
-        ) as mock_insert:
+        ) as mock_insert, patch("src.jobs.roles.message_feedback.register", new_callable=AsyncMock):
             await roles.announce_roles(context, CHAT_ID, roles_map, {1: "tmaxims"})
         assert mock_insert.await_args.kwargs["is_broadcast"] is True
+
+    async def test_announcement_registers_feedback_with_roles_source(self):
+        context = MagicMock()
+        context.bot.send_message = AsyncMock(return_value=MagicMock(message_id=555))
+        context.bot.id = 999
+        roles_map = {1: {"role": "Геймер", "reason": "тащит ноутбук и геймпад"}}
+        with patch("src.jobs.roles.unified_messages.insert", new_callable=AsyncMock), \
+             patch("src.jobs.roles.message_feedback.register", new_callable=AsyncMock) as register:
+            await roles.announce_roles(context, CHAT_ID, roles_map, {1: "tmaxims"})
+        assert register.await_args.kwargs == {"chat_id": CHAT_ID, "message_id": 555, "source": "roles"}

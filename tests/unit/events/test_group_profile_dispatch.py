@@ -42,7 +42,9 @@ class TestDeliverGroupProfile:
              patch(SEND_AND_STORE, AsyncMock()) as send:
             await messages.deliver_group_profile(bot, CHAT_ID, REQUEST_MSG_ID, RUBRIC)
         run.assert_awaited_once_with(CHAT_ID, RUBRIC)
-        send.assert_awaited_once_with(bot, CHAT_ID, "@alice — Циклоп", reply_to=REQUEST_MSG_ID, is_broadcast=True)
+        send.assert_awaited_once_with(
+            bot, CHAT_ID, "@alice — Циклоп", source="group_profile", reply_to=REQUEST_MSG_ID, is_broadcast=True,
+        )
 
     async def test_shows_typing_indicator_before_generating(self):
         bot = make_bot()

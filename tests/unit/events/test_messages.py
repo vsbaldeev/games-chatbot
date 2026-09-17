@@ -190,8 +190,8 @@ class TestSendAndStoreBroadcastFlag:
         bot.send_message = AsyncMock(return_value=MagicMock(message_id=777))
         with patch(
             "src.events.sending.unified_messages.insert", new_callable=AsyncMock
-        ) as mock_insert:
-            await send_and_store(bot, 1000, "🏷 Роли недели:", is_broadcast=True)
+        ) as mock_insert, patch(FEEDBACK_REGISTER_SENDING_TARGET, new_callable=AsyncMock):
+            await send_and_store(bot, 1000, "🏷 Роли недели:", source="roles", is_broadcast=True)
         assert mock_insert.await_args.kwargs["is_broadcast"] is True
 
     async def test_ordinary_send_defaults_to_not_broadcast(self):
@@ -199,8 +199,8 @@ class TestSendAndStoreBroadcastFlag:
         bot.send_message = AsyncMock(return_value=MagicMock(message_id=778))
         with patch(
             "src.events.sending.unified_messages.insert", new_callable=AsyncMock
-        ) as mock_insert:
-            await send_and_store(bot, 1000, "обычный ответ")
+        ) as mock_insert, patch(FEEDBACK_REGISTER_SENDING_TARGET, new_callable=AsyncMock):
+            await send_and_store(bot, 1000, "обычный ответ", source="notice")
         assert mock_insert.await_args.kwargs["is_broadcast"] is False
 
 
@@ -208,8 +208,9 @@ class TestEditAndStore:
     async def test_edits_message_and_persists_it(self):
         message = MagicMock(message_id=321)
         message.edit_text = AsyncMock()
-        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock) as mock_insert:
-            await edit_and_store(message, 1000, "готово", reply_to=55)
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock) as mock_insert, \
+             patch(FEEDBACK_REGISTER_SENDING_TARGET, new_callable=AsyncMock):
+            await edit_and_store(message, 1000, "готово", source="notice", reply_to=55)
         message.edit_text.assert_awaited_once_with("готово")
         assert mock_insert.await_args.kwargs["message_id"] == 321
         assert mock_insert.await_args.kwargs["content"] == "готово"
@@ -366,3 +367,26 @@ class TestDeliverAndRecordFeedbackCapture:
         with patch(INSERT_PATCH_TARGET, AsyncMock()), \
              patch(PROMPT_ENSURE_PATCH_TARGET, AsyncMock(side_effect=RuntimeError("db down"))):
             await deliver_and_record(state, msg, bot_id=999, response_text="y")  # must not raise
+
+
+FEEDBACK_REGISTER_SENDING_TARGET = "src.events.sending.message_feedback.register"
+
+
+class TestSendAndStoreRegistersFeedback:
+    async def test_registers_with_given_source(self):
+        bot = MagicMock()
+        sent = MagicMock(message_id=777)
+        bot.send_message = AsyncMock(return_value=sent)
+        with patch(MESSAGES_INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(FEEDBACK_REGISTER_SENDING_TARGET, AsyncMock()) as register:
+            await send_and_store(bot, 1000, "text", source="notice")
+        assert register.await_args.kwargs == {"chat_id": 1000, "message_id": 777, "source": "notice"}
+
+    async def test_edit_and_store_registers_with_given_source(self):
+        message = MagicMock()
+        message.message_id = 888
+        message.edit_text = AsyncMock()
+        with patch(MESSAGES_INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(FEEDBACK_REGISTER_SENDING_TARGET, AsyncMock()) as register:
+            await edit_and_store(message, 1000, "text", source="notice")
+        assert register.await_args.kwargs == {"chat_id": 1000, "message_id": 888, "source": "notice"}

@@ -15,6 +15,7 @@ BOT_ID = 999
 
 GET_MEME = "src.memes.sender.get_meme"
 INSERT = "src.memes.sender.unified_messages.insert"
+FEEDBACK_REGISTER = "src.memes.sender.message_feedback.register"
 
 
 def make_bot() -> MagicMock:
@@ -31,7 +32,8 @@ class TestSendMeme:
     async def test_sends_photo_and_records_history(self):
         bot = make_bot()
         with patch(GET_MEME, AsyncMock(return_value=b"IMG")), \
-             patch(INSERT, AsyncMock()) as insert:
+             patch(INSERT, AsyncMock()) as insert, \
+             patch(FEEDBACK_REGISTER, AsyncMock()):
             assert await sender.send_meme(bot, CHAT_ID) is True
 
         send_kwargs = bot.send_photo.await_args.kwargs
@@ -48,7 +50,8 @@ class TestSendMeme:
     async def test_never_attaches_a_caption(self):
         """The scraped caption belongs to the source channel, not to the bot."""
         bot = make_bot()
-        with patch(GET_MEME, AsyncMock(return_value=b"IMG")), patch(INSERT, AsyncMock()):
+        with patch(GET_MEME, AsyncMock(return_value=b"IMG")), patch(INSERT, AsyncMock()), \
+             patch(FEEDBACK_REGISTER, AsyncMock()):
             await sender.send_meme(bot, CHAT_ID)
         assert "caption" not in bot.send_photo.await_args.kwargs
 
@@ -56,7 +59,8 @@ class TestSendMeme:
         """A bare placeholder is what the photo-description enricher looks for."""
         bot = make_bot()
         with patch(GET_MEME, AsyncMock(return_value=b"IMG")), \
-             patch(INSERT, AsyncMock()) as insert:
+             patch(INSERT, AsyncMock()) as insert, \
+             patch(FEEDBACK_REGISTER, AsyncMock()):
             await sender.send_meme(bot, CHAT_ID)
         content = insert.await_args.kwargs["content"]
         assert unified_messages.needs_photo_description(content)
@@ -65,7 +69,8 @@ class TestSendMeme:
     async def test_unanchored_when_no_reply_to(self):
         bot = make_bot()
         with patch(GET_MEME, AsyncMock(return_value=b"IMG")), \
-             patch(INSERT, AsyncMock()) as insert:
+             patch(INSERT, AsyncMock()) as insert, \
+             patch(FEEDBACK_REGISTER, AsyncMock()):
             await sender.send_meme(bot, CHAT_ID)
         assert bot.send_photo.await_args.kwargs["reply_parameters"] is None
         assert insert.await_args.kwargs["reply_to_msg_id"] is None
@@ -73,12 +78,21 @@ class TestSendMeme:
     async def test_anchors_to_the_requesting_message(self):
         bot = make_bot()
         with patch(GET_MEME, AsyncMock(return_value=b"IMG")), \
-             patch(INSERT, AsyncMock()) as insert:
+             patch(INSERT, AsyncMock()) as insert, \
+             patch(FEEDBACK_REGISTER, AsyncMock()):
             await sender.send_meme(bot, CHAT_ID, reply_to=42)
         reply_parameters = bot.send_photo.await_args.kwargs["reply_parameters"]
         assert reply_parameters.message_id == 42
         assert reply_parameters.allow_sending_without_reply is True
         assert insert.await_args.kwargs["reply_to_msg_id"] == 42
+
+    async def test_registers_with_meme_source(self):
+        bot = make_bot()
+        with patch(GET_MEME, AsyncMock(return_value=b"IMG")), \
+             patch(INSERT, AsyncMock()), \
+             patch(FEEDBACK_REGISTER, AsyncMock()) as register:
+            await sender.send_meme(bot, CHAT_ID)
+        assert register.await_args.kwargs == {"chat_id": CHAT_ID, "message_id": 555, "source": "meme"}
 
     async def test_no_meme_available_returns_false(self):
         bot = make_bot()

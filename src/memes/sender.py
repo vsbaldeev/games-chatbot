@@ -16,7 +16,7 @@ from telegram import ReplyParameters
 
 from src import config, log
 from src.memes.fetcher import get_meme
-from src.store import unified_messages
+from src.store import message_feedback, unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -70,6 +70,10 @@ async def send_meme(bot, chat_id: int, *, reply_to: int | None = None) -> bool:
             reply_to_msg_id=reply_to,
             file_id=sent.photo[-1].file_id if sent.photo else None,
         )
+        try:
+            await message_feedback.register(chat_id=chat_id, message_id=sent.message_id, source="meme")
+        except Exception as err:
+            logger.warning("Failed to register feedback tracking for meme %s: %s", sent.message_id, err)
         return True
     except Exception as error:
         logger.warning("Failed to send meme to chat %s: %s", chat_id, error)

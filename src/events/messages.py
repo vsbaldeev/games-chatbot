@@ -283,10 +283,10 @@ async def send_limit_notice(
     """
     if notification_msg is not None:
         quota_notice_gate.seen(chat_id)
-        await edit_and_store(notification_msg, chat_id, notice_text, reply_to=msg.message_id)
+        await edit_and_store(notification_msg, chat_id, notice_text, source="notice", reply_to=msg.message_id)
         return
     if not quota_notice_gate.seen(chat_id):
-        await send_and_store(msg.get_bot(), chat_id, notice_text, reply_to=msg.message_id)
+        await send_and_store(msg.get_bot(), chat_id, notice_text, source="notice", reply_to=msg.message_id)
         return
     try:
         await msg.set_reaction("😴")
@@ -424,7 +424,7 @@ async def deliver_meme(bot, chat_id: int, reply_to_msg_id: int) -> None:
         logger.warning("Failed to send meme upload action to chat %s: %s", chat_id, error)
     if await send_meme(bot, chat_id, reply_to=reply_to_msg_id):
         return
-    await send_and_store(bot, chat_id, random.choice(MEME_FAILED_REPLIES), reply_to=reply_to_msg_id)
+    await send_and_store(bot, chat_id, random.choice(MEME_FAILED_REPLIES), source="meme", reply_to=reply_to_msg_id)
 
 
 def launch_meme_task(bot, chat_id: int, reply_to_msg_id: int) -> None:
@@ -471,10 +471,10 @@ async def deliver_group_profile(bot, chat_id: int, reply_to_msg_id: int, rubric:
         logger.warning("Group profile generation failed for chat %s: %s", chat_id, error)
         text = None
     if text:
-        await send_and_store(bot, chat_id, text, reply_to=reply_to_msg_id, is_broadcast=True)
+        await send_and_store(bot, chat_id, text, source="group_profile", reply_to=reply_to_msg_id, is_broadcast=True)
         return
     await send_and_store(
-        bot, chat_id, random.choice(GROUP_PROFILE_FAILED_REPLIES), reply_to=reply_to_msg_id
+        bot, chat_id, random.choice(GROUP_PROFILE_FAILED_REPLIES), source="group_profile", reply_to=reply_to_msg_id
     )
 
 
@@ -540,9 +540,9 @@ async def notify_pipeline_failure(
 async def _send_or_edit_notice(msg, chat_id: int, text: str, notification_msg) -> None:
     """Deliver a failure notice, editing ``notification_msg`` if given instead of sending anew."""
     if notification_msg is not None:
-        await edit_and_store(notification_msg, chat_id, text, reply_to=msg.message_id)
+        await edit_and_store(notification_msg, chat_id, text, source="notice", reply_to=msg.message_id)
         return
-    await send_and_store(msg.get_bot(), chat_id, text, reply_to=msg.message_id)
+    await send_and_store(msg.get_bot(), chat_id, text, source="notice", reply_to=msg.message_id)
 
 
 async def run_pipeline(

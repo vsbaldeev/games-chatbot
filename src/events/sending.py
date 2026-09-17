@@ -9,7 +9,7 @@ recent history and future reply chains resolve them only via the
 from telegram import ReplyParameters
 
 from src import config, log
-from src.store import unified_messages
+from src.store import message_feedback, unified_messages
 
 logger = log.get_logger(__name__)
 
@@ -29,14 +29,17 @@ def build_reply_parameters(reply_to: int | None) -> ReplyParameters | None:
 
 
 async def send_and_store(
-    bot, chat_id: int, text: str, *, reply_to: int | None = None, is_broadcast: bool = False
+    bot, chat_id: int, text: str, *, source: str, reply_to: int | None = None, is_broadcast: bool = False
 ):
-    """Send a text message as the bot and persist it to ``unified_messages``.
+    """Send a text message as the bot, persist it to ``unified_messages``, and
+    register it for feedback tracking.
 
     Args:
         bot: The ``telegram.Bot`` instance to send with.
         chat_id: Destination chat.
         text: Message text to send.
+        source: Feedback source tag ("notice" | "meme" | "group_profile" | ...)
+            — see src.store.message_feedback.register.
         reply_to: Message id to anchor the send to, or None for an
             un-anchored message. A deleted anchor degrades to un-anchored
             via ``allow_sending_without_reply``.
@@ -65,13 +68,18 @@ async def send_and_store(
         )
     except Exception as err:
         logger.warning("Failed to store sent message %s: %s", sent.message_id, err)
+    try:
+        await message_feedback.register(chat_id=chat_id, message_id=sent.message_id, source=source)
+    except Exception as err:
+        logger.warning("Failed to register feedback tracking for message %s: %s", sent.message_id, err)
     return sent
 
 
 async def edit_and_store(
-    message, chat_id: int, text: str, *, reply_to: int | None = None
+    message, chat_id: int, text: str, *, source: str, reply_to: int | None = None
 ) -> None:
-    """Edit an already-sent bot message and persist the edit to ``unified_messages``.
+    """Edit an already-sent bot message, persist the edit to ``unified_messages``,
+    and register it for feedback tracking.
 
     Used to resolve a message the bot sent earlier in the same turn (e.g. the
     「🔍 Ищу…」 search-notification) into its final text, instead of leaving
@@ -81,6 +89,7 @@ async def edit_and_store(
         message: The ``telegram.Message`` to edit (previously sent by the bot).
         chat_id: Chat the message belongs to.
         text: New text to edit the message to.
+        source: Feedback source tag — see src.store.message_feedback.register.
         reply_to: Message id the edited message is anchored to, or None.
     """
     await message.edit_text(text)
@@ -96,3 +105,7 @@ async def edit_and_store(
         )
     except Exception as err:
         logger.warning("Failed to store edited message %s: %s", message.message_id, err)
+    try:
+        await message_feedback.register(chat_id=chat_id, message_id=message.message_id, source=source)
+    except Exception as err:
+        logger.warning("Failed to register feedback tracking for message %s: %s", message.message_id, err)
