@@ -49,6 +49,7 @@ import re
 from typing import Any
 
 from src import log
+from src.feedback.replies import track_reply
 from src.pipeline import shorts, social_links
 from src.pipeline.state import BotState, IncomingMessage
 from src.store import unified_messages
@@ -304,6 +305,9 @@ class MessageRouter:
             )
         except Exception as err:
             logger.warning("Failed to store message %s: %s", msg["message_id"], err)
+
+        if msg["reply_to_msg_id"] is not None:
+            await track_reply(chat_id=msg["chat_id"], message_id=msg["message_id"], bot_id=self.__bot_id)
 
     def __detect_shorts(self, msg: IncomingMessage) -> dict | None:
         """Route a YouTube Shorts link to the summary pipeline, if gates allow.

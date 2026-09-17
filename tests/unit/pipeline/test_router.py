@@ -460,3 +460,24 @@ class TestBroadcastReplyFlag:
         incoming = make_incoming(raw_text="Гениально)", telegram_message=telegram_message)
         await call_decide_full(router, incoming)
         assert mock_link_repost_lookup.await_count == 1
+
+
+TRACK_REPLY_PATCH_TARGET = "src.pipeline.router.track_reply"
+
+
+class TestReplyTrackingHook:
+    async def test_reply_to_a_message_triggers_tracking(self):
+        router = MessageRouter(bot_username=BOT_USERNAME, bot_id=BOT_ID)
+        incoming = make_incoming(chat_id=1000, message_id=200, reply_to_msg_id=100)
+        with patch("src.pipeline.router.unified_messages.insert", new_callable=AsyncMock), \
+             patch(TRACK_REPLY_PATCH_TARGET, new_callable=AsyncMock) as track_reply:
+            await router._MessageRouter__store_message(incoming)
+        track_reply.assert_awaited_once_with(chat_id=1000, message_id=200, bot_id=BOT_ID)
+
+    async def test_non_reply_message_does_not_trigger_tracking(self):
+        router = MessageRouter(bot_username=BOT_USERNAME, bot_id=BOT_ID)
+        incoming = make_incoming(chat_id=1000, message_id=200, reply_to_msg_id=None)
+        with patch("src.pipeline.router.unified_messages.insert", new_callable=AsyncMock), \
+             patch(TRACK_REPLY_PATCH_TARGET, new_callable=AsyncMock) as track_reply:
+            await router._MessageRouter__store_message(incoming)
+        track_reply.assert_not_awaited()
