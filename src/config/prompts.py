@@ -344,6 +344,23 @@ MEME_JUDGE_SYSTEM = (
     '{"score": N}'
 )
 
+# Correction classifier (src/feedback/classifier.py). One small call deciding
+# whether a direct reply to a bot message disputes or corrects a factual
+# claim the bot made — the implicit-feedback signal closest to "the bot
+# hallucinated" this repo can measure without an LLM-judge pass over every
+# reply. Binary rather than multi-label: only corrections are counted, and a
+# yes/no call is easier for a small model to get right than a 5-way one.
+CORRECTION_CLASSIFIER_SYSTEM = (
+    "You decide whether a chat reply corrects or disputes a factual claim in "
+    "the bot message it replies to.\n"
+    "Answer CORRECTION when the reply says the bot got a fact wrong, denies "
+    "something the bot stated as true, or supplies the actual fact in its place.\n"
+    "Answer OTHER for everything else: agreement, jokes, insults, requests, "
+    "disagreement with an opinion or tone rather than a fact, or a reply "
+    "about something unrelated to the bot's claim.\n"
+    "Answer with exactly one word: CORRECTION or OTHER."
+)
+
 # Chat-requested selfie scene writer (src/life/selfie.py). English, like the
 # other image-model-adjacent text: the output is a generation prompt. Same
 # contract as the episode writer's image_prompt — the character descriptor
