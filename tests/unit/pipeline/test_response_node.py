@@ -537,7 +537,7 @@ class TestMemeRequestSkipsGeneration:
         agent = make_mock_agent("этого не должно быть")
         state = make_state(make_incoming(), meme_request=True)
         result = await ResponseNode(agent)(state)
-        assert result == {"response": "", "response_messages": []}
+        assert result == {"response": "", "response_messages": [], "response_trace": None}
         agent.invoke_response.assert_not_called()
 
     async def test_ordinary_message_still_generates(self):
@@ -554,7 +554,7 @@ class TestGroupProfileRequestSkipsGeneration:
         agent = make_mock_agent("этого не должно быть")
         state = make_state(make_incoming(), group_profile_request=True)
         result = await ResponseNode(agent)(state)
-        assert result == {"response": "", "response_messages": []}
+        assert result == {"response": "", "response_messages": [], "response_trace": None}
         agent.invoke_response.assert_not_called()
 
 
@@ -799,3 +799,38 @@ class TestLogResponseUsage:
         caplog.set_level(logging.DEBUG)
         log_response_usage({})
         assert "input=" not in caplog.text
+
+
+class TestResponseTrace:
+    async def test_builds_trace_with_prompt_and_response(self):
+        agent = make_mock_agent("Это ответ бота.")
+
+        async def fake_invoke(messages, usage_sink=None):
+            usage_sink.update({"input_tokens": 50, "output_tokens": 4, "model_name": "test-model"})
+            return "Это ответ бота."
+
+        agent.invoke_response = AsyncMock(side_effect=fake_invoke)
+        node = ResponseNode(agent)
+        incoming = make_incoming(username="vasya", raw_text="привет")
+        state = make_state(incoming, response_trigger="explicit", filter_verdict="MEANINGFUL")
+        with patch(THREAD_GET_HISTORY, AsyncMock(return_value=[])), \
+             patch(THREAD_APPEND_TURN, AsyncMock()):
+            result = await node(state)
+
+        trace = result["response_trace"]
+        assert trace["response"] == "Это ответ бота."
+        assert trace["raw_response"] == "Это ответ бота."
+        assert trace["model"] == "test-model"
+        assert trace["input_tokens"] == 50
+        assert trace["output_tokens"] == 4
+        assert trace["language_corrected"] is False
+        assert isinstance(trace["latency_ms"], int)
+        assert trace["user_prompt"]  # the enriched final turn, non-empty
+        assert trace["history_messages"] == []
+
+    async def test_no_trace_for_meme_request(self):
+        agent = make_mock_agent()
+        node = ResponseNode(agent)
+        state = make_state(make_incoming(), meme_request=True)
+        result = await node(state)
+        assert result.get("response_trace") is None

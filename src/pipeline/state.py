@@ -76,3 +76,4 @@ class BotState(TypedDict):
     drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line
     media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified
     voice_low_confidence: NotRequired[bool]  # True when Whisper's mean segment confidence was low for a voice transcript; response_node softens its reaction accordingly
+    response_trace: NotRequired[dict | None]  # exact prompt/response of the response LLM call, set by ResponseNode/LanguageCorrectionNode; None when no response LLM call ran (meme/group-profile requests)

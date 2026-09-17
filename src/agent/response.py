@@ -51,7 +51,8 @@ class ResponseAgent:
                 the system prompt internally; callers must not include it.
             usage_sink: If given, filled in-place with the reply message's
                 ``usage_metadata`` (``input_tokens``/``output_tokens``/
-                ``total_tokens``) when the serving model returned one —
+                ``total_tokens``) and its ``response_metadata["model_name"]``
+                (as ``"model_name"``) when the serving model returned them —
                 whichever model in the fallback chain actually answered.
                 Left empty when the model reports none. Optional so existing
                 callers and test doubles need no change.
@@ -69,8 +70,12 @@ class ResponseAgent:
             raise RuntimeError("ResponseAgent.init() must be called before invoking response executor")
         result = await guarded_ainvoke(self.__response_executor, {"messages": messages})
         last_message = result["messages"][-1]
-        if usage_sink is not None and last_message.usage_metadata:
-            usage_sink.update(last_message.usage_metadata)
+        if usage_sink is not None:
+            if last_message.usage_metadata:
+                usage_sink.update(last_message.usage_metadata)
+            model_name = (last_message.response_metadata or {}).get("model_name")
+            if model_name:
+                usage_sink["model_name"] = model_name
         return last_message.content or ""
 
     @staticmethod

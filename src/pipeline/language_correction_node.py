@@ -34,8 +34,11 @@ class LanguageCorrectionNode:
                 assembled LangChain messages from the preceding response node.
 
         Returns:
-            Dict with ``response`` key containing the corrected reply, or empty
-            dict to keep the original response if correction itself fails.
+            Dict with ``response`` and ``response_trace`` (the trace from
+            ResponseNode, updated to the corrected text with
+            ``language_corrected=True``) when correction succeeds, or an
+            empty dict to keep the original response and trace if correction
+            itself fails.
 
         Raises:
             DailyLimitError: Propagated when the daily token quota is exhausted.
@@ -55,4 +58,9 @@ class LanguageCorrectionNode:
         # the original response when correction itself failed.
         final_text = corrected or state.get("response") or ""
         await persist_thread_turn(state, final_text)
-        return {"response": corrected} if corrected else {}
+        if not corrected:
+            return {}
+        trace = dict(state.get("response_trace") or {})
+        trace["response"] = corrected
+        trace["language_corrected"] = True
+        return {"response": corrected, "response_trace": trace}

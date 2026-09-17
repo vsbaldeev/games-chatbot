@@ -307,11 +307,12 @@ def make_worker_agent(*, content=None, error=None):
     return WorkerAgent(worker_executor=executor)
 
 
-def make_response_agent(*, content=None, error=None, usage_metadata=None):
+def make_response_agent(*, content=None, error=None, usage_metadata=None, model_name=None):
     """Return a ResponseAgent with an injected mock executor."""
     last_message = MagicMock()
     last_message.content = content or "ответ"
     last_message.usage_metadata = usage_metadata
+    last_message.response_metadata = {"model_name": model_name} if model_name else {}
     executor = MagicMock()
     if error is not None:
         executor.ainvoke = AsyncMock(side_effect=error)
@@ -427,3 +428,25 @@ class TestInvokeResponseUsageSink:
         """Existing callers that never pass usage_sink must be unaffected."""
         result = await make_response_agent(content="ответ").invoke_response([HumanMessage(content="вопрос")])
         assert result == "ответ"
+
+    async def test_model_name_captured_alongside_usage(self):
+        """The model that actually answered (post-fallback) is captured for
+        bot_llm_log — see src.store.llm_log.insert_call."""
+        agent = make_response_agent(
+            content="ответ",
+            usage_metadata={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
+            model_name="openai/gpt-oss-120b",
+        )
+        usage_sink: dict = {}
+
+        await agent.invoke_response([HumanMessage(content="вопрос")], usage_sink=usage_sink)
+
+        assert usage_sink["model_name"] == "openai/gpt-oss-120b"
+
+    async def test_model_name_absent_from_sink_when_not_reported(self):
+        agent = make_response_agent(content="ответ", usage_metadata=None)
+        usage_sink: dict = {}
+
+        await agent.invoke_response([HumanMessage(content="вопрос")], usage_sink=usage_sink)
+
+        assert "model_name" not in usage_sink

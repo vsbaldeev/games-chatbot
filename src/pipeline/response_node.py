@@ -3,6 +3,7 @@
 import datetime
 import logging
 import re
+import time
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -240,6 +241,24 @@ def build_past_messages(history: list[dict]) -> list[HumanMessage | AIMessage]:
         else:
             result.append(AIMessage(content=entry["content"]))
     return result
+
+
+def serialize_history(past_messages: list[HumanMessage | AIMessage]) -> list[dict]:
+    """Convert thread-history LangChain messages into JSON-serializable dicts.
+
+    Used to persist the exact prompt a response LLM call saw — see
+    src.store.llm_log.insert_call.
+
+    Args:
+        past_messages: History turns as built by build_past_messages, oldest-first.
+
+    Returns:
+        [{"role": "human"|"ai", "content": str}, ...], oldest-first.
+    """
+    return [
+        {"role": "human" if isinstance(message, HumanMessage) else "ai", "content": message.content}
+        for message in past_messages
+    ]
 
 
 def build_user_facts_lines(context) -> list[str]:
@@ -796,8 +815,12 @@ class ResponseNode:
                 optional worker output.
 
         Returns:
-            Dict with ``response`` and ``response_messages`` keys; the latter
-            carries the assembled LangChain message list for the correction node.
+            Dict with ``response`` and ``response_messages`` keys — the latter
+            carries the assembled LangChain message list for the correction
+            node — plus ``response_trace``, the exact prompt/response of this
+            call for persistence by ``deliver_and_record``
+            (``src/events/messages.py``), or None when no response LLM call
+            ran (meme/group-profile requests).
         """
         if state.get("meme_request") or state.get("group_profile_request"):
             # The meme (or the group-profile message) is the whole reply: a
@@ -805,7 +828,7 @@ class ResponseNode:
             # content this model never sees is the stacking failure the
             # 2026-08-07 absurdity work removed. Returning empty also skips
             # the response LLM entirely.
-            return {"response": "", "response_messages": []}
+            return {"response": "", "response_messages": [], "response_trace": None}
 
         msg = state["incoming"]
 
@@ -841,15 +864,28 @@ class ResponseNode:
         messages = past_messages + [HumanMessage(content=enriched)]
         log_response_input(past_messages, enriched)
         usage: dict = {}
+        started_at = time.monotonic()
         response_text = normalize_homoglyphs(await self.__generate(messages, usage))
+        latency_ms = int((time.monotonic() - started_at) * 1000)
         log_response_usage(usage)
+        response_trace = {
+            "history_messages": serialize_history(past_messages),
+            "user_prompt": enriched,
+            "raw_response": response_text,
+            "model": usage.get("model_name"),
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "latency_ms": latency_ms,
+            "response": response_text,
+            "language_corrected": False,
+        }
 
         # Foreign-script responses are persisted by LanguageCorrectionNode
         # after the retry, so history stores the reply the chat actually saw.
         if not needs_russian_correction(response_text or ""):
             await persist_thread_turn(state, response_text)
 
-        return {"response": response_text, "response_messages": messages}
+        return {"response": response_text, "response_messages": messages, "response_trace": response_trace}
 
     async def __generate(self, messages: list, usage_sink: dict) -> str:
         """Delegate to the response agent.

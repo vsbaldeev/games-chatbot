@@ -34,7 +34,7 @@ class TestLanguageCorrectionNode:
     async def test_returns_corrected_response(self):
         node = make_node(response="Исправленный ответ.")
         result = await node({"response_messages": [], "response": "こんにちは"})
-        assert result == {"response": "Исправленный ответ."}
+        assert result["response"] == "Исправленный ответ."
 
     async def test_correction_prompt_appended_to_messages(self):
         agent = MagicMock()
@@ -78,3 +78,39 @@ class TestLanguageCorrectionNode:
         node = make_node(error=Exception("oops"))
         result = await node({"response_messages": [], "response": "こんにちは"})
         assert result == {}
+
+
+class TestResponseTraceUpdate:
+    def make_trace(self) -> dict:
+        return {
+            "history_messages": [], "user_prompt": "x", "raw_response": "original",
+            "model": "m", "input_tokens": 1, "output_tokens": 1, "latency_ms": 1,
+            "response": "original", "language_corrected": False,
+        }
+
+    async def test_successful_correction_marks_trace_corrected(self):
+        node = make_node(response="Corrected Russian reply.")
+        original_trace = self.make_trace()
+        result = await node({
+            "response_messages": [], "response": "original", "response_trace": original_trace,
+        })
+        assert result["response_trace"]["response"] == "Corrected Russian reply."
+        assert result["response_trace"]["language_corrected"] is True
+        assert result["response_trace"]["raw_response"] == "original"
+
+    async def test_failed_correction_does_not_touch_trace(self):
+        node = make_node(error=Exception("boom"))
+        original_trace = self.make_trace()
+        result = await node({
+            "response_messages": [], "response": "original", "response_trace": original_trace,
+        })
+        assert "response_trace" not in result
+
+    async def test_original_trace_dict_not_mutated(self):
+        node = make_node(response="Corrected Russian reply.")
+        original_trace = self.make_trace()
+        await node({
+            "response_messages": [], "response": "original", "response_trace": original_trace,
+        })
+        assert original_trace["response"] == "original"
+        assert original_trace["language_corrected"] is False
