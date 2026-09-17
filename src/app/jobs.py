@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from telegram.ext import Application
 
 from src.jobs.cleanup import cleanup_messages_job
+from src.jobs.feedback import feedback_metrics_job
 from src.jobs.meme import daily_meme_job
 from src.jobs.roles import CATCH_UP_DELAY_SECONDS, ROLES_RUN_TIME, catch_up_roles_job, weekly_roles_job
 
@@ -33,3 +34,8 @@ class MessageCleanupJobManager(JobManagerInterface):
             cleanup_messages_job,
             time=datetime.time(hour=3, minute=0, tzinfo=datetime.timezone.utc),
         )
+
+
+class FeedbackJobManager(JobManagerInterface):
+    def add_jobs(self, app: Application) -> None:
+        app.job_queue.run_repeating(feedback_metrics_job, interval=300, first=300)
