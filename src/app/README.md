@@ -36,6 +36,7 @@ handlers run.
 |---|---|---|---|
 | any `Update` | `register_sender_as_member` | `-1` | registers every active user in `chat_members`; no chat-type filter |
 | new chat member, groups only | `register_users_from_join_message` | `0` | registers each joined user in `chat_members` |
+| message reaction (add/remove emoji) | `handle_message_reaction` | `0` | `MessageReactionHandler` has no `filters` parameter, so the group-only check happens inside the handler itself (`src/events/reactions.py`); applies the reaction delta to `bot_message_feedback` — requires the bot to be a group admin, or Telegram never sends these updates |
 
 ## CommandHandlerManager
 
@@ -63,7 +64,6 @@ Not registered by any manager above — PTB drops these silently, no error.
 | Update / trigger | Why ignored |
 |---|---|
 | any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` still fires there, since it has no chat-type filter |
-| message reaction (add/remove emoji) | no handler registered for `message_reaction` updates anywhere in the codebase |
 | audio (music/sound file attachment) | `handle_audio_message` was removed — never transcribed, no stat, rarely sent in practice |
 | document, location, contact, poll, dice, venue | no filter registered for these types anywhere in the codebase |
 

@@ -8,6 +8,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
+    MessageReactionHandler,
     TypeHandler,
     filters,
 )
@@ -25,6 +26,7 @@ from src.events.messages import (
     handle_video_message,
     handle_animation_message,
 )
+from src.events.reactions import handle_message_reaction
 
 class HandlerManagerInterface(ABC):
     @abstractmethod
@@ -38,6 +40,7 @@ class EventHandlerManager(HandlerManagerInterface):
             filters.StatusUpdate.NEW_CHAT_MEMBERS & filters.ChatType.GROUPS,
             register_users_from_join_message,
         ))
+        app.add_handler(MessageReactionHandler(handle_message_reaction))
 
 
 class CommandHandlerManager(HandlerManagerInterface):
