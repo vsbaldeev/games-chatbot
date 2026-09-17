@@ -5,10 +5,29 @@ Job managers live in src/app/jobs.py. Implementations live here, one file per jo
 ## Schedule
 
 ```
-03:00 UTC        cleanup_messages_job   cleanup.py      prune unified_messages and thread_history rows older than 60 days, and user_memories facts older than 14 days
+03:00 UTC        cleanup_messages_job   cleanup.py      prune unified_messages and thread_history rows older than 60 days, user_memories facts older than 14 days, bot_llm_log and bot_message_feedback rows older than 60 days, and bot_feedback_metrics rows older than 365 days
 14:00 UTC        weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
 15:00 UTC        daily_meme_job         meme.py         fan out memes.sender.send_meme over every chat (un-anchored, vision-vetted, no caption)
+every 5 minutes  feedback_metrics_job   feedback.py     close 15-minute feedback windows (bot_message_feedback.ignored) and roll closed windows into hourly bot_feedback_metrics rows
 ```
+
+## Feedback metrics job
+
+Two steps, always in this order — see `src/feedback/README.md` for how rows get
+into `bot_message_feedback` in the first place:
+
+```
+1. message_feedback.close_expired_windows(): set ignored on every row whose
+   15-minute feedback window has just passed
+2. feedback_metrics.recompute_recent_buckets(): recompute the last few hourly
+   buckets in bot_feedback_metrics from bot_message_feedback (ON CONFLICT DO
+   UPDATE, so re-running is idempotent and a late classifier correction still
+   lands in the right bucket)
+```
+
+A failure in step 1 skips step 2 for that run (nothing to roll up yet); a
+failure in step 2 is logged and the job exits — either way the next 5-minute
+tick retries.
 
 ## Roles job
 

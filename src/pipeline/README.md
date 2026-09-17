@@ -27,6 +27,12 @@ incoming message
     │                       row as still needing vision description; caption preserved)
     │              voice / video_note / video → content = placeholder, file_id stored
     │
+    ├─ always, when the message is a reply (any media type): src.feedback.replies.track_reply
+    │              walks the reply chain (unified_messages.get_chain) and credits every
+    │              bot ancestor's bot_message_feedback row, each at its own hop depth; a
+    │              depth-1 (direct) text reply is also classified as a correction
+    │              (src.feedback.classifier) — see src/feedback/README.md
+    │
     ├─ text
     │     ├─ YouTube Shorts link      → should_respond=True,  trigger="youtube_short"
     │     │       (checked first, even for forwarded messages — forwarding is
@@ -637,6 +643,13 @@ response   personality LLM (ReAct executor, no tools)
     │        trailing emoji run dropped (the persona prompt asks for at most
     │        one emoji only when it fits; the model appends one almost always)
     ├─ saves response_messages to state for LanguageCorrectionNode
+    ├─ saves response_trace to state — the exact prompt/response of this call
+    │    (history_messages, user_prompt, raw_response, model, tokens,
+    │    latency_ms), None when no response LLM call ran (meme/group-profile
+    │    requests). Persisted by deliver_and_record (src/events/messages.py)
+    │    into bot_llm_log — see src/feedback/README.md. language_correction
+    │    below updates response.response/language_corrected in the trace when
+    │    it replaces the reply
     ├─ persists the exchange to thread_history only when no correction is
     │    needed — otherwise language_correction persists the corrected reply,
     │    so history always stores what the chat actually saw

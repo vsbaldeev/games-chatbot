@@ -120,7 +120,95 @@ sticker_descriptions (
     description    TEXT             NOT NULL,
     created_at     DOUBLE PRECISION NOT NULL
 )
+
+-- Deduplicated response system prompt text, keyed by sha256. Stored once so
+-- bot_llm_log rows below need only a hash, not the multi-KB prompt itself.
+-- Retention: pruned when no bot_llm_log row references it any more.
+llm_system_prompts (
+    sha256        TEXT        PRIMARY KEY,
+    content       TEXT        NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+
+-- One row per delivered pipeline reply that went through the response LLM —
+-- the exact prompt and response, for inspecting corrected replies. Only the
+-- response call is logged, not the worker/tool-calling call. See
+-- src/feedback/README.md. Retention: 60 days.
+bot_llm_log (
+    chat_id            BIGINT      NOT NULL,
+    bot_message_id     BIGINT      NOT NULL,
+    user_message_id    BIGINT      NOT NULL,
+    user_id            BIGINT      NOT NULL,
+    trigger            TEXT        NOT NULL,
+    filter_verdict     TEXT        NOT NULL DEFAULT '-',
+    system_prompt_sha  TEXT        NOT NULL REFERENCES llm_system_prompts(sha256),
+    history_messages   JSONB       NOT NULL,   -- thread-history turns before the final human turn
+    user_prompt        TEXT        NOT NULL,   -- final human turn exactly as sent to the model
+    raw_response       TEXT        NOT NULL,   -- first model output, before language correction
+    language_corrected BOOLEAN     NOT NULL DEFAULT FALSE,
+    response           TEXT        NOT NULL,   -- text actually delivered to the chat
+    model              TEXT,                   -- model that answered; NULL when unreported
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    latency_ms         INTEGER     NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (chat_id, bot_message_id)
+)
+INDEX idx_bot_llm_log_created ON (created_at)
+
+-- One row per bot message of any source — reaction/reply/correction counts
+-- gathered only within the first 15 minutes after sending (every mutator's
+-- WHERE clause enforces the window, except add_correction: the classifier
+-- may finish after the window closes but the reply itself arrived in time).
+-- See src/feedback/README.md. Retention: 60 days.
+bot_message_feedback (
+    chat_id           BIGINT      NOT NULL,
+    message_id        BIGINT      NOT NULL,
+    source            TEXT        NOT NULL,   -- "pipeline" | "meme" | "selfie" | "roles" | "group_profile" | "notice"
+    trigger           TEXT        NOT NULL DEFAULT '-',
+    filter_verdict    TEXT        NOT NULL DEFAULT '-',
+    sent_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reactions         INTEGER     NOT NULL DEFAULT 0,   -- net current reactions
+    emojis            JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- {"🤡": 1, "😂": 2}
+    replies           INTEGER     NOT NULL DEFAULT 0,
+    corrections       INTEGER     NOT NULL DEFAULT 0,
+    thread_depth      INTEGER     NOT NULL DEFAULT 0,
+    first_feedback_at TIMESTAMPTZ,
+    ignored           BOOLEAN,                -- NULL while the 15-minute window is still open
+    PRIMARY KEY (chat_id, message_id)
+)
+INDEX idx_bot_message_feedback_sent ON (sent_at)
+
+-- Hourly rollup of bot_message_feedback, written by feedback_metrics_job
+-- (src/jobs/feedback.py). The only feedback table dashboards should query —
+-- counts sit next to their rates so a daily/weekly figure is
+-- SUM(count) / SUM(messages), never an average of hourly rates.
+-- Retention: 365 days.
+bot_feedback_metrics (
+    bucket_start             TIMESTAMPTZ NOT NULL,  -- date_trunc('hour', sent_at)
+    chat_id                  BIGINT      NOT NULL,
+    source                   TEXT        NOT NULL,
+    trigger                  TEXT        NOT NULL,
+    messages                 INTEGER     NOT NULL,
+    ignored                  INTEGER     NOT NULL,
+    corrected                INTEGER     NOT NULL,
+    reacted                  INTEGER     NOT NULL,
+    replied                  INTEGER     NOT NULL,
+    ignore_rate              REAL        NOT NULL,
+    correction_rate          REAL        NOT NULL,
+    reaction_rate            REAL        NOT NULL,
+    reply_rate               REAL        NOT NULL,
+    avg_thread_depth         REAL        NOT NULL,
+    median_first_feedback_s  REAL,
+    computed_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (bucket_start, chat_id, source, trigger)
+)
 ```
+
+JSONB columns (`history_messages`, `emojis`) are written as `json.dumps(...)`
+text with an explicit `$N::jsonb` cast — no JSONB codec is registered on the
+connection pool (`db.py` only registers pgvector's), so asyncpg would
+otherwise reject a plain Python dict/list for these columns.
 
 ## Coverage gaps in `unified_messages`
 
@@ -142,4 +230,8 @@ engagement.py       add_signal (atomic decay-and-charge, returns new score), pee
 thread_history.py   append_turn, get_history (thread-scoped, oldest-first), cleanup_old (60-day retention)
 sticker_descriptions.py get_description / save_description — permanent vision-description cache keyed by sticker file_unique_id
 embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[float] (384-dim)
+llm_system_prompts.py hash_prompt (pure sha256), ensure (upsert, ON CONFLICT DO NOTHING), cleanup_unreferenced
+llm_log.py           insert_call (one response-LLM call per bot message), cleanup_old (60-day retention, RETENTION_DAYS)
+message_feedback.py  register, add_reaction / remove_reaction, add_reply, add_correction (no window guard), close_expired_windows, cleanup_old (60-day retention, RETENTION_DAYS)
+feedback_metrics.py  recompute_recent_buckets (hourly rollup, idempotent ON CONFLICT DO UPDATE), cleanup_old (365-day retention, RETENTION_DAYS)
 ```

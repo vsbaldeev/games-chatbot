@@ -9,6 +9,26 @@ members.py
     register_sender_as_member(update)           — upsert user into chat_members on every update
     register_users_from_join_message(...)   — upsert joined users into chat_members
 
+reactions.py
+    handle_message_reaction(update)     — MessageReactionHandler; applies an
+                                     emoji-reaction add/remove delta to the
+                                     reacted-to message's bot_message_feedback
+                                     row (src.store.message_feedback). Group-only
+                                     (checked inside the handler — MessageReactionHandler
+                                     has no filters parameter); requires the
+                                     bot to be a group admin, or Telegram never
+                                     sends these updates. See src/feedback/README.md
+
+sending.py
+    send_and_store(bot, chat_id, text, *, source, ...)   — send + persist +
+                                     register for feedback tracking
+    edit_and_store(message, chat_id, text, *, source, ...) — same, editing an
+                                     already-sent message
+                                     `source` is required on both (feedback
+                                     source tag: "notice" | "meme" |
+                                     "group_profile" | "selfie" | ...) — see
+                                     src.store.message_feedback.register
+
 messages.py
     handle_text_message(update)         — text: track stats (night, link, forward, emoji, long),
                                      then enter the LangGraph pipeline
