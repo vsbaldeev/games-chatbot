@@ -6,12 +6,16 @@ container, never the bot. See README.md for the full contract.
 """
 
 import asyncio
+import base64
 import contextlib
 import datetime
 import logging
+from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
+import shorts
 from ytdlp_update import check_and_update
 
 logger = logging.getLogger("download-service")
@@ -72,3 +76,62 @@ def healthz() -> dict:
         Status payload.
     """
     return {"status": "ok"}
+
+
+class DownloadRequest(BaseModel):
+    """Body of ``POST /download``.
+
+    Attributes:
+        url: Canonical URL to download or fetch metadata for.
+        kind: Which relocated module handles the request.
+    """
+
+    url: str
+    kind: Literal["youtube_short"]
+
+
+class DownloadResponse(BaseModel):
+    """Body of a successful ``POST /download`` response.
+
+    Attributes:
+        video_bytes_base64: Base64-encoded video bytes, or None for a
+            metadata-only kind.
+        info: yt-dlp's info dict for the downloaded/fetched item.
+    """
+
+    video_bytes_base64: str | None
+    info: dict
+
+
+# (module, attribute name) rather than a bound function reference: resolved
+# via getattr at call time, so patching e.g. "main.shorts.download_short" in
+# tests reaches the actual call instead of a reference captured at import.
+DOWNLOADERS = {
+    "youtube_short": (shorts, "download_short"),
+}
+
+
+@app.post("/download", response_model=DownloadResponse)
+def download(request: DownloadRequest) -> DownloadResponse:
+    """Download or fetch metadata for one URL via the matching relocated module.
+
+    Args:
+        request: The URL and which downloader to use.
+
+    Returns:
+        Base64-encoded video bytes (None for metadata-only kinds) + the
+        info dict.
+
+    Raises:
+        HTTPException: 502 when the downloader raised (extraction failure,
+            timeout, duration/filesize rejection, ...).
+    """
+    module, attr_name = DOWNLOADERS[request.kind]
+    downloader = getattr(module, attr_name)
+    try:
+        video_bytes, info = downloader(request.url)
+    except Exception as error:
+        logger.warning("download failed for %s (%s): %s", request.url, request.kind, error)
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    video_bytes_base64 = base64.b64encode(video_bytes).decode() if video_bytes is not None else None
+    return DownloadResponse(video_bytes_base64=video_bytes_base64, info=info)
