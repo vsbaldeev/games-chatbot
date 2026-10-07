@@ -272,6 +272,7 @@ class MessageRouter:
 
     async def __store_message(self, msg: IncomingMessage) -> None:
         media_type = msg["media_type"]
+        message = msg["update"].message
 
         if media_type == "text":
             content = msg["raw_text"] or ""
@@ -287,6 +288,28 @@ class MessageRouter:
             content = unified_messages.STICKER_PLACEHOLDER
         elif media_type == "animation":
             content = unified_messages.ANIMATION_PLACEHOLDER
+        elif media_type == "document":
+            content = unified_messages.format_document_content(message.document.file_name)
+        elif media_type == "audio":
+            content = unified_messages.format_audio_content(
+                message.audio.file_name, message.audio.title, message.audio.performer,
+            )
+        elif media_type == "location":
+            content = unified_messages.format_location_content(
+                message.location.latitude, message.location.longitude,
+            )
+        elif media_type == "contact":
+            content = unified_messages.format_contact_content(
+                message.contact.first_name, message.contact.last_name,
+            )
+        elif media_type == "dice":
+            content = unified_messages.format_dice_content(message.dice.emoji, message.dice.value)
+        elif media_type == "venue":
+            content = unified_messages.format_venue_content(message.venue.title, message.venue.address)
+        elif media_type == "poll":
+            content = unified_messages.format_poll_content(
+                message.poll.question, [option.text for option in message.poll.options],
+            )
         else:
             content = ""
 

@@ -8,12 +8,16 @@ re-tested here.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from types import SimpleNamespace
+
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
 from src.events.messages import (
     GENERIC_FAILURE_NOTICE,
     RATE_LIMIT_NOTICE,
+    build_replied_to_fallback,
     deliver_and_record,
     deliver_response,
+    derive_reply_media_type,
     notify_pipeline_failure,
     passive_voice_extract,
     send_limit_notice,
@@ -390,3 +394,85 @@ class TestSendAndStoreRegistersFeedback:
              patch(FEEDBACK_REGISTER_SENDING_TARGET, AsyncMock()) as register:
             await edit_and_store(message, 1000, "text", source="notice")
         assert register.await_args.kwargs == {"chat_id": 1000, "message_id": 888, "source": "notice"}
+
+
+def make_reply(**media_kwargs) -> SimpleNamespace:
+    """A minimal reply-to-message stand-in: only the given media attribute is
+    set, so derive_reply_media_type's getattr(reply, media_type, None) scan
+    sees every other media type as genuinely absent (unlike a bare MagicMock,
+    whose auto-created attributes are all truthy)."""
+    reply = SimpleNamespace(
+        from_user=SimpleNamespace(id=1, username="alice"), reply_to_message=None, message_id=50,
+    )
+    for key, value in media_kwargs.items():
+        setattr(reply, key, value)
+    return reply
+
+
+class TestDeriveReplyMediaTypeForNewTypes:
+    def test_document_is_classified(self):
+        reply = make_reply(document=SimpleNamespace(file_name="report.pdf"))
+        assert derive_reply_media_type(reply) == "document"
+
+    def test_audio_is_classified(self):
+        reply = make_reply(audio=SimpleNamespace(file_name="track.mp3", title=None, performer=None))
+        assert derive_reply_media_type(reply) == "audio"
+
+    def test_location_is_classified(self):
+        reply = make_reply(location=SimpleNamespace(latitude=55.75, longitude=37.61))
+        assert derive_reply_media_type(reply) == "location"
+
+    def test_contact_is_classified(self):
+        reply = make_reply(contact=SimpleNamespace(first_name="Ivan", last_name=None))
+        assert derive_reply_media_type(reply) == "contact"
+
+    def test_dice_is_classified(self):
+        reply = make_reply(dice=SimpleNamespace(emoji="🎲", value=4))
+        assert derive_reply_media_type(reply) == "dice"
+
+    def test_venue_is_classified(self):
+        reply = make_reply(venue=SimpleNamespace(title="Кафе", address="ул. Ленина"))
+        assert derive_reply_media_type(reply) == "venue"
+
+    def test_poll_is_classified(self):
+        reply = make_reply(poll=SimpleNamespace(question="Го?", options=[]))
+        assert derive_reply_media_type(reply) == "poll"
+
+    def test_no_known_media_falls_back_to_text(self):
+        assert derive_reply_media_type(make_reply()) == "text"
+
+
+class TestBuildRepliedToFallbackForNewTypes:
+    def test_document_fallback_includes_file_name(self):
+        reply = make_reply(document=SimpleNamespace(file_name="report.pdf"))
+        assert build_replied_to_fallback(reply)["content"] == "[document] report.pdf"
+
+    def test_audio_fallback_prefers_title_and_performer(self):
+        reply = make_reply(audio=SimpleNamespace(file_name="track.mp3", title="Komarovo", performer="Кино"))
+        assert build_replied_to_fallback(reply)["content"] == "[audio] Кино - Komarovo"
+
+    def test_location_fallback_includes_coordinates(self):
+        reply = make_reply(location=SimpleNamespace(latitude=55.75, longitude=37.61))
+        assert build_replied_to_fallback(reply)["content"] == "[location] 55.75,37.61"
+
+    def test_contact_fallback_excludes_phone_number(self):
+        reply = make_reply(contact=SimpleNamespace(first_name="Ivan", last_name="Petrov"))
+        content = build_replied_to_fallback(reply)["content"]
+        assert content == "[contact] Ivan Petrov"
+        assert "+" not in content
+
+    def test_dice_fallback_includes_emoji_and_value(self):
+        reply = make_reply(dice=SimpleNamespace(emoji="🎲", value=4))
+        assert build_replied_to_fallback(reply)["content"] == "[dice] 🎲 4"
+
+    def test_venue_fallback_includes_title_and_address(self):
+        reply = make_reply(venue=SimpleNamespace(title="Кафе", address="ул. Ленина"))
+        assert build_replied_to_fallback(reply)["content"] == "[venue] Кафе, ул. Ленина"
+
+    def test_poll_fallback_includes_question_and_options(self):
+        options = [SimpleNamespace(text="Да"), SimpleNamespace(text="Нет")]
+        reply = make_reply(poll=SimpleNamespace(question="Го?", options=options))
+        assert build_replied_to_fallback(reply)["content"] == "[опрос] Вопрос: Го? Варианты: Да | Нет"
+
+    def test_no_reply_returns_none(self):
+        assert build_replied_to_fallback(None) is None

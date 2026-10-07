@@ -25,6 +25,7 @@ unified_messages (
     username        TEXT,
     content         TEXT,           -- text / transcript / vision description; placeholder before enrichment
     media_type      TEXT,           -- "text" | "voice" | "video_note" | "video" | "photo" | "sticker" | "animation" | "audio"
+                                     -- "document" | "location" | "contact" | "dice" | "venue" | "poll"
     reply_to_msg_id BIGINT,
     file_id         TEXT,           -- Telegram file_id; permanent; used for lazy photo/sticker description
     media_group_id  TEXT,           -- Telegram album id; groups items of one album

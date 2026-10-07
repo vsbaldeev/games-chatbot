@@ -18,6 +18,12 @@ VIDEO_PLACEHOLDER = "[video]"
 PHOTO_PLACEHOLDER = "[photo]"
 STICKER_PLACEHOLDER = "[sticker]"
 ANIMATION_PLACEHOLDER = "[animation]"
+DOCUMENT_PLACEHOLDER = "[document]"
+LOCATION_PLACEHOLDER = "[location]"
+CONTACT_PLACEHOLDER = "[contact]"
+DICE_PLACEHOLDER = "[dice]"
+VENUE_PLACEHOLDER = "[venue]"
+AUDIO_PLACEHOLDER = "[audio]"
 
 CHAIN_DEPTH_LIMIT = 10
 
@@ -59,6 +65,56 @@ def combine_description_and_caption(description: str, caption: str) -> str:
     if caption:
         return f"{description}\n(подпись: {caption})"
     return description
+
+
+def format_document_content(file_name: str | None) -> str:
+    """Content for a document: placeholder, with the file name when Telegram sent one."""
+    if file_name:
+        return f"{DOCUMENT_PLACEHOLDER} {file_name}"
+    return DOCUMENT_PLACEHOLDER
+
+
+def format_location_content(latitude: float, longitude: float) -> str:
+    """Content for a bare location pin: placeholder + coordinates."""
+    return f"{LOCATION_PLACEHOLDER} {latitude},{longitude}"
+
+
+def format_contact_content(first_name: str, last_name: str | None) -> str:
+    """Content for a shared contact: placeholder + name, no phone number."""
+    full_name = f"{first_name} {last_name}" if last_name else first_name
+    return f"{CONTACT_PLACEHOLDER} {full_name}"
+
+
+def format_dice_content(emoji: str, value: int) -> str:
+    """Content for a dice/casino roll: placeholder + emoji + rolled value."""
+    return f"{DICE_PLACEHOLDER} {emoji} {value}"
+
+
+def format_venue_content(title: str, address: str) -> str:
+    """Content for a named venue: placeholder + title and address (unlike a bare location)."""
+    return f"{VENUE_PLACEHOLDER} {title}, {address}"
+
+
+def format_audio_content(file_name: str | None, title: str | None, performer: str | None) -> str:
+    """Content for a music/sound file: placeholder + the best available label.
+
+    Prefers ID3 title/performer tags (more readable than the raw upload name)
+    when Telegram sent them, falls back to the file name, then the bare
+    placeholder.
+    """
+    if title and performer:
+        return f"{AUDIO_PLACEHOLDER} {performer} - {title}"
+    if title:
+        return f"{AUDIO_PLACEHOLDER} {title}"
+    if file_name:
+        return f"{AUDIO_PLACEHOLDER} {file_name}"
+    return AUDIO_PLACEHOLDER
+
+
+def format_poll_content(question: str, options: list[str]) -> str:
+    """Content for a poll: question and its options, read in full rather than a bare placeholder."""
+    rendered_options = " | ".join(options)
+    return f"[опрос] Вопрос: {question} Варианты: {rendered_options}"
 
 
 def display_photo_content(content: str) -> str:

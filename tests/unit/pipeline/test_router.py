@@ -11,7 +11,7 @@ Scenarios anchored to real bugs:
   c21fe1c — forwarded messages must not be routed anywhere active
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -463,6 +463,66 @@ class TestBroadcastReplyFlag:
 
 
 TRACK_REPLY_PATCH_TARGET = "src.pipeline.router.track_reply"
+
+
+class TestStoreMessageContentForNewMediaTypes:
+    """New ignored-update types must be stored with real content, not an empty
+    fallback — the else-branch `content = ""` in __store_message would silently
+    swallow them (see src/app/README.md's former "Ignored updates" table)."""
+
+    async def __stored_content(self, incoming: dict) -> str:
+        router = MessageRouter(bot_username=BOT_USERNAME, bot_id=BOT_ID)
+        with patch("src.pipeline.router.unified_messages.insert", new_callable=AsyncMock) as mock_insert:
+            await router._MessageRouter__store_message(incoming)
+        return mock_insert.call_args.kwargs["content"]
+
+    async def test_document_content_includes_file_name(self):
+        telegram_message = make_telegram_message()
+        telegram_message.document = MagicMock(file_name="report.pdf")
+        incoming = make_incoming(media_type="document", telegram_message=telegram_message)
+        assert await self.__stored_content(incoming) == "[document] report.pdf"
+
+    async def test_audio_content_prefers_title_and_performer(self):
+        telegram_message = make_telegram_message()
+        telegram_message.audio = MagicMock(file_name="track.mp3", title="Komarovo", performer="Кино")
+        incoming = make_incoming(media_type="audio", telegram_message=telegram_message)
+        assert await self.__stored_content(incoming) == "[audio] Кино - Komarovo"
+
+    async def test_location_content_includes_coordinates(self):
+        telegram_message = make_telegram_message()
+        telegram_message.location = MagicMock(latitude=55.75, longitude=37.61)
+        incoming = make_incoming(media_type="location", telegram_message=telegram_message)
+        assert await self.__stored_content(incoming) == "[location] 55.75,37.61"
+
+    async def test_contact_content_includes_name_only(self):
+        telegram_message = make_telegram_message()
+        telegram_message.contact = MagicMock(first_name="Ivan", last_name="Petrov", phone_number="+79001234567")
+        incoming = make_incoming(media_type="contact", telegram_message=telegram_message)
+        content = await self.__stored_content(incoming)
+        assert content == "[contact] Ivan Petrov"
+        assert "+" not in content
+
+    async def test_dice_content_includes_emoji_and_value(self):
+        telegram_message = make_telegram_message()
+        telegram_message.dice = MagicMock(emoji="🎲", value=4)
+        incoming = make_incoming(media_type="dice", telegram_message=telegram_message)
+        assert await self.__stored_content(incoming) == "[dice] 🎲 4"
+
+    async def test_venue_content_includes_title_and_address(self):
+        telegram_message = make_telegram_message()
+        telegram_message.venue = MagicMock(title="Кафе Пушкин", address="Тверской бул. 26А")
+        incoming = make_incoming(media_type="venue", telegram_message=telegram_message)
+        assert await self.__stored_content(incoming) == "[venue] Кафе Пушкин, Тверской бул. 26А"
+
+    async def test_poll_content_includes_question_and_options(self):
+        telegram_message = make_telegram_message()
+        telegram_message.poll = MagicMock(
+            question="Го в дуэль?",
+            options=[MagicMock(text="Да"), MagicMock(text="Нет")],
+        )
+        incoming = make_incoming(media_type="poll", telegram_message=telegram_message)
+        content = await self.__stored_content(incoming)
+        assert content == "[опрос] Вопрос: Го в дуэль? Варианты: Да | Нет"
 
 
 class TestReplyTrackingHook:

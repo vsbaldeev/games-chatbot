@@ -116,7 +116,10 @@ def derive_reply_media_type(reply) -> str:
         One of the media-type strings used in ``unified_messages`` rows;
         ``"text"`` when no known media attachment is present.
     """
-    for media_type in ("voice", "video_note", "video", "photo", "sticker", "animation"):
+    for media_type in (
+        "voice", "video_note", "video", "photo", "sticker", "animation",
+        "document", "audio", "location", "contact", "dice", "venue", "poll",
+    ):
         if getattr(reply, media_type, None):
             return media_type
     return "text"
@@ -147,6 +150,24 @@ def build_replied_to_fallback(reply) -> dict | None:
         content = unified_messages.format_photo_content(reply.caption)
     elif media_type == "text":
         content = reply.text or reply.caption or ""
+    elif media_type == "document":
+        content = unified_messages.format_document_content(reply.document.file_name)
+    elif media_type == "audio":
+        content = unified_messages.format_audio_content(
+            reply.audio.file_name, reply.audio.title, reply.audio.performer,
+        )
+    elif media_type == "location":
+        content = unified_messages.format_location_content(reply.location.latitude, reply.location.longitude)
+    elif media_type == "contact":
+        content = unified_messages.format_contact_content(reply.contact.first_name, reply.contact.last_name)
+    elif media_type == "dice":
+        content = unified_messages.format_dice_content(reply.dice.emoji, reply.dice.value)
+    elif media_type == "venue":
+        content = unified_messages.format_venue_content(reply.venue.title, reply.venue.address)
+    elif media_type == "poll":
+        content = unified_messages.format_poll_content(
+            reply.poll.question, [option.text for option in reply.poll.options],
+        )
     else:
         content = REPLY_PLACEHOLDERS[media_type]
     nested_reply = getattr(reply, "reply_to_message", None)
@@ -845,3 +866,66 @@ async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     await achievements.increment_stat(user_id, chat_id, username, "video_messages")
     await run_pipeline(update, context, media_type="video", file_id=msg.video.file_id)
+
+
+async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.document:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="document", file_id=msg.document.file_id)
+
+
+async def handle_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.audio:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="audio", file_id=msg.audio.file_id)
+
+
+async def handle_location_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.location:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="location")
+
+
+async def handle_contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.contact:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="contact")
+
+
+async def handle_dice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.dice:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="dice")
+
+
+async def handle_venue_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.venue:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="venue")
+
+
+async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.poll:
+        return
+    if update.effective_user and update.effective_user.is_bot:
+        return
+    await run_pipeline(update, context, media_type="poll")

@@ -13,11 +13,24 @@ a caption follows.
 import pytest
 
 from src.store.unified_messages import (
+    AUDIO_PLACEHOLDER,
+    CONTACT_PLACEHOLDER,
+    DICE_PLACEHOLDER,
+    DOCUMENT_PLACEHOLDER,
+    LOCATION_PLACEHOLDER,
     PHOTO_PLACEHOLDER,
+    VENUE_PLACEHOLDER,
     combine_description_and_caption,
     display_photo_content,
     extract_photo_caption,
+    format_audio_content,
+    format_contact_content,
+    format_dice_content,
+    format_document_content,
+    format_location_content,
     format_photo_content,
+    format_poll_content,
+    format_venue_content,
     needs_photo_description,
 )
 
@@ -75,6 +88,69 @@ class TestCombineDescriptionAndCaption:
     def test_description_alone_when_caption_is_empty(self):
         result = combine_description_and_caption("A cute cat.", "")
         assert result == "A cute cat."
+
+
+class TestFormatDocumentContent:
+    def test_file_name_is_appended_to_placeholder(self):
+        assert format_document_content("report.pdf") == f"{DOCUMENT_PLACEHOLDER} report.pdf"
+
+    def test_missing_file_name_produces_bare_placeholder(self):
+        assert format_document_content(None) == DOCUMENT_PLACEHOLDER
+
+
+class TestFormatAudioContent:
+    def test_title_and_performer_take_priority(self):
+        result = format_audio_content("track.mp3", "Komarovo", "Кино")
+        assert result == f"{AUDIO_PLACEHOLDER} Кино - Komarovo"
+
+    def test_title_alone_without_performer(self):
+        result = format_audio_content("track.mp3", "Komarovo", None)
+        assert result == f"{AUDIO_PLACEHOLDER} Komarovo"
+
+    def test_falls_back_to_file_name_without_tags(self):
+        result = format_audio_content("track.mp3", None, None)
+        assert result == f"{AUDIO_PLACEHOLDER} track.mp3"
+
+    def test_bare_placeholder_with_nothing_available(self):
+        assert format_audio_content(None, None, None) == AUDIO_PLACEHOLDER
+
+
+class TestFormatLocationContent:
+    def test_coordinates_are_appended_to_placeholder(self):
+        result = format_location_content(55.75, 37.61)
+        assert result == f"{LOCATION_PLACEHOLDER} 55.75,37.61"
+
+
+class TestFormatContactContent:
+    def test_full_name_is_appended_to_placeholder(self):
+        result = format_contact_content("Ivan", "Petrov")
+        assert result == f"{CONTACT_PLACEHOLDER} Ivan Petrov"
+
+    def test_missing_last_name_uses_first_name_only(self):
+        result = format_contact_content("Ivan", None)
+        assert result == f"{CONTACT_PLACEHOLDER} Ivan"
+
+    def test_phone_number_is_never_included(self):
+        result = format_contact_content("Ivan", "Petrov")
+        assert "+" not in result
+
+
+class TestFormatDiceContent:
+    def test_emoji_and_value_are_appended_to_placeholder(self):
+        result = format_dice_content("🎲", 4)
+        assert result == f"{DICE_PLACEHOLDER} 🎲 4"
+
+
+class TestFormatVenueContent:
+    def test_title_and_address_are_appended_to_placeholder(self):
+        result = format_venue_content("Кафе Пушкин", "Тверской бул. 26А")
+        assert result == f"{VENUE_PLACEHOLDER} Кафе Пушкин, Тверской бул. 26А"
+
+
+class TestFormatPollContent:
+    def test_question_and_options_are_rendered_in_full(self):
+        result = format_poll_content("Го в дуэль?", ["Да", "Нет", "Может быть"])
+        assert result == "[опрос] Вопрос: Го в дуэль? Варианты: Да | Нет | Может быть"
 
 
 class TestDisplayPhotoContent:

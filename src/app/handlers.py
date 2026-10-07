@@ -25,6 +25,13 @@ from src.events.messages import (
     handle_sticker_message,
     handle_video_message,
     handle_animation_message,
+    handle_document_message,
+    handle_audio_message,
+    handle_location_message,
+    handle_contact_message,
+    handle_dice_message,
+    handle_venue_message,
+    handle_poll_message,
 )
 from src.events.reactions import handle_message_reaction
 
@@ -60,3 +67,10 @@ class MessageHandlerManager(HandlerManagerInterface):
         app.add_handler(MessageHandler(filters.Sticker.ALL & group_only, handle_sticker_message))
         app.add_handler(MessageHandler(filters.VIDEO & group_only, handle_video_message))
         app.add_handler(MessageHandler(filters.ANIMATION & group_only, handle_animation_message))
+        app.add_handler(MessageHandler(filters.Document.ALL & group_only, handle_document_message))
+        app.add_handler(MessageHandler(filters.AUDIO & group_only, handle_audio_message))
+        app.add_handler(MessageHandler(filters.LOCATION & group_only, handle_location_message))
+        app.add_handler(MessageHandler(filters.CONTACT & group_only, handle_contact_message))
+        app.add_handler(MessageHandler(filters.Dice.ALL & group_only, handle_dice_message))
+        app.add_handler(MessageHandler(filters.VENUE & group_only, handle_venue_message))
+        app.add_handler(MessageHandler(filters.POLL & group_only, handle_poll_message))

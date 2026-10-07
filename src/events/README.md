@@ -38,6 +38,21 @@ messages.py
     handle_sticker_message(update) — increment sticker_messages, enter pipeline
     handle_video_message(update)   — increment video_messages, enter pipeline
     handle_animation_message(update) — increment animation_messages (no pipeline)
+    handle_document_message(update) — document: enter pipeline, no stat; content placeholder
+                                     includes the file name
+    handle_audio_message(update)   — audio (music/sound file): enter pipeline, no stat;
+                                     placeholder prefers ID3 title/performer over the file name
+    handle_location_message(update) — bare location pin: enter pipeline, no stat; placeholder
+                                     includes coordinates
+    handle_contact_message(update) — shared contact: enter pipeline, no stat; placeholder
+                                     includes the name, never the phone number
+    handle_dice_message(update)    — dice/casino roll: enter pipeline, no stat; placeholder
+                                     includes the emoji and rolled value
+    handle_venue_message(update)   — named venue: enter pipeline, no stat; placeholder
+                                     includes the title and address
+    handle_poll_message(update)    — poll: enter pipeline, no stat; content is the question
+                                     and options in full, read for real rather than a bare
+                                     placeholder
 
 voice_reply.py
     try_send_voice_reply(msg, text) — answer a voice/video_note trigger in kind:

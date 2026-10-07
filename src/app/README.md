@@ -52,10 +52,17 @@ handlers run.
 |---|---|---|---|
 | text (not a command), groups only | `handle_text_message` | `0` | main pipeline entry point |
 | voice or video note, groups only | `handle_voice_message` | `0` | same handler for both media types |
-| photo, groups only | `handle_photo_message` | `0` | |
-| sticker, groups only | `handle_sticker_message` | `0` | |
-| video, groups only | `handle_video_message` | `0` | |
-| animation (GIF), groups only | `handle_animation_message` | `0` | |
+| photo, groups only | `handle_photo_message` | `0` | content placeholder until the vision LLM describes it; caption (if any) carried alongside |
+| sticker, groups only | `handle_sticker_message` | `0` | vision description cached per sticker identity (`file_unique_id`), described at most once ever |
+| video, groups only | `handle_video_message` | `0` | transcribed via Whisper and its frames described via the vision LLM, same as `video_note` |
+| animation (GIF), groups only | `handle_animation_message` | `0` | no vision/transcript enrichment — placeholder only |
+| document, groups only | `handle_document_message` | `0` | placeholder includes the file name when Telegram sent one |
+| audio (music/sound file attachment), groups only | `handle_audio_message` | `0` | placeholder prefers the ID3 title/performer tags over the raw file name |
+| location, groups only | `handle_location_message` | `0` | placeholder includes the coordinates |
+| contact, groups only | `handle_contact_message` | `0` | placeholder includes the name, never the phone number |
+| dice/casino roll, groups only | `handle_dice_message` | `0` | placeholder includes the emoji and rolled value |
+| venue, groups only | `handle_venue_message` | `0` | placeholder includes the title and address |
+| poll, groups only | `handle_poll_message` | `0` | content is the question and options in full, not a bare placeholder |
 
 ## Ignored updates
 
@@ -64,8 +71,6 @@ Not registered by any manager above — PTB drops these silently, no error.
 | Update / trigger | Why ignored |
 |---|---|
 | any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` still fires there, since it has no chat-type filter |
-| audio (music/sound file attachment) | `handle_audio_message` was removed — never transcribed, no stat, rarely sent in practice |
-| document, location, contact, poll, dice, venue | no filter registered for these types anywhere in the codebase |
 
 # Scheduled jobs (jobs.py)
 
