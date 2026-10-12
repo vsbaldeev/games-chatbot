@@ -344,21 +344,37 @@ MEME_JUDGE_SYSTEM = (
     '{"score": N}'
 )
 
-# Correction classifier (src/feedback/classifier.py). One small call deciding
-# whether a direct reply to a bot message disputes or corrects a factual
-# claim the bot made — the implicit-feedback signal closest to "the bot
-# hallucinated" this repo can measure without an LLM-judge pass over every
-# reply. Binary rather than multi-label: only corrections are counted, and a
-# yes/no call is easier for a small model to get right than a 5-way one.
-CORRECTION_CLASSIFIER_SYSTEM = (
-    "You decide whether a chat reply corrects or disputes a factual claim in "
-    "the bot message it replies to.\n"
-    "Answer CORRECTION when the reply says the bot got a fact wrong, denies "
-    "something the bot stated as true, or supplies the actual fact in its place.\n"
-    "Answer OTHER for everything else: agreement, jokes, insults, requests, "
-    "disagreement with an opinion or tone rather than a fact, or a reply "
-    "about something unrelated to the bot's claim.\n"
-    "Answer with exactly one word: CORRECTION or OTHER."
+REPLY_LABEL_SYSTEM = (
+    "You label how a chat member reacted to a bot message in a Russian-speaking "
+    "group chat. The bot is a sarcastic character called Жора.\n"
+    "Input is a JSON array of items, each with an id, the bot message, that "
+    "message's source and trigger, and the member's reply.\n"
+    "For each item output a reaction and, only for a NEGATIVE reaction, a "
+    "cause.\n"
+    "reaction is exactly one of:\n"
+    "  POSITIVE — the reply plays along: answers, asks a follow-up, agrees, "
+    "laughs with the bot, or trades insults in good humour.\n"
+    "  NEGATIVE — the reply dismisses the bot message: calls it nonsense, tells "
+    "the bot to stop, mocks it, brushes it off, or says it got a fact wrong.\n"
+    "  NEUTRAL — an acknowledgement or an aside that carries no attitude.\n"
+    "  UNCLEAR — you genuinely cannot tell.\n"
+    "cause is exactly one of, and only when reaction is NEGATIVE:\n"
+    "  PERSONA — they are rejecting the bot's manner, voice or character.\n"
+    "  INVENTED_LIFE — they are rejecting a made-up activity, village story or "
+    "claim about the bot's own life.\n"
+    "  FACTUAL — they are rejecting a claim about the real world as wrong.\n"
+    "  TONE — the joke did not land, or the reply was rude or unfunny.\n"
+    "  IRRELEVANT — the bot answered something nobody asked.\n"
+    "  UNCLEAR — negative, but the reason is not stated.\n"
+    "PERSONA and INVENTED_LIFE are different: disliking how he talks is "
+    "PERSONA, disliking a story he invented about himself is INVENTED_LIFE. "
+    "Never merge them.\n"
+    "When source is \"roast\" or the bot message is an invited insult, a crude "
+    "or insulting reply is POSITIVE, not NEGATIVE — that exchange is working as "
+    "intended.\n"
+    "For any reaction other than NEGATIVE set cause to null.\n"
+    "Output a JSON array only. One object per input item, with exactly the keys "
+    "id, reaction and cause. No prose, no explanation, no extra keys."
 )
 
 # Chat-requested selfie scene writer (src/life/selfie.py). English, like the

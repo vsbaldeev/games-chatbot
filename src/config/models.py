@@ -104,6 +104,25 @@ MEMORY_MODEL_FALLBACKS: list[str] = [
 # FILTER_MODEL's note above on the same bucket getting crowded.
 TAG_MODEL = "qwen/qwen3.8-27b"
 
+# Reply reaction labelling (src/feedback/reply_labeller.py). OpenRouter-only,
+# deliberately: this is an offline batched job behind a 15-minute schedule, so
+# a 429 costs nothing — the row stays pending and the next run picks it up.
+# That makes it the one call site where a saturating free pool is the right
+# choice, and the one that must never share TAG_MODEL's already-crowded Groq
+# bucket (see TAG_MODEL above): measurement must never degrade chat replies.
+# Two legs on independent backends (Z.ai and Google AI Studio) so saturation
+# in one pool does not stall the queue.
+REPLY_LABEL_MODELS: list[str] = [
+    "z-ai/glm-5.2:free",
+    "google/gemma-4-31b-it:free",
+]
+
+# The verdict is {"id": N, "reaction": "...", "cause": "..."} per item — small,
+# but reasoning models on the free tier sometimes emit a <think> block before
+# the JSON, so this leaves room for one rather than truncating mid-array.
+REPLY_LABEL_MAX_TOKENS_PER_ITEM = 15
+REPLY_LABEL_BATCH_SIZE = 10
+
 # Tool-calling worker fallback chain. No 8B floor: at that size the worker
 # skips tools and fabricates facts from parametric memory — for a
 # fact-gatherer, no data beats fake data; exhaustion raises an honest
