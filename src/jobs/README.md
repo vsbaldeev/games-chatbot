@@ -9,6 +9,7 @@ Job managers live in src/app/jobs.py. Implementations live here, one file per jo
 14:00 UTC        weekly_roles_job       roles.py        assign unique member role tags + reasons (Sundays only)
 15:00 UTC        daily_meme_job         meme.py         fan out memes.sender.send_meme over every chat (un-anchored, vision-vetted, no caption)
 every 5 minutes  feedback_metrics_job   feedback.py     close 15-minute feedback windows (bot_message_feedback.ignored) and roll closed windows into hourly bot_feedback_metrics rows
+every 900s       reply_labels_job       reply_labels.py drain pending reply labels queue (ROWS_PER_RUN=200), free stage before model stage; interval must stay inside recompute_recent_buckets' 3-hour lookback window
 ```
 
 ## Feedback metrics job

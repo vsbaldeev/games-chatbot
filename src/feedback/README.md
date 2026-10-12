@@ -1,8 +1,8 @@
 # Feedback
 
 Implicit user-feedback tracking on bot messages: reactions, replies, and
-correction detection — the online proxy for how often the bot says
-something wrong, and how much members engage with it. Design:
+per-reply reaction labels — engagement metrics and the online proxy for the
+bot's impact on the chat. Design:
 `docs/superpowers/specs/2026-09-17-bot-feedback-metrics-design.md`.
 
 Lives outside `src/events` because `src/pipeline` (the call site for
@@ -16,14 +16,26 @@ replies.py    — track_reply(chat_id, message_id, bot_id): called from
                  Walks the reply chain (src.store.unified_messages.get_chain)
                  and credits every bot ancestor via
                  src.store.message_feedback.add_reply, each at its own hop
-                 depth. A depth-1 (direct) reply that is text is additionally
-                 classified for a correction — the reply's own row is already
-                 in the fetched chain, so no second query is needed.
+                 depth. Text replies are enqueued for offline labelling; the
+                 job drains the queue asynchronously.
 
-classifier.py — classify_correction(bot_text, reply_text): one TAG_MODEL
-                 call (reasoning_effort="none", max_tokens=10) returning
-                 True only on an explicit CORRECTION verdict; fails closed
-                 (False) on any error or unparseable output.
+sentiment.py  — POSITIVE_REACTIONS (❤👍😂🔥💯😅😁) and
+                 is_positive_reaction/normalize_reaction. Every other
+                 reaction counts as negative — the operator's rule for
+                 this chat, not an oversight. Normalizes U+FE0F so "❤️"
+                 and "❤" compare equal; the rollup SQL mirrors that
+                 normalization.
+
+reply_labeller.py  — build_batch_payload/parse_label_batch/label_batch: one
+                     OpenRouter call labels up to REPLY_LABEL_BATCH_SIZE text
+                     replies POSITIVE/NEGATIVE/NEUTRAL/UNCLEAR, plus a cause
+                     on the negatives that is stored and never reported.
+                     MEDIA is not in the model's vocabulary — the job applies
+                     it by rule to every wordless reply. OpenRouter-only on
+                     purpose: an offline batched job must never share the Groq
+                     quota that serves chat replies. Parsing is strict; a
+                     malformed item leaves its row pending rather than storing
+                     a guess.
 ```
 
 ## Where the rest lives
@@ -40,10 +52,22 @@ classifier.py — classify_correction(bot_text, reply_text): one TAG_MODEL
 - The 15-minute window close and hourly rollup: `src/jobs/feedback.py`.
 - Retention: `src/jobs/cleanup.py`.
 
-## Known limits
+## Explicit limits
 
-- Correction rate is a lower bound: it misses corrections sent without
-  Telegram's reply feature, non-text replies, and anything the classifier
-  gets wrong.
-- Animation (GIF) replies and duel-game replies don't pass through the
-  router, so they never reach `track_reply`.
+- Duel-game replies don't pass through the router, so they never reach
+  track_reply. (Animation replies do, since handle_animation_message routes
+  through run_pipeline — the earlier claim that they didn't was stale.)
+- negative_response_rate is a lower bound: it misses dismissals sent without
+  Telegram's reply feature, which is likely the largest blind spot.
+- media_response_rate is not a sentiment. It counts wordless replies — GIF,
+  sticker, voice, video note, photo. In this chat they lean negative, but the
+  metric asserts nothing, and folding that inference into
+  negative_response_rate was rejected on purpose.
+- The seven rates say that members reacted, not why. The cause is stored on
+  bot_reply_labels and aggregated by nothing; querying it by hand is the only
+  route to attribution, and it has no validated accuracy.
+- Correction tracking is gone. corrected and correction_rate hold history and
+  are NULL for every bucket after v5_0004.
+- FACTUAL as a cause records that a member thinks the bot got something
+  wrong, not a verified check. Factual groundedness is deliberately not
+  measured.
