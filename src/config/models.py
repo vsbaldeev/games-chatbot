@@ -110,10 +110,30 @@ TAG_MODEL = "qwen/qwen3.8-27b"
 # That makes it the one call site where a saturating free pool is the right
 # choice, and the one that must never share TAG_MODEL's already-crowded Groq
 # bucket (see TAG_MODEL above): measurement must never degrade chat replies.
-# Two legs on independent backends (Z.ai and Google AI Studio) so saturation
-# in one pool does not stall the queue.
+# Two legs on independent backends (NVIDIA and Google AI Studio) so saturation
+# in one pool does not stall the queue — checked live on 2026-10-12, when the
+# whole Google AI Studio free pool was returning 429 while NVIDIA answered
+# normally, which is exactly the failure this split exists for.
+#
+# The primary was "z-ai/glm-5.2:free" until 2026-10-12. That slug does not
+# exist: OpenRouter's /api/v1/models carries only the paid "z-ai/glm-5.2", and
+# a call to the :free variant 404s with "This model is unavailable for free",
+# so the chain silently ran on the Gemma leg alone.
+#
+# nvidia/nemotron-3-super-120b-a12b:free replaced it after checking the live
+# free catalog: 120B hybrid MoE with 12B active, text-only, no expiry date, and
+# the only non-Google free leg that is both general-purpose (not a coding or
+# guardrail model) and reachable from a plain API key — the Thinking Machines
+# and Poolside free legs are gated to "agentic harnesses" (403) or expire
+# within weeks. Verified on this call's real shape (two Russian replies, JSON
+# array out): correct labels, valid JSON, zero reasoning tokens.
+#
+# It is a reasoning model with reasoning ON by default, so callers must pass
+# reasoning_effort="none" — the same idiom FILTER_MODEL, VISION_MODEL and
+# TAG_MODEL already carry here. Measured on the same probe: "none" yields 0
+# reasoning tokens, while "low" burned 293 and truncated the JSON mid-array.
 REPLY_LABEL_MODELS: list[str] = [
-    "z-ai/glm-5.2:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
     "google/gemma-4-31b-it:free",
 ]
 

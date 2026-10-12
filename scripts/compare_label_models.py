@@ -30,7 +30,12 @@ logger = log.get_logger(__name__)
 
 
 async def label_with(model: str, rows: list[dict]) -> dict[int, tuple[str, str | None]]:
-    """Label rows with one specific model, bypassing the fallback chain."""
+    """Label rows with one specific model, bypassing the fallback chain.
+
+    Raises:
+        Exception: Whatever the call raises. try_label_with is the caller that
+            turns that into a reported failure instead of a crash.
+    """
     llm = ChatOpenAI(
         model=model,
         api_key=config.OPENROUTER_API_KEY,
@@ -45,6 +50,28 @@ async def label_with(model: str, rows: list[dict]) -> dict[int, tuple[str, str |
     ])
     expected_ids = {row["reply_message_id"] for row in rows}
     return parse_label_batch(response.content or "", expected_ids)
+
+
+async def try_label_with(model: str, rows: list[dict]) -> dict[int, tuple[str, str | None]] | None:
+    """Label rows with one leg, returning None instead of raising on failure.
+
+    This script exists to tell the operator whether a model is usable at all,
+    so a leg that 404s, 403s or saturates must be reported rather than take
+    the whole comparison down with it — a crash says nothing about the other
+    leg, which may well be answering fine.
+
+    Args:
+        model: The OpenRouter slug for this leg.
+        rows: Pending rows to label.
+
+    Returns:
+        The leg's labels, or None when the call never produced any.
+    """
+    try:
+        return await label_with(model, rows)
+    except Exception as error:
+        logger.warning("Leg %s failed, no labels from it: %s", model, error)
+        return None
 
 
 def report_disagreements(
@@ -78,6 +105,31 @@ def report_disagreements(
     )
 
 
+async def compare_legs(rows: list[dict]) -> None:
+    """Label rows with both legs and report as much as the legs allow.
+
+    Degrades in three steps rather than crashing: both legs down says so, one
+    leg down reports how much the surviving leg managed and that no comparison
+    is possible, and two live legs get the full agreement figure.
+    """
+    primary_model, secondary_model = config.REPLY_LABEL_MODELS[:2]
+    primary = await try_label_with(primary_model, rows)
+    secondary = await try_label_with(secondary_model, rows)
+    if primary is None and secondary is None:
+        logger.warning("Both legs failed, no comparison possible")
+        return
+    if primary is None or secondary is None:
+        failed = primary_model if primary is None else secondary_model
+        survivor = secondary_model if primary is None else primary_model
+        labelled = secondary if primary is None else primary
+        logger.warning(
+            "Leg %s failed, no comparison possible — leg %s labelled %d of %d rows",
+            failed, survivor, len(labelled), len(rows),
+        )
+        return
+    report_disagreements(rows, primary, secondary)
+
+
 async def main() -> None:
     """Fetch pending rows, label them with each leg, report disagreement."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -96,9 +148,7 @@ async def main() -> None:
         if not rows:
             logger.warning("No pending text replies to compare")
             return
-        primary = await label_with(config.REPLY_LABEL_MODELS[0], rows)
-        secondary = await label_with(config.REPLY_LABEL_MODELS[1], rows)
-        report_disagreements(rows, primary, secondary)
+        await compare_legs(rows)
     finally:
         await database.close()
 
