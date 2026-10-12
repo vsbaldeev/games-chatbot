@@ -32,6 +32,10 @@ logger = log.get_logger(__name__)
 async def label_with(model: str, rows: list[dict]) -> dict[int, tuple[str, str | None]]:
     """Label rows with one specific model, bypassing the fallback chain.
 
+    Mirrors make_labeller_llm's parameters, reasoning_effort included, so the
+    agreement figure describes the call the job actually makes rather than a
+    differently-configured one.
+
     Raises:
         Exception: Whatever the call raises. try_label_with is the caller that
             turns that into a reported failure instead of a crash.
@@ -43,6 +47,7 @@ async def label_with(model: str, rows: list[dict]) -> dict[int, tuple[str, str |
         temperature=0.0,
         max_tokens=len(rows) * config.REPLY_LABEL_MAX_TOKENS_PER_ITEM,
         max_retries=0,
+        reasoning_effort="none",
     )
     response = await ainvoke_with_backoff(llm, [
         SystemMessage(content=REPLY_LABEL_SYSTEM),

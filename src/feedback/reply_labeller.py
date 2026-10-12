@@ -121,7 +121,18 @@ def parse_label_batch(raw: str, expected_ids: set[int]) -> dict[int, tuple[str, 
 
 
 def make_labeller_llm(max_tokens: int) -> ChatOpenAI:
-    """Build the OpenRouter client, primary leg with the second as fallback."""
+    """Build the OpenRouter client, primary leg with the second as fallback.
+
+    ``reasoning_effort="none"`` is the same idiom make_filter_llm
+    (src/pipeline/filter_node.py) and the vision/roles calls already use in
+    this repo for the same class of problem: the primary leg
+    (nvidia/nemotron-3-super-120b-a12b:free) is a reasoning model with
+    reasoning ON by default, and a <think> block would eat the whole
+    REPLY_LABEL_MAX_TOKENS_PER_ITEM budget before any JSON appeared. Measured
+    on this call's real shape: "none" spends 0 reasoning tokens, "low" spent
+    293 and truncated the array. The Gemma fallback leg does not reason by
+    default and OpenRouter drops the parameter for models that ignore it.
+    """
     legs = [
         ChatOpenAI(
             model=model,
@@ -130,6 +141,7 @@ def make_labeller_llm(max_tokens: int) -> ChatOpenAI:
             temperature=0.0,
             max_tokens=max_tokens,
             max_retries=0,
+            reasoning_effort="none",
         )
         for model in config.REPLY_LABEL_MODELS
     ]
