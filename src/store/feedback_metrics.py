@@ -5,6 +5,7 @@ rates so a daily/weekly figure is SUM(count) / SUM(messages), never an
 average of hourly rates.
 """
 
+from src.feedback.sentiment import positive_reactions_sql_array
 from src.store import db as database
 from src.store import message_feedback
 
@@ -12,6 +13,10 @@ RETENTION_DAYS = 365
 # Bounded by bot_message_feedback's own retention — nothing older survives there.
 CATCHUP_LIMIT_DAYS = message_feedback.RETENTION_DAYS
 
+# The cause column on bot_reply_labels is deliberately never aggregated here
+# (spec decision 10) — no cause rollup, no recompute_cause_buckets, no
+# bot_reply_cause_metrics. An ad-hoc GROUP BY cause is the only thing that
+# ever reads it; the omission is a decision, not an oversight.
 ROLLUP_SQL = """
 WITH bounds AS (
     SELECT GREATEST(
@@ -30,41 +35,96 @@ closed AS (
         feedback.trigger,
         COUNT(*)                                          AS messages,
         COUNT(*) FILTER (WHERE feedback.ignored)           AS ignored,
-        COUNT(*) FILTER (WHERE feedback.corrections > 0)   AS corrected,
-        COUNT(*) FILTER (WHERE feedback.reactions > 0)     AS reacted,
-        COUNT(*) FILTER (WHERE feedback.replies > 0)       AS replied,
-        AVG(feedback.thread_depth)                         AS avg_thread_depth,
-        percentile_cont(0.5) WITHIN GROUP (
-            ORDER BY EXTRACT(EPOCH FROM (feedback.first_feedback_at - feedback.sent_at))
-        ) FILTER (WHERE feedback.first_feedback_at IS NOT NULL) AS median_first_feedback_s
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM bot_reply_labels AS label
+            WHERE label.chat_id = feedback.chat_id
+              AND label.bot_message_id = feedback.message_id
+              AND label.reaction = 'MEDIA'
+        ))                                                AS media_responded,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM bot_reply_labels AS label
+            WHERE label.chat_id = feedback.chat_id
+              AND label.bot_message_id = feedback.message_id
+              AND label.reaction = 'POSITIVE'
+        ))                                                AS positive_responded,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM bot_reply_labels AS label
+            WHERE label.chat_id = feedback.chat_id
+              AND label.bot_message_id = feedback.message_id
+              AND label.reaction = 'NEGATIVE'
+        ))                                                AS negative_responded,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM bot_reply_labels AS label
+            WHERE label.chat_id = feedback.chat_id
+              AND label.bot_message_id = feedback.message_id
+              AND label.reaction = 'NEUTRAL'
+              AND label.media_type = 'text'
+        ))                                                AS neutral_responded,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM bot_reply_labels AS label
+            WHERE label.chat_id = feedback.chat_id
+              AND label.bot_message_id = feedback.message_id
+              AND label.media_type = 'text'
+              AND (label.reaction IS NULL OR label.reaction = 'UNCLEAR')
+        ))                                                AS unlabelled,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM jsonb_object_keys(feedback.emojis) AS emoji_key
+            WHERE replace(emoji_key, U&'\\FE0F', '') = ANY($3::text[])
+        ))                                                AS positive_emoji,
+        COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM jsonb_object_keys(feedback.emojis) AS emoji_key
+            WHERE replace(emoji_key, U&'\\FE0F', '') <> ALL($3::text[])
+        ))                                                AS negative_emoji
     FROM bot_message_feedback AS feedback, bounds
     WHERE feedback.ignored IS NOT NULL
+      -- Kept in step with src/jobs/reply_labels.py's EXCLUDED_TRIGGERS: a
+      -- trigger excluded there has every reply labelled SKIPPED, so without
+      -- this clause its bucket would read "N messages, 0% everything" —
+      -- a lying zero rather than an honest "not measured".
+      AND feedback.trigger <> 'social_link'
       AND feedback.sent_at >= bounds.since
       AND feedback.sent_at < date_trunc('hour', now())
     GROUP BY 1, 2, 3, 4
 )
 INSERT INTO bot_feedback_metrics
-    (bucket_start, chat_id, source, trigger, messages, ignored, corrected, reacted, replied,
-     ignore_rate, correction_rate, reaction_rate, reply_rate, avg_thread_depth,
-     median_first_feedback_s, computed_at)
+    (bucket_start, chat_id, source, trigger, messages, ignored, ignore_rate,
+     media_responded, positive_responded, negative_responded, neutral_responded,
+     unlabelled, positive_emoji, negative_emoji,
+     media_response_rate, positive_response_rate, negative_response_rate,
+     neutral_response_rate, unlabelled_rate, positive_emoji_rate,
+     negative_emoji_rate, computed_at)
 SELECT
-    bucket_start, chat_id, source, trigger, messages, ignored, corrected, reacted, replied,
-    ignored::real / messages, corrected::real / messages,
-    reacted::real / messages, replied::real / messages,
-    avg_thread_depth, median_first_feedback_s, now()
+    bucket_start, chat_id, source, trigger, messages, ignored,
+    ignored::real / messages,
+    media_responded, positive_responded, negative_responded, neutral_responded,
+    unlabelled, positive_emoji, negative_emoji,
+    media_responded::real / messages,
+    positive_responded::real / messages,
+    negative_responded::real / messages,
+    neutral_responded::real / messages,
+    unlabelled::real / messages,
+    positive_emoji::real / messages,
+    negative_emoji::real / messages,
+    now()
 FROM closed
 ON CONFLICT (bucket_start, chat_id, source, trigger) DO UPDATE SET
     messages = EXCLUDED.messages,
     ignored = EXCLUDED.ignored,
-    corrected = EXCLUDED.corrected,
-    reacted = EXCLUDED.reacted,
-    replied = EXCLUDED.replied,
     ignore_rate = EXCLUDED.ignore_rate,
-    correction_rate = EXCLUDED.correction_rate,
-    reaction_rate = EXCLUDED.reaction_rate,
-    reply_rate = EXCLUDED.reply_rate,
-    avg_thread_depth = EXCLUDED.avg_thread_depth,
-    median_first_feedback_s = EXCLUDED.median_first_feedback_s,
+    media_responded = EXCLUDED.media_responded,
+    positive_responded = EXCLUDED.positive_responded,
+    negative_responded = EXCLUDED.negative_responded,
+    neutral_responded = EXCLUDED.neutral_responded,
+    unlabelled = EXCLUDED.unlabelled,
+    positive_emoji = EXCLUDED.positive_emoji,
+    negative_emoji = EXCLUDED.negative_emoji,
+    media_response_rate = EXCLUDED.media_response_rate,
+    positive_response_rate = EXCLUDED.positive_response_rate,
+    negative_response_rate = EXCLUDED.negative_response_rate,
+    neutral_response_rate = EXCLUDED.neutral_response_rate,
+    unlabelled_rate = EXCLUDED.unlabelled_rate,
+    positive_emoji_rate = EXCLUDED.positive_emoji_rate,
+    negative_emoji_rate = EXCLUDED.negative_emoji_rate,
     computed_at = EXCLUDED.computed_at
 """
 
@@ -84,6 +144,11 @@ async def recompute_recent_buckets(*, lookback_hours: int = 3) -> int:
     skipped — bounded by CATCHUP_LIMIT_DAYS, matching how far
     bot_message_feedback itself retains data.
 
+    The positive emoji set is bound as $3 rather than inlined into
+    ROLLUP_SQL, so src/feedback/sentiment.py stays the single definition.
+    The query's `replace(..., U&'\\FE0F', '')` normalization mirrors
+    normalize_reaction, so Postgres and Python agree on emoji like "❤️".
+
     Args:
         lookback_hours: How far back to always recompute, even with no gap.
 
@@ -91,7 +156,9 @@ async def recompute_recent_buckets(*, lookback_hours: int = 3) -> int:
         Number of (bucket, chat, source, trigger) rows written or updated.
     """
     async with database.acquire() as conn:
-        result = await conn.execute(ROLLUP_SQL, lookback_hours, CATCHUP_LIMIT_DAYS)
+        result = await conn.execute(
+            ROLLUP_SQL, lookback_hours, CATCHUP_LIMIT_DAYS, positive_reactions_sql_array(),
+        )
     return int(result.split()[-1])
 
 
