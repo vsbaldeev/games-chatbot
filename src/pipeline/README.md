@@ -29,9 +29,11 @@ incoming message
     │
     ├─ always, when the message is a reply (any media type): src.feedback.replies.track_reply
     │              walks the reply chain (unified_messages.get_chain) and credits every
-    │              bot ancestor's bot_message_feedback row, each at its own hop depth; a
-    │              depth-1 (direct) text reply is also classified as a correction
-    │              (src.feedback.classifier) — see src/feedback/README.md
+    │              bot ancestor's bot_message_feedback row; it also enqueues the reply
+    │              itself as one unlabelled bot_reply_labels row, attributed to its
+    │              nearest bot ancestor. No model call on this path at all: the
+    │              inline correction classifier is deleted, and src/jobs/reply_labels.py
+    │              labels the row offline within 15 minutes — see src/feedback/README.md
     │
     ├─ text
     │     ├─ YouTube Shorts link      → should_respond=True,  trigger="youtube_short"
