@@ -35,7 +35,12 @@ reply_labeller.py  — build_batch_payload/parse_label_batch/label_batch: one
                      purpose: an offline batched job must never share the Groq
                      quota that serves chat replies. Parsing is strict; a
                      malformed item leaves its row pending rather than storing
-                     a guess.
+                     a guess, and costs that row one of its three attempts.
+                     A call that never reached a model at all raises
+                     LabellingCallFailed instead of returning an empty result,
+                     so the job can leave every row in the batch at the
+                     attempts it already had — an OpenRouter outage must not
+                     retire a queue it says nothing about.
 ```
 
 ## Where the rest lives
