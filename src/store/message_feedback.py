@@ -2,15 +2,10 @@
 feedback arrived at all, within the first 15 minutes after a bot message is
 sent. Per-reply detail lives in bot_reply_labels, one row per reply.
 
-Every mutator's WHERE clause enforces the 15-minute window (except
-add_correction — see its docstring), so a write arriving after the window
-closed is a silent no-op rather than skewing a message's numbers with late
-noise. Reads (used by the hourly rollup in feedback_metrics.py) are
-unrestricted.
-
-add_correction is deliberately left untouched this pass even though its
-corrections column is gone: it's removed in Task 6 alongside its last
-caller, _classify_direct_reply.
+Every mutator's WHERE clause enforces the 15-minute window, so a write
+arriving after the window closed is a silent no-op rather than skewing a
+message's numbers with late noise. Reads (used by the hourly rollup in
+feedback_metrics.py) are unrestricted.
 """
 
 from src.store import db as database
@@ -98,21 +93,6 @@ async def add_reply(*, chat_id: int, message_id: int) -> None:
             WHERE chat_id = $1 AND message_id = $2
               AND now() <= sent_at + {FEEDBACK_WINDOW_SQL}
             """,
-            chat_id, message_id,
-        )
-
-
-async def add_correction(*, chat_id: int, message_id: int) -> None:
-    """Credit a classifier-confirmed correction.
-
-    No window guard: the reply itself arrived inside the window (add_reply
-    already required that), but the background classifier that labels it
-    CORRECTION may finish after the window closes.
-    """
-    async with database.acquire() as conn:
-        await conn.execute(
-            "UPDATE bot_message_feedback SET corrections = corrections + 1 "
-            "WHERE chat_id = $1 AND message_id = $2",
             chat_id, message_id,
         )
 
