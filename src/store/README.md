@@ -157,10 +157,14 @@ bot_llm_log (
 )
 INDEX idx_bot_llm_log_created ON (created_at)
 
--- One row per bot message of any source — reaction/reply/correction counts
--- gathered only within the first 15 minutes after sending (every mutator's
--- WHERE clause enforces the window, except add_correction: the classifier
--- may finish after the window closes but the reply itself arrived in time).
+-- One row per bot message of any source — which reaction emoji landed, and
+-- whether any feedback arrived at all, within the first 15 minutes after
+-- sending (every mutator's WHERE clause enforces that window). Per-reply
+-- detail is not here: it lives one row per reply in bot_reply_labels below.
+-- v5_0004 dropped the four counters this table used to carry (reactions,
+-- replies, corrections, thread_depth) — each was read by exactly one of the
+-- eight bot_feedback_metrics columns dropped in the same migration, so after
+-- that the bot would have written four numbers nothing could read.
 -- See src/feedback/README.md. Retention: 60 days.
 bot_message_feedback (
     chat_id           BIGINT      NOT NULL,
@@ -169,38 +173,89 @@ bot_message_feedback (
     trigger           TEXT        NOT NULL DEFAULT '-',
     filter_verdict    TEXT        NOT NULL DEFAULT '-',
     sent_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    reactions         INTEGER     NOT NULL DEFAULT 0,   -- net current reactions
-    emojis            JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- {"🤡": 1, "😂": 2}
-    replies           INTEGER     NOT NULL DEFAULT 0,
-    corrections       INTEGER     NOT NULL DEFAULT 0,
-    thread_depth      INTEGER     NOT NULL DEFAULT 0,
-    first_feedback_at TIMESTAMPTZ,
+    emojis            JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- {"🤡": 1, "😂": 2}; feeds the two emoji rates
+    first_feedback_at TIMESTAMPTZ,            -- load-bearing: close_expired_windows derives `ignored` from it
     ignored           BOOLEAN,                -- NULL while the 15-minute window is still open
     PRIMARY KEY (chat_id, message_id)
 )
 INDEX idx_bot_message_feedback_sent ON (sent_at)
 
+-- One row per reply to a bot message, carrying how that reply was received.
+-- Written by track_reply (src/feedback/replies.py) with reaction = NULL, then
+-- labelled offline by reply_labels_job (src/jobs/reply_labels.py) every 15
+-- minutes. Exactly one row per reply, attributed to its nearest bot ancestor,
+-- even when the reply chain passes through several bot messages.
+--
+-- reaction IS NULL means not yet labelled, and the partial index on that is
+-- the job's work queue and its only read. Emoji reactions are NOT rows here:
+-- they have no message and are aggregated straight from
+-- bot_message_feedback.emojis in the rollup. Retention: 60 days.
+bot_reply_labels (
+    chat_id          BIGINT      NOT NULL,
+    reply_message_id BIGINT      NOT NULL,   -- the member's reply
+    bot_message_id   BIGINT      NOT NULL,   -- nearest bot ancestor in the chain
+    depth            INTEGER     NOT NULL,   -- hop distance from the reply to that ancestor
+    media_type       TEXT        NOT NULL,   -- as unified_messages stores it; non-"text" resolves to MEDIA by rule
+    reaction         TEXT,                   -- POSITIVE | NEGATIVE | NEUTRAL | UNCLEAR | MEDIA | SKIPPED; NULL = unlabelled
+    cause            TEXT,                   -- PERSONA | INVENTED_LIFE | FACTUAL | TONE | IRRELEVANT | UNCLEAR
+                                             -- only on a NEGATIVE text reply; stored and never aggregated
+    labelled_by      TEXT,                   -- "model" | "media_rule" | "empty_text" | "excluded_trigger" | "unlabelled" | "human"
+    attempts         INTEGER     NOT NULL DEFAULT 0,  -- model attempts spent; capped at MAX_ATTEMPTS = 3
+    labelled_at      TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (chat_id, reply_message_id)
+)
+INDEX idx_bot_reply_labels_pending     ON (created_at) WHERE reaction IS NULL  -- the work queue
+INDEX idx_bot_reply_labels_created     ON (created_at)                         -- retention sweep
+INDEX idx_bot_reply_labels_bot_message ON (chat_id, bot_message_id) INCLUDE (reaction, media_type)
+                                       -- v5_0005: makes the rollup's five EXISTS subqueries index-only
+
 -- Hourly rollup of bot_message_feedback, written by feedback_metrics_job
 -- (src/jobs/feedback.py). The only feedback table dashboards should query —
 -- counts sit next to their rates so a daily/weekly figure is
 -- SUM(count) / SUM(messages), never an average of hourly rates.
+--
+-- v5_0004 dropped eight columns outright (corrected, correction_rate, reacted,
+-- reaction_rate, replied, reply_rate, avg_thread_depth,
+-- median_first_feedback_s) and added the fourteen below. The drop destroyed
+-- the history in those eight — they do not exist and are not NULL. "Any
+-- reaction" and "any reply" stopped being questions anyone reads once the
+-- signal was split by sentiment; the last two were off-subject. messages,
+-- ignored and ignore_rate stayed, because ignore_rate is one of the seven
+-- reported metrics and is computed from feedback.ignored.
+--
+-- The seven rates share one denominator (messages) so they can be read side by
+-- side, and they are deliberately not mutually exclusive: one bot message can
+-- draw a 👍 and an angry reply. Read them split by trigger — see
+-- src/feedback/README.md — and never without unlabelled_rate beside them.
+-- Rows on trigger = 'social_link' are not written at all (excluded from
+-- measurement), so that trigger has no buckets rather than zero-filled ones.
 -- Retention: 365 days.
 bot_feedback_metrics (
     bucket_start             TIMESTAMPTZ NOT NULL,  -- date_trunc('hour', sent_at)
     chat_id                  BIGINT      NOT NULL,
     source                   TEXT        NOT NULL,
     trigger                  TEXT        NOT NULL,
-    messages                 INTEGER     NOT NULL,
+    messages                 INTEGER     NOT NULL,  -- the shared denominator
     ignored                  INTEGER     NOT NULL,
-    corrected                INTEGER     NOT NULL,
-    reacted                  INTEGER     NOT NULL,
-    replied                  INTEGER     NOT NULL,
     ignore_rate              REAL        NOT NULL,
-    correction_rate          REAL        NOT NULL,
-    reaction_rate            REAL        NOT NULL,
-    reply_rate               REAL        NOT NULL,
-    avg_thread_depth         REAL        NOT NULL,
-    median_first_feedback_s  REAL,
+    -- counts, nullable with no default: buckets written before v5_0004 have
+    -- no honest value for them
+    media_responded          INTEGER,               -- >=1 non-text reply
+    positive_emoji           INTEGER,               -- >=1 reaction in ❤👍😂🔥💯😅😁
+    negative_emoji           INTEGER,               -- >=1 reaction outside that set
+    positive_responded       INTEGER,               -- >=1 text reply labelled POSITIVE
+    negative_responded       INTEGER,               -- >=1 text reply labelled NEGATIVE
+    neutral_responded        INTEGER,               -- >=1 text reply labelled NEUTRAL
+    unlabelled               INTEGER,               -- >=1 text reply still NULL or UNCLEAR
+    -- rates, each the count above over `messages`
+    media_response_rate      REAL,
+    positive_emoji_rate      REAL,
+    negative_emoji_rate      REAL,
+    positive_response_rate   REAL,
+    negative_response_rate   REAL,
+    neutral_response_rate    REAL,
+    unlabelled_rate          REAL,                  -- the error bar on the three response rates
     computed_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (bucket_start, chat_id, source, trigger)
 )
@@ -233,6 +288,7 @@ sticker_descriptions.py get_description / save_description — permanent vision-
 embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[float] (384-dim)
 llm_system_prompts.py hash_prompt (pure sha256), ensure (upsert, ON CONFLICT DO NOTHING), cleanup_unreferenced
 llm_log.py           insert_call (one response-LLM call per bot message), cleanup_old (60-day retention, RETENTION_DAYS)
-message_feedback.py  register, add_reaction / remove_reaction, add_reply, add_correction (no window guard), close_expired_windows, cleanup_old (60-day retention, RETENTION_DAYS)
-feedback_metrics.py  recompute_recent_buckets (hourly rollup, idempotent ON CONFLICT DO UPDATE), cleanup_old (365-day retention, RETENTION_DAYS)
+message_feedback.py  register, add_reaction / remove_reaction, add_reply (no depth argument — per-reply detail is in reply_labels.py), close_expired_windows, cleanup_old (60-day retention, RETENTION_DAYS). add_correction is gone with correction tracking (v5_0004)
+reply_labels.py      enqueue (idempotent ON CONFLICT DO NOTHING), fetch_pending (oldest-first work queue, joins the reply text, the bot message and its source/trigger so the job needs no per-row query; skips rows at MAX_ATTEMPTS), write_label (guarded by `reaction IS NULL`, so a human label is never overwritten), bump_attempts, cleanup_old (60-day retention, RETENTION_DAYS). MAX_ATTEMPTS = 3
+feedback_metrics.py  recompute_recent_buckets (hourly rollup, idempotent ON CONFLICT DO UPDATE; the positive emoji set is bound as a parameter from src/feedback/sentiment.py rather than inlined), cleanup_old (365-day retention, RETENTION_DAYS)
 ```
