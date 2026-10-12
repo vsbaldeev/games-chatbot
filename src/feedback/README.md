@@ -66,8 +66,14 @@ reply_labeller.py  — build_batch_payload/parse_label_batch/label_batch: one
 - The seven rates say that members reacted, not why. The cause is stored on
   bot_reply_labels and aggregated by nothing; querying it by hand is the only
   route to attribution, and it has no validated accuracy.
-- Correction tracking is gone. corrected and correction_rate hold history and
-  are NULL for every bucket after v5_0004.
+- Correction tracking is gone, and this is the one irreversible part of the
+  change. v5_0004 did not stop writing `corrected` and `correction_rate` — it
+  DROP COLUMNed them. They do not exist, they are not NULL, and the roughly
+  three and a half weeks of history they held (bot_feedback_metrics only
+  started filling on 2026-09-17) was destroyed, not preserved. Migrations here
+  are forward-only, so there is no route back to it. The same migration dropped
+  six more metric columns and four per-message counters the same way — see
+  src/store/README.md.
 - FACTUAL as a cause records that a member thinks the bot got something
   wrong, not a verified check. Factual groundedness is deliberately not
   measured.
