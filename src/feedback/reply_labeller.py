@@ -10,6 +10,16 @@ pending and gets retried; a batch-level problem (duplicate ids, non-array
 JSON) drops everything, for the same reason. Nothing is ever guessed — a
 wrong label is worse than a missing one, because a missing one is visible in
 the unlabelled count.
+
+Two failure modes, and the caller must be able to tell them apart. A model
+that answered but got an item wrong is reported by that item's absence from
+the returned dict: the row's own content is what the model choked on, so the
+row has earned a retry attempt. A call that never reached a model at all —
+no API key, a transport error, every fallback leg down — raises
+LabellingCallFailed instead, because an OpenRouter outage says nothing about
+any particular row and must not spend its attempts. Without that split a
+45-minute outage (three runs at the 15-minute schedule) would retire every
+queued reply as UNCLEAR, backfill included.
 """
 
 import json
@@ -35,6 +45,16 @@ CAUSES: frozenset[str] = frozenset({
 CAUSE_BEARING_REACTION = "NEGATIVE"
 
 ITEM_KEYS = frozenset({"id", "reaction", "cause"})
+
+
+class LabellingCallFailed(Exception):
+    """The labelling call never produced a response to parse.
+
+    Raised for a global failure — a missing OPENROUTER_API_KEY, a transport
+    error, every fallback leg refusing — as opposed to a response that came
+    back and was wrong about some item. The job treats the two differently:
+    only the second kind costs a row one of its three attempts.
+    """
 
 
 def build_batch_payload(rows: list[dict]) -> str:
@@ -151,16 +171,25 @@ def make_labeller_llm(max_tokens: int) -> ChatOpenAI:
 async def label_batch(rows: list[dict]) -> dict[int, tuple[str, str | None]]:
     """Label one batch of pending rows.
 
+    Fails closed either way — no label is ever guessed — but the two ways are
+    distinguishable, because only one of them is the row's own fault.
+
     Returns:
-        {reply_message_id: (reaction, cause)} for every row that labelled
-        cleanly. Rows absent from the result stay pending. An empty dict on
-        any failure — fails closed, same stance as the classifier this
-        replaces.
+        {reply_message_id: (reaction, cause)} for every row the model
+        labelled cleanly. A row absent from the result is one the model
+        answered about wrongly or not at all, which is what earns it an
+        attempt.
+
+    Raises:
+        LabellingCallFailed: The call never produced a response — no API key,
+            a transport error, or every fallback leg failing. Nothing was
+            learned about any row in the batch, so the caller must leave
+            their attempts alone.
     """
-    if not rows or not config.OPENROUTER_API_KEY:
-        if not config.OPENROUTER_API_KEY:
-            logger.warning("Reply labelling: OPENROUTER_API_KEY unset, skipping")
+    if not rows:
         return {}
+    if not config.OPENROUTER_API_KEY:
+        raise LabellingCallFailed("OPENROUTER_API_KEY unset")
     expected_ids = {row["reply_message_id"] for row in rows}
     try:
         llm = make_labeller_llm(len(rows) * config.REPLY_LABEL_MAX_TOKENS_PER_ITEM)
@@ -169,6 +198,5 @@ async def label_batch(rows: list[dict]) -> dict[int, tuple[str, str | None]]:
             HumanMessage(content=build_batch_payload(rows)),
         ])
     except Exception as error:
-        logger.warning("Reply labelling call failed, leaving rows pending: %s", error)
-        return {}
+        raise LabellingCallFailed(str(error) or type(error).__name__) from error
     return parse_label_batch(response.content or "", expected_ids)

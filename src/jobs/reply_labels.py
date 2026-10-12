@@ -17,10 +17,19 @@ excluded from every rate.
 Nothing is ever left permanently pending. A model failure bumps attempts and
 retries next run; at the cap the row is written UNCLEAR so it leaves the queue
 and is counted in unlabelled rather than quietly accumulating.
+
+"A model failure" means the model answered and got this row wrong. A call that
+never reached a model — OPENROUTER_API_KEY unset, OpenRouter unreachable, both
+legs down — is a condition of the run, not of any row, and spends no attempts
+at all. The missing key is checked once per run before any batch is sent, and
+a failing call (LabellingCallFailed) ends the model stage with every remaining
+row untouched. Without that, a 45-minute outage — three runs at this interval
+— would retire the whole queue as UNCLEAR, and write_label's `reaction IS NULL`
+guard makes that unrecoverable without hand-written SQL.
 """
 
 from src import config, log
-from src.feedback.reply_labeller import label_batch
+from src.feedback.reply_labeller import LabellingCallFailed, label_batch
 from src.store import reply_labels
 
 logger = log.get_logger(__name__)
@@ -110,12 +119,26 @@ async def handle_unlabelled(rows: list[dict]) -> int:
 
 
 async def run_model_stage(rows: list[dict]) -> tuple[int, int]:
-    """Label text rows in batches. Returns (labelled, retired unlabelled)."""
+    """Label text rows in batches. Returns (labelled, retired unlabelled).
+
+    A LabellingCallFailed ends the stage rather than moving on to the next
+    batch: the call never reached a model, so no row in this batch learned
+    anything and its attempts stay as they were, and the remaining batches
+    would almost certainly fail the same way within the same run. They are
+    left pending with attempts untouched for the next run to pick up.
+    """
     labelled = 0
     retired = 0
     for start in range(0, len(rows), config.REPLY_LABEL_BATCH_SIZE):
         batch = rows[start:start + config.REPLY_LABEL_BATCH_SIZE]
-        labels = await label_batch(batch)
+        try:
+            labels = await label_batch(batch)
+        except LabellingCallFailed as error:
+            logger.warning(
+                "Reply labelling: call failed, %d rows stay pending with attempts "
+                "untouched: %s", len(rows) - start, error,
+            )
+            return labelled, retired
         missed: list[dict] = []
         for row in batch:
             label = labels.get(row["reply_message_id"])
@@ -142,6 +165,15 @@ async def reply_labels_job(context) -> None:
     if not rows:
         return
     free, text = split_rows(rows)
+    if text and not config.OPENROUTER_API_KEY:
+        # Checked once here rather than per batch: a missing key is a property
+        # of the deployment, and letting each batch discover it separately
+        # would charge every text row an attempt for it.
+        logger.warning(
+            "Reply labelling: OPENROUTER_API_KEY unset — skipping the model stage, "
+            "%d text rows stay pending with attempts untouched", len(text),
+        )
+        text = []
     try:
         by_rule = await run_free_stage(free)
         by_model, retired = await run_model_stage(text)
