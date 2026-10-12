@@ -27,6 +27,12 @@ from src.store import reply_labels
 
 logger = log.get_logger(__name__)
 
+# unified_messages.created_at is a Unix epoch DOUBLE PRECISION (see
+# alembic/versions/v3/0001_initial_schema.py and unified_messages.cleanup_old,
+# which compares it against time.time() - days * 86400), not a TIMESTAMPTZ like
+# bot_reply_labels.created_at. The cutoff is therefore converted to an epoch
+# float with EXTRACT(EPOCH FROM ...); comparing the column directly against a
+# timestamptz expression has no Postgres operator and errors on every run.
 HISTORICAL_REPLIES_SQL = """
 SELECT
     reply.chat_id,
@@ -42,7 +48,7 @@ LEFT JOIN bot_reply_labels AS existing
  AND existing.reply_message_id = reply.message_id
 WHERE reply.reply_to_msg_id IS NOT NULL
   AND existing.reply_message_id IS NULL
-  AND reply.created_at >= now() - make_interval(days => $1)
+  AND reply.created_at >= EXTRACT(EPOCH FROM (now() - make_interval(days => $1)))::double precision
 ORDER BY reply.created_at
 """
 
