@@ -24,7 +24,7 @@ class TestTrackReply:
              patch(ADD_REPLY, AsyncMock()) as add_reply, \
              patch(CLASSIFY, AsyncMock(return_value=False)):
             await track_reply(chat_id=1000, message_id=2, bot_id=BOT_ID)
-        add_reply.assert_awaited_once_with(chat_id=1000, message_id=1, depth=1)
+        add_reply.assert_awaited_once_with(chat_id=1000, message_id=1)
 
     async def test_reply_two_hops_below_bot_message_credited_at_depth_two(self):
         chain = [
@@ -35,7 +35,7 @@ class TestTrackReply:
         with patch(GET_CHAIN, AsyncMock(return_value=chain)), \
              patch(ADD_REPLY, AsyncMock()) as add_reply:
             await track_reply(chat_id=1000, message_id=3, bot_id=BOT_ID)
-        add_reply.assert_awaited_once_with(chat_id=1000, message_id=1, depth=2)
+        add_reply.assert_awaited_once_with(chat_id=1000, message_id=1)
 
     async def test_two_bot_ancestors_both_credited(self):
         chain = [
@@ -49,8 +49,8 @@ class TestTrackReply:
              patch(CLASSIFY, AsyncMock(return_value=False)):
             await track_reply(chat_id=1000, message_id=4, bot_id=BOT_ID)
         assert add_reply.await_args_list == [
-            ((), {"chat_id": 1000, "message_id": 3, "depth": 1}),
-            ((), {"chat_id": 1000, "message_id": 1, "depth": 3}),
+            ((), {"chat_id": 1000, "message_id": 3}),
+            ((), {"chat_id": 1000, "message_id": 1}),
         ]
 
     async def test_reply_with_no_bot_ancestor_credits_nothing(self):

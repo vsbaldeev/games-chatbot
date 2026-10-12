@@ -47,7 +47,7 @@ async def track_reply(*, chat_id: int, message_id: int, bot_id: int) -> None:
         for depth, ancestor in enumerate(reversed(ancestors), start=1):
             if ancestor["user_id"] != bot_id:
                 continue
-            await message_feedback.add_reply(chat_id=chat_id, message_id=ancestor["message_id"], depth=depth)
+            await message_feedback.add_reply(chat_id=chat_id, message_id=ancestor["message_id"])
             if depth == 1:
                 await _classify_direct_reply(chat_id=chat_id, bot_message=ancestor, reply=reply)
     except Exception as err:

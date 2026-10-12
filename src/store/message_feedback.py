@@ -1,11 +1,16 @@
-"""Per-message feedback facts: reactions, replies, corrections seen within
-the first 15 minutes after a bot message is sent.
+"""Per-message feedback facts: which reaction emoji landed, and whether any
+feedback arrived at all, within the first 15 minutes after a bot message is
+sent. Per-reply detail lives in bot_reply_labels, one row per reply.
 
 Every mutator's WHERE clause enforces the 15-minute window (except
 add_correction — see its docstring), so a write arriving after the window
 closed is a silent no-op rather than skewing a message's numbers with late
 noise. Reads (used by the hourly rollup in feedback_metrics.py) are
 unrestricted.
+
+add_correction is deliberately left untouched this pass even though its
+corrections column is gone: it's removed in Task 6 alongside its last
+caller, _classify_direct_reply.
 """
 
 from src.store import db as database
@@ -47,8 +52,7 @@ async def add_reaction(*, chat_id: int, message_id: int, emoji: str) -> None:
         await conn.execute(
             f"""
             UPDATE bot_message_feedback
-            SET reactions = reactions + 1,
-                emojis = jsonb_set(emojis, ARRAY[$3], to_jsonb(COALESCE((emojis->>$3)::int, 0) + 1)),
+            SET emojis = jsonb_set(emojis, ARRAY[$3], to_jsonb(COALESCE((emojis->>$3)::int, 0) + 1)),
                 first_feedback_at = COALESCE(first_feedback_at, now())
             WHERE chat_id = $1 AND message_id = $2
               AND now() <= sent_at + {FEEDBACK_WINDOW_SQL}
@@ -67,8 +71,7 @@ async def remove_reaction(*, chat_id: int, message_id: int, emoji: str) -> None:
         await conn.execute(
             f"""
             UPDATE bot_message_feedback
-            SET reactions = GREATEST(reactions - 1, 0),
-                emojis = CASE
+            SET emojis = CASE
                     WHEN COALESCE((emojis->>$3)::int, 0) <= 1 THEN emojis - $3
                     ELSE jsonb_set(emojis, ARRAY[$3], to_jsonb((emojis->>$3)::int - 1))
                 END
@@ -79,22 +82,23 @@ async def remove_reaction(*, chat_id: int, message_id: int, emoji: str) -> None:
         )
 
 
-async def add_reply(*, chat_id: int, message_id: int, depth: int) -> None:
-    """Credit a reply landing in a bot message's thread, at hop depth >= 1.
+async def add_reply(*, chat_id: int, message_id: int) -> None:
+    """Mark that a reply landed in a bot message's thread.
 
-    thread_depth tracks the deepest hop seen so far, not the latest.
+    No counter any more: the replies themselves live in bot_reply_labels, one
+    row each, which is both the count and the detail. What this still does is
+    stamp first_feedback_at, because close_expired_windows derives `ignored`
+    from it and ignore_rate depends on that.
     """
     async with database.acquire() as conn:
         await conn.execute(
             f"""
             UPDATE bot_message_feedback
-            SET replies = replies + 1,
-                thread_depth = GREATEST(thread_depth, $3),
-                first_feedback_at = COALESCE(first_feedback_at, now())
+            SET first_feedback_at = COALESCE(first_feedback_at, now())
             WHERE chat_id = $1 AND message_id = $2
               AND now() <= sent_at + {FEEDBACK_WINDOW_SQL}
             """,
-            chat_id, message_id, depth,
+            chat_id, message_id,
         )
 
 
