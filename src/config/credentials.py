@@ -56,7 +56,3 @@ OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 # YouTube metadata). Empty disables all three — links then fall through to
 # normal routing.
 DOWNLOAD_SERVICE_URL: str = os.getenv("DOWNLOAD_SERVICE_URL", "")
-
-# Local path of the Silero TTS model file. Downloaded on first start when
-# missing; the Docker image pre-bakes it (see Dockerfile).
-TTS_MODEL_PATH: str = os.getenv("TTS_MODEL_PATH", ".cache/silero/v5_ru.pt")

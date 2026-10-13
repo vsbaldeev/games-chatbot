@@ -25,7 +25,6 @@ from src.events.messages import (
 from src.events.sending import edit_and_store, send_and_store
 from tests.builders import make_incoming, make_state
 
-REPLY_VOICE_PATCH_TARGET = "src.events.messages.try_send_voice_reply"
 TRANSCRIBE_VOICE_PATCH_TARGET = "src.events.messages.transcribe_voice"
 UPDATE_CONTENT_PATCH_TARGET = "src.events.messages.unified_messages.update_content"
 EXTRACT_AND_SAVE_PATCH_TARGET = "src.events.messages.extract_and_save"
@@ -107,11 +106,21 @@ class TestLinkTriggerDelegatesToLinkRepost:
         incoming = make_incoming(media_type="text")
         state = make_state(incoming, response_trigger="social_link")
         deliver = AsyncMock()
-        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver), \
-             patch(REPLY_VOICE_PATCH_TARGET, new=AsyncMock(return_value=None)):
+        with patch(LINK_DELIVER_PATCH_TARGET, new=deliver):
             await deliver_response(state, msg, "Про котиков.")
         deliver.assert_not_awaited()
         msg.reply_text.assert_awaited_once_with("Про котиков.")
+
+
+class TestVoiceTriggerGetsATextReply:
+    async def test_voice_message_is_answered_with_text(self):
+        msg = make_msg()
+        incoming = make_incoming(media_type="voice")
+        state = make_state(incoming, response_trigger="explicit")
+        sent_id, anchor_id, sent_media_type = await deliver_response(state, msg, "Привет.")
+        msg.reply_text.assert_awaited_once_with("Привет.")
+        msg.reply_voice.assert_not_called()
+        assert sent_media_type == "text"
 
 
 class TestPassiveVoiceExtractPersistsTranscript:
@@ -180,8 +189,7 @@ class TestDeliverAndRecordPersistsLinkMaterial:
         msg = make_msg()
         incoming = make_incoming(media_type="text")
         state = make_state(incoming, response_trigger="explicit")
-        with patch(REPLY_VOICE_PATCH_TARGET, new=AsyncMock(return_value=None)), \
-             patch(INSERT_PATCH_TARGET, new=AsyncMock()) as mock_insert:
+        with patch(INSERT_PATCH_TARGET, new=AsyncMock()) as mock_insert:
             await deliver_and_record(state, msg, bot_id=42, response_text="Ответ.")
         assert mock_insert.await_args.kwargs["link_material"] is None
 

@@ -14,7 +14,6 @@ from src.app.jobs import (
     RolesJobManager,
 )
 from src.store import db as database
-from src.tts import speech_service
 
 log.setup()
 logger = log.get_logger(__name__)
@@ -38,7 +37,6 @@ async def __on_startup(application: Application) -> None:
     await database.init()
     await worker_agent.init()
     await response_agent.init()
-    await speech_service.init()
     logger.info("Bot started, all agents and jobs initialized")
 
 

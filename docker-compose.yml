@@ -77,9 +77,10 @@ services:
       # download service is down — everything else works.
       download-service:
         condition: service_started
-    # 2g: CPU torch + the resident Silero TTS model do not fit in the old
-    # 800m cap. Budget on the 8GB host: OS+Docker ~1.2g, postgres 1g,
-    # pot-provider 256m, download-service 512m, bot 2g.
+    # 2g was sized for CPU torch plus the resident Silero TTS model, both
+    # since removed; the cap is left as is until real usage is measured.
+    # Budget on the 8GB host: OS+Docker ~1.2g, postgres 1g, pot-provider
+    # 256m, download-service 512m, bot 2g.
     mem_limit: 2g
     memswap_limit: 2g
     # Bumped 2026-08-20 for the Tier 1.2 DEBUG capture week (see

@@ -219,13 +219,3 @@ MEME_JUDGE_ATTEMPTS = 3
 # boundary truncation in src/events/link_repost.py.
 CAPTION_COMPRESS_MODEL = "openai/gpt-oss-120b"
 CAPTION_COMPRESS_MAX_TOKENS = 1024
-
-# Text-to-speech — Silero v5 Russian, runs locally on CPU (no API quota).
-# Chosen for automatic stress placement and homograph resolution: wrongly
-# stressed words are the loudest tell of synthetic Russian speech.
-TTS_MODEL_URL = "https://models.silero.ai/models/tts/ru/v5_ru.pt"
-TTS_SPEAKER = "aidar"  # male; alternative male voice: "eugene"
-TTS_SAMPLE_RATE = 48000  # Silero supports 8000/24000/48000; Opus is native at 48k
-TTS_MAX_CHARS = 800  # Silero rejects ~1000+ chars per call; longer replies stay text
-TTS_TORCH_THREADS = 4  # Silero plateaus past 4 threads; leaves CPU for the event loop
-TTS_TIMEOUT_SECONDS = 30

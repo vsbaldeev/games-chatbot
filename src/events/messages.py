@@ -29,7 +29,6 @@ from src.pipeline.ingester import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES, RESPONSE_PROMPT
 from src.events.sending import edit_and_store, send_and_store
-from src.events.voice_reply import try_send_voice_reply
 from src.group_profile.profile import run_group_profile
 from src.memes.sender import send_meme
 from src.pipeline.router import is_explicitly_addressed
@@ -57,9 +56,6 @@ RATE_LIMIT_NOTICE = (
 GENERIC_FAILURE_NOTICE = (
     "Что-то сломалось внутри бота. Попробуй позже."
 )
-
-# Incoming media types answered in kind with a voice note.
-VOICE_REPLY_TRIGGER_MEDIA_TYPES = ("voice", "video_note")
 
 
 def is_night_message(update: Update) -> bool:
@@ -233,9 +229,7 @@ def build_pipeline_state(
 async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int, int | None, str]:
     """Send the pipeline response to Telegram.
 
-    Normal responses reply to the triggering message; when the trigger was a
-    voice message or video note the reply goes out in kind as a voice note,
-    degrading to text on any synthesis failure. A link trigger (social link
+    Normal responses reply to the triggering message as text. A link trigger (social link
     or YouTube Short) whose fetch succeeded is delegated to
     :mod:`src.events.link_repost`, which posts video + summary as one message
     and deletes the original when it was a bare link.
@@ -247,7 +241,7 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
 
     Returns:
         Tuple of the sent message id, the message id the response is anchored
-        to, and the sent media type (``"text"``, ``"voice"``, or ``"video"``).
+        to, and the sent media type (``"text"`` or ``"video"``).
         The anchor id is ``None`` specifically for an un-anchored link
         repost — sent without a reply-to because the original message is
         about to be deleted.
@@ -271,10 +265,6 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
             is_bare=bool(final_state.get("link_message_is_bare")),
             cap_remaining=final_state.get("social_link_cap_remaining"),
         )
-    if final_state["incoming"]["media_type"] in VOICE_REPLY_TRIGGER_MEDIA_TYPES:
-        voice_message = await try_send_voice_reply(msg, clean)
-        if voice_message is not None:
-            return voice_message.message_id, msg.message_id, "voice"
     sent = await msg.reply_text(clean)
     return sent.message_id, msg.message_id, "text"
 
