@@ -508,7 +508,7 @@ class TestBuildResponseInputVoiceConfidence:
 
 class TestBuildDirectiveLinesInsultReplyingToBot:
     def test_unprovoked_insult_gets_the_comeback(self):
-        lines = build_directive_lines(is_bot_insult=True, wind_down=False, photo_directive=None)
+        lines = build_directive_lines(is_bot_insult=True, wind_down=False)
         joined = "\n".join(lines)
         assert "дерзкой" in joined
         assert "надоел" not in joined
@@ -519,13 +519,13 @@ class TestBuildDirectiveLinesInsultReplyingToBot:
         engagement tier has already dropped — both cases filter_node treats
         the same way: a mirrored counter-insult would just fuel the loop, so
         only the softer wind-down line should reach the model, never both."""
-        lines = build_directive_lines(is_bot_insult=True, wind_down=True, photo_directive=None)
+        lines = build_directive_lines(is_bot_insult=True, wind_down=True)
         joined = "\n".join(lines)
         assert "дерзкой" not in joined
         assert "надоел" in joined
 
     def test_plain_wind_down_unaffected(self):
-        lines = build_directive_lines(is_bot_insult=False, wind_down=True, photo_directive=None)
+        lines = build_directive_lines(is_bot_insult=False, wind_down=True)
         joined = "\n".join(lines)
         assert "надоел" in joined
         assert "дерзкой" not in joined
@@ -589,7 +589,7 @@ class TestResolveGroupProfileDirective:
 class TestBuildDirectiveLinesMemeRefusal:
     def test_refusal_line_forbids_inventing_a_meme(self):
         lines = build_directive_lines(
-            is_bot_insult=False, wind_down=True, photo_directive=None,
+            is_bot_insult=False, wind_down=True,
             meme_directive="refused",
         )
         joined = "\n".join(lines)
@@ -598,7 +598,7 @@ class TestBuildDirectiveLinesMemeRefusal:
 
     def test_no_meme_directive_adds_no_meme_line(self):
         lines = build_directive_lines(
-            is_bot_insult=False, wind_down=False, photo_directive=None, meme_directive=None,
+            is_bot_insult=False, wind_down=False, meme_directive=None,
         )
         assert "мем" not in "\n".join(lines)
 
@@ -606,7 +606,7 @@ class TestBuildDirectiveLinesMemeRefusal:
 class TestBuildDirectiveLinesGroupProfileRefusal:
     def test_refusal_line_forbids_inventing_verdicts(self):
         lines = build_directive_lines(
-            is_bot_insult=False, wind_down=True, photo_directive=None,
+            is_bot_insult=False, wind_down=True,
             group_profile_directive="refused",
         )
         joined = "\n".join(lines)
@@ -615,7 +615,7 @@ class TestBuildDirectiveLinesGroupProfileRefusal:
 
     def test_no_group_profile_directive_adds_no_group_profile_line(self):
         lines = build_directive_lines(
-            is_bot_insult=False, wind_down=False, photo_directive=None,
+            is_bot_insult=False, wind_down=False,
             group_profile_directive=None,
         )
         assert "вердикт" not in "\n".join(lines)

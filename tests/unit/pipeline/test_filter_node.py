@@ -327,9 +327,9 @@ class TestClassify:
         [
             ("MEANINGFUL", "MEANINGFUL"),
             ("MEANINGLESS", "MEANINGLESS"),
-            ("PHOTO_REQUEST", "PHOTO_REQUEST"),
+            ("BANTER", "BANTER"),
         ],
-        ids=["meaningful", "meaningless", "photo-request"],
+        ids=["meaningful", "meaningless", "banter"],
     )
     async def test_other_labels_are_not_swallowed_by_the_meme_check(self, llm_response, expected):
         """The MEME substring test must not capture the pre-existing labels."""

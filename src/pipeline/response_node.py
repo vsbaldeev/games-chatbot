@@ -18,7 +18,6 @@ from src.config.prompts import (
     WORKER_DATA_UNVERIFIED_HEADER,
     WORKER_DATA_VERIFIED_HEADER,
 )
-from src.life import calendar_ru
 from src.pipeline.state import BotState
 from src.store import thread_history, unified_messages
 
@@ -491,7 +490,7 @@ def build_recent_history_lines(
 
 
 def build_directive_lines(
-    is_bot_insult: bool, wind_down: bool, photo_directive: str | None,
+    is_bot_insult: bool, wind_down: bool,
     meme_directive: str | None = None, group_profile_directive: str | None = None,
 ) -> list[str]:
     """Assemble the behavioural directive blocks appended before the trigger line.
@@ -509,10 +508,6 @@ def build_directive_lines(
             counter-insult would fuel a loop the gate is already trying to
             end, so only this softer line fires and the aggressive comeback
             is suppressed.
-        photo_directive: Photo-request framing — ``"ack"`` (generation is
-            being launched, promise the photo), ``"busy"`` (a selfie is
-            already rendering, no second one), ``"refused"`` (wound-down user
-            asked for a photo, refuse it explicitly) or None.
         meme_directive: Meme-request framing — ``"refused"`` (wound-down user
             asked for a meme) or None. There is no ``"ack"`` counterpart: an
             accepted meme request answers with the image and no text, so the
@@ -536,36 +531,19 @@ def build_directive_lines(
     if wind_down:
         lines.append(
             "[Тебе уже надоел этот разговор. Ответь очень коротко — одной фразой, "
-            "в своём характере: дай понять, что сворачиваешь болтовню (дела, "
-            "работа, некогда). Без встречных вопросов и без приглашений "
-            "продолжить.]\n"
-        )
-    if photo_directive == "ack":
-        lines.append(
-            "[Тебя просят прислать твоё фото. Ты уже пошёл фоткать — ответь одной "
-            "короткой фразой в своём духе, что сейчас сфоткаешь и скинешь. "
-            "Не описывай будущее фото и ничего про него не выдумывай.]\n"
-        )
-    elif photo_directive == "busy":
-        lines.append(
-            "[Ты уже фоткаешь по предыдущей просьбе. Скажи коротко, что уже этим "
-            "занят и фото скоро будет; второй раз фоткать не пойдёшь.]\n"
-        )
-    elif photo_directive == "refused":
-        lines.append(
-            "[Тебя просят прислать твоё фото, но фоткаться тебе лень и некогда. "
-            "Откажи прямо, в своём характере, без обещаний прислать позже.]\n"
+            "дай понять, что сворачиваешь болтовню. Без встречных вопросов и без "
+            "приглашений продолжить.]\n"
         )
     if meme_directive == "refused":
         lines.append(
             "[Тебя просят скинуть мем, но тебе сейчас не до этого. Откажи "
-            "коротко и в своём характере, без обещаний скинуть позже. "
+            "коротко, без обещаний скинуть позже. "
             "Не пересказывай и не выдумывай никаких мемов.]\n"
         )
     if group_profile_directive == "refused":
         lines.append(
             "[Тебя просят разобрать всех в чате по какой-то теме, но тебе "
-            "сейчас не до этого. Откажи коротко и в своём характере, без "
+            "сейчас не до этого. Откажи коротко, без "
             "обещаний сделать это позже. Не придумывай и не называй никаких "
             "ролей, оценок или вердиктов сам.]\n"
         )
@@ -583,7 +561,6 @@ def build_response_input(
     is_bot_insult: bool = False,
     wind_down: bool = False,
     worker_tools_used: bool = False,
-    photo_directive: str | None = None,
     meme_directive: str | None = None,
     group_profile_directive: str | None = None,
     voice_low_confidence: bool = False,
@@ -611,8 +588,6 @@ def build_response_input(
             context-derived frame.
         meme_directive: Meme-request framing passed to
             :func:`build_directive_lines` — ``"refused"`` or None.
-        photo_directive: Photo-request framing passed to
-            :func:`build_directive_lines`, or None.
         group_profile_directive: Group-profile-request framing passed to
             :func:`build_directive_lines` — ``"refused"`` or None.
         voice_low_confidence: True when the voice transcript's mean Whisper
@@ -646,7 +621,7 @@ def build_response_input(
         parts.append(f"{header}\n{worker_output}\n")
 
     parts += build_directive_lines(
-        is_bot_insult, wind_down, photo_directive, meme_directive, group_profile_directive
+        is_bot_insult, wind_down, meme_directive, group_profile_directive
     )
 
     parts.append(
@@ -656,24 +631,6 @@ def build_response_input(
         )
     )
     return "\n".join(parts)
-
-
-def resolve_photo_directive(state: BotState) -> str | None:
-    """Derive the photo-request directive from the filter's state flags.
-
-    Args:
-        state: Current pipeline state.
-
-    Returns:
-        ``"ack"`` for an accepted photo request, ``"busy"`` when a selfie was
-        already rendering, ``"refused"`` for a wound-down photo request, or
-        None when the message is not photo-related.
-    """
-    if state.get("photo_request"):
-        return "busy" if state.get("photo_in_flight") else "ack"
-    if state.get("wind_down") and state.get("filter_verdict") == "PHOTO_REQUEST":
-        return "refused"
-    return None
 
 
 def resolve_meme_directive(state: BotState) -> str | None:
@@ -856,7 +813,6 @@ class ResponseNode:
             is_bot_insult=bool(state.get("is_bot_insult")),
             wind_down=bool(state.get("wind_down")),
             worker_tools_used=bool(state.get("worker_tools_used")),
-            photo_directive=resolve_photo_directive(state),
             meme_directive=resolve_meme_directive(state),
             group_profile_directive=resolve_group_profile_directive(state),
             voice_low_confidence=bool(state.get("voice_low_confidence")),

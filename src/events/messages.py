@@ -31,7 +31,6 @@ from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES
 from src.events.sending import edit_and_store, send_and_store
 from src.events.voice_reply import try_send_voice_reply
 from src.group_profile.profile import run_group_profile
-from src.life import selfie
 from src.memes.sender import send_meme
 from src.pipeline.router import is_explicitly_addressed
 from src.store import llm_log, llm_system_prompts, message_feedback, unified_messages
@@ -404,27 +403,6 @@ async def _record_feedback(final_state, msg, sent_id: int) -> None:
         logger.warning("Failed to register feedback tracking for message %s: %s", sent_id, err)
 
 
-def launch_selfie_task(bot, chat_id: int, reply_to_msg_id: int, final_state: BotState) -> None:
-    """Fire-and-forget the background selfie generation for an accepted photo request.
-
-    Launched only after the in-character «ща сфоткаю» acknowledgement was
-    actually delivered, so a pipeline failure never leaves a photo without
-    its promise.
-
-    Args:
-        bot: Telegram Bot instance to send with.
-        chat_id: Chat the request came from.
-        reply_to_msg_id: The requesting message id the photo will reply to.
-        final_state: Final pipeline state after the graph run.
-    """
-    asyncio.create_task(selfie.deliver_selfie(
-        bot=bot,
-        chat_id=chat_id,
-        reply_to_msg_id=reply_to_msg_id,
-        request_text=final_state["incoming"]["raw_text"] or "",
-    ))
-
-
 async def deliver_meme(bot, chat_id: int, reply_to_msg_id: int) -> None:
     """Send a meme in answer to a request, or say honestly that there is none.
 
@@ -451,10 +429,9 @@ async def deliver_meme(bot, chat_id: int, reply_to_msg_id: int) -> None:
 def launch_meme_task(bot, chat_id: int, reply_to_msg_id: int) -> None:
     """Fire-and-forget the meme send for an accepted meme request.
 
-    Fire-and-forget like the selfie path, so the handler is not held open for
-    the download and up to three vision calls. The trade-off is the same one
-    the selfie path already makes: the canonical log line emits before the
-    meme actually lands.
+    Fire-and-forget, so the handler is not held open for the download and up
+    to three vision calls. The trade-off: the canonical log line emits before
+    the meme actually lands.
 
     Args:
         bot: Telegram Bot instance to send with.
@@ -502,10 +479,9 @@ async def deliver_group_profile(bot, chat_id: int, reply_to_msg_id: int, rubric:
 def launch_group_profile_task(bot, chat_id: int, reply_to_msg_id: int, rubric: str) -> None:
     """Fire-and-forget the group-profile generation for an accepted request.
 
-    Fire-and-forget like the meme and selfie paths, so the handler is not
-    held open for the per-member dossier gathering and the LLM call. Same
-    trade-off those paths already make: the canonical log line emits before
-    the profile message actually lands.
+    Fire-and-forget like the meme path, so the handler is not held open for
+    the per-member dossier gathering and the LLM call. Same trade-off: the
+    canonical log line emits before the profile message actually lands.
 
     Args:
         bot: Telegram Bot instance to send with.
@@ -605,9 +581,6 @@ async def run_pipeline(
         if response.strip():
             await deliver_and_record(final_state, msg, context.bot.id, response)
             action = "replied"
-            if final_state.get("photo_request") and not final_state.get("photo_in_flight"):
-                launch_selfie_task(context.bot, chat.id, msg.message_id, final_state)
-                action = "replied+photo"
             canonical.emit(final_state, action, time.monotonic() - started_at)
             return True
         # An accepted meme or group-profile request answers with media/a

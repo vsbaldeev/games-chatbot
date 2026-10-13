@@ -23,20 +23,15 @@ logger = log.get_logger(__name__)
 # Weight each classification charges against the attention budget. BOT_INSULT
 # stays low enough that two rapid insults both land in the full-reply tier:
 # the classifier has false positives, and one mislabel must not cost the user
-# their comeback. PHOTO_REQUEST is the heaviest signal: each accepted request
-# occupies the single shared imagegen worker for minutes, so 4.5 keeps a
-# fresh user's first request below BRUSH_OFF_THRESHOLD (full tier, photo
-# ships) while a rapid second one lands past it and is refused in character.
-# MEME_REQUEST costs an ordinary message: asking for a meme is a normal thing
-# to do, not a scarce favour, so ~7 land before wind-down. The accepted cost
-# is up to three vision calls per request against the shared daily budget —
-# raise this constant if bursts start starving photo_judge and memory
+# their comeback. MEME_REQUEST costs an ordinary message: asking for a meme is
+# a normal thing to do, not a scarce favour, so ~7 land before wind-down. The
+# accepted cost is up to three vision calls per request against the shared
+# daily budget — raise this constant if bursts start starving memory
 # extraction. GROUP_PROFILE_REQUEST costs one LLM call plus a store query per
-# chat member — real but not scarce like the single shared imagegen worker
-# PHOTO_REQUEST occupies, so it sits below that weight; the per-chat cooldown
-# in filter_node.py is the primary spam guard, this is the secondary one.
+# chat member, so it is weighted above an ordinary message; the per-chat
+# cooldown in filter_node.py is the primary spam guard, this is the secondary
+# one.
 SIGNAL_WEIGHTS = {
-    "PHOTO_REQUEST": 4.5,
     "GROUP_PROFILE_REQUEST": 3.0,
     "BOT_INSULT": 3.0,
     "BANTER": 2.0,

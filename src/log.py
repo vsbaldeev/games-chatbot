@@ -94,7 +94,7 @@ def log_outgoing_text(kind: str, chat_id: int, text: str) -> None:
     content appears only at DEBUG (see the README's Logging section).
 
     Args:
-        kind: What is going out — ``reply``, ``joke``, ``life:photo``, …
+        kind: What is going out — ``reply``, ``joke``, ``meme``, …
         chat_id: Destination chat.
         text: The exact text being sent; collapsed to one line and truncated
             to :data:`OUTGOING_TEXT_LIMIT`.

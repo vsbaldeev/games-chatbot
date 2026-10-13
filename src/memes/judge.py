@@ -35,8 +35,7 @@ def detect_image_mime(image_bytes: bytes) -> str:
 
     Meme CDNs serve JPEG, PNG and WebP interchangeably and the data URL must
     declare the format it actually carries, so the type is sniffed rather than
-    assumed (unlike :mod:`src.life.photo_judge`, whose input is always PNG from
-    the local image generator).
+    assumed.
 
     Args:
         image_bytes: Raw downloaded image.

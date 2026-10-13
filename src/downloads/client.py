@@ -1,9 +1,8 @@
 """HTTP client for the self-hosted download service (download-service/).
 
-Mirrors the imagegen never-raise contract: each function returns
-(video_bytes, info) or None on any failure. Downloads finish in seconds,
-not imagegen's minutes, so this is a plain request/response — no job/poll
-machinery.
+Never-raise contract: each function returns (video_bytes, info) or None on
+any failure. Downloads finish in seconds, so this is a plain
+request/response — no job/poll machinery.
 """
 
 import base64

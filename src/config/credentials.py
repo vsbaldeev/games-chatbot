@@ -51,11 +51,6 @@ TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 # and each caller degrades on its own terms.
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 
-# Base URL of the self-hosted image-generation service (imagegen-service/).
-# Empty disables image generation entirely — a photo request then gets the
-# canned in-character excuse.
-IMAGEGEN_URL: str = os.getenv("IMAGEGEN_URL", "")
-
 # Base URL of the self-hosted download service (download-service/) that
 # owns all yt-dlp downloads (YouTube Shorts, Instagram Reels, long-form
 # YouTube metadata). Empty disables all three — links then fall through to

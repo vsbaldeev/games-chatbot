@@ -82,7 +82,7 @@ async def register(
     Args:
         chat_id: Chat the message was sent in.
         message_id: The sent message's id.
-        source: "pipeline" | "meme" | "selfie" | "roles" | "group_profile" | "notice".
+        source: "pipeline" | "meme" | "roles" | "group_profile" | "notice".
         trigger: Pipeline response_trigger, or "-" for non-pipeline sources.
         filter_verdict: Filter node verdict, or "-" when not applicable.
     """

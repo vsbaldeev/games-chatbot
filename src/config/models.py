@@ -197,27 +197,6 @@ RESPONSE_OPENROUTER_FALLBACKS: list[str] = [
     "qwen/qwen3-235b-a22b-2507",
 ]
 
-# Self-hosted image generation (imagegen-service/, SD1.5 on CPU, DPM++ 2M
-# Karras). Standard multi-step sampling, not an LCM speed hack: low-step/
-# low-guidance sampling reliably hallucinated compositions. One 512px image
-# is estimated at ~5-10 min on the 4 vCPU host (confirm at deploy), so the
-# client polls the async job API instead of holding a request open.
-IMAGEGEN_STEPS = 20
-IMAGEGEN_SIZE = 512
-IMAGEGEN_GUIDANCE = 6.0
-IMAGEGEN_POLL_SECONDS = 10
-IMAGEGEN_DEADLINE_SECONDS = 1200
-
-# Best-of-N photo selection: SD1.5 renders subject interactions
-# stochastically, so up to N candidates are generated per photo post and a
-# vision-LLM judge (VISION_MODEL) scores each against the episode's
-# image_prompt (0-10, interaction-weighted). The first candidate scoring
-# >= PHOTO_JUDGE_PASS_SCORE ships immediately; otherwise the best one does —
-# the judge is a ranker, not a gate.
-IMAGEGEN_CANDIDATES = 3
-PHOTO_JUDGE_PASS_SCORE = 7
-PHOTO_JUDGE_MAX_TOKENS = 150
-
 # Meme vetting gate (src/memes/judge.py). Scraped Telegram channels serve the
 # channel author's own posts — donation appeals, ads, "I'm back" announcements —
 # in markup identical to a meme post, so the source parser cannot tell them
@@ -231,24 +210,11 @@ MEME_JUDGE_MAX_TOKENS = 50  # the verdict is just {"score": N}
 MEME_JUDGE_PASS_SCORE = 7
 MEME_JUDGE_ATTEMPTS = 3
 
-# Chat-requested selfie scene writer (src/life/selfie.py). One small call
-# turning a member's Russian photo request into an English scene line. No
-# fallback chain: a failure degrades to a canned in-character excuse.
-# Was llama-3.3-70b-versatile (decommissioned by Groq 2026-08-16, no
-# free-tier Llama replacement anywhere); openai/gpt-oss-120b is the
-# replacement. It's a reasoning model with no proven "no thinking" mode in
-# this codebase, so SELFIE_SCENE_MAX_TOKENS is raised to the same headroom
-# a gpt-oss-120b reasoning-model call needs elsewhere in this file, rather
-# than risk the whole budget disappearing into a hidden <think> block before
-# strip_thinking ever sees an answer.
-SELFIE_SCENE_MODEL = "openai/gpt-oss-120b"
-SELFIE_SCENE_MAX_TOKENS = 1024
-
 # Caption compressor (src/agent/compress.py). One small call that rewrites an
 # over-budget video caption shorter without dropping meaning — cutting mid-
 # sentence is the thing this exists to avoid. Was llama-3.3-70b-versatile
 # (decommissioned by Groq 2026-08-16); openai/gpt-oss-120b is the
-# replacement, same reasoning-headroom caveat as SELFIE_SCENE_MODEL above.
+# replacement, same reasoning-model caveat: the token budget needs headroom for a hidden <think> block.
 # No fallback chain: a failure degrades to the deterministic sentence-
 # boundary truncation in src/events/link_repost.py.
 CAPTION_COMPRESS_MODEL = "openai/gpt-oss-120b"

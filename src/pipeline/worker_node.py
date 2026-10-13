@@ -107,7 +107,6 @@ class WorkerNode:
         if (
             state.get("is_bot_insult")
             or state.get("wind_down")
-            or state.get("photo_request")
             or state.get("meme_request")
             or state.get("group_profile_request")
             or state.get("response_trigger") == "youtube_short"
@@ -118,8 +117,7 @@ class WorkerNode:
             # search output steering it. Same for Shorts and social-link
             # summaries — the source material is already in processed_text —
             # for wind-down brush-offs, which are one short phrase closing
-            # the conversation, and for photo-request acks («ща сфоткаю»),
-            # which must go out fast and without a search notification.
+            # the conversation.
             # A meme request answers with the image alone and no text at all,
             # so gathered facts would have nowhere to go. Same for a group-
             # profile request — it runs its own dedicated LLM call over the

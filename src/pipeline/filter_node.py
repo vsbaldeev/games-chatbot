@@ -5,11 +5,7 @@ Uses an LLM to classify the message (text or transcribed media) depending on
 how it entered the pipeline:
   - Addressed messages (@mention / reply to the bot) are classified as
     MEANINGLESS (emoji reaction, no reply), BANTER (content-free jab that
-    only keeps the exchange going), BOT_INSULT, PHOTO_REQUEST (the user asks
-    for a photo of the bot itself — accepted at the full tier, the reply is
-    an in-character «ща сфоткаю» ack and the events layer launches the
-    background selfie generation; see ``src/life/selfie.py``) or MEANINGFUL
-    (normal reply).
+    only keeps the exchange going), BOT_INSULT or MEANINGFUL (normal reply).
     When the message replies to an earlier stored
     message, that message is loaded and shown to the classifier as context —
     a short reaction like «ахаха что?» is meaningless in a vacuum but a real
@@ -420,7 +416,7 @@ class MeaninglessFilterNode:
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``,
+            ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``,
             ``"NOT_ADDRESSED"`` or ``"MEANINGFUL"``.
         """
         replied_to = await self.__fetch_replied_to(state["incoming"])
@@ -770,12 +766,9 @@ class MeaninglessFilterNode:
         short conversation-closing phrase, worker skipped). A BOT_INSULT gets
         the full comeback only at the full tier and only when the insult is
         not a reply to the bot's own message — a mirrored counter-insult in a
-        running thread would just fuel the loop. A PHOTO_REQUEST at the full
-        tier sets ``photo_request`` (the events layer launches generation
-        after the ack) plus a ``photo_in_flight`` peek covering both image
-        flows (``selfie.image_generation_in_flight``); at the brush-off tier
-        it falls into the ``wind_down`` refusal. MEME_REQUEST behaves the same
-        way via ``meme_request``, whose reply is the image alone.
+        running thread would just fuel the loop. A MEME_REQUEST at the full
+        tier sets ``meme_request``, whose reply is the image alone; at the
+        brush-off tier it falls into the ``wind_down`` refusal.
         GROUP_PROFILE_REQUEST behaves the same way via ``group_profile_request``,
         except a request inside the per-chat cooldown window returns a canned
         refusal with ``should_respond: False`` instead — skipping the LLM call
@@ -794,11 +787,6 @@ class MeaninglessFilterNode:
             update["is_bot_insult"] = True
             if tier != engagement_gate.FULL_TIER or replies_to_bot(state["incoming"]):
                 update["wind_down"] = True
-        elif classification == "PHOTO_REQUEST" and tier == engagement_gate.FULL_TIER:
-            # deferred: src.life.selfie -> src.events.sending -> src.events -> src.pipeline.filter_node cycle
-            from src.life import selfie
-            update["photo_request"] = True
-            update["photo_in_flight"] = selfie.image_generation_in_flight()
         elif classification == "MEME_REQUEST" and tier == engagement_gate.FULL_TIER:
             update["meme_request"] = True
         elif classification == "GROUP_PROFILE_REQUEST" and tier == engagement_gate.FULL_TIER:
@@ -898,7 +886,7 @@ class MeaninglessFilterNode:
 
         Returns:
             One of ``"BOT_INSULT"``, ``"BANTER"``, ``"MEANINGLESS"``,
-            ``"PHOTO_REQUEST"``, ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``,
+            ``"MEME_REQUEST"``, ``"GROUP_PROFILE_REQUEST"``,
             ``"NOT_ADDRESSED"`` or ``"MEANINGFUL"``. Fails open to
             ``"MEANINGFUL"`` on any LLM error.
         """
@@ -908,8 +896,6 @@ class MeaninglessFilterNode:
                 HumanMessage(content=text),
             ])
             result = response.content.strip().upper()
-            if "PHOTO" in result:
-                return "PHOTO_REQUEST"
             if "MEME" in result:
                 return "MEME_REQUEST"
             if "PROFILE" in result:

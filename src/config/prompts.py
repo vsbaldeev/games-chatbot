@@ -85,22 +85,12 @@ FILTER_SYSTEM = (
     "- Self-praise or comparison jabs: 'Я очень классный, а ты нет'\n"
     "- Counter-insults that merely mirror the bot's own jab back without new content: "
     "'сам такой', 'сам пидр', 'на себя посмотри'\n\n"
-    "PHOTO_REQUEST — the user asks the bot to send a photo OF THE BOT ITSELF: "
-    "its own appearance, life or surroundings:\n"
-    "- Appearance: 'сфоткай себя', 'сфоткайся', 'скинь свою фотку', "
-    "'покажи, как выглядишь'\n"
-    "- The bot's own life and surroundings: 'сфоткай свой огород', "
-    "'покажи свою избу', 'скинь фото своей мастерской'\n"
-    "- A request for a picture of anything else — animals, other people, "
-    "screenshots ('скинь фотку котика') — is MEANINGFUL, not PHOTO_REQUEST. "
-    "A request for a meme is MEME_REQUEST.\n\n"
     "MEME_REQUEST — the user asks the bot to send a meme:\n"
     "- 'скинь мем', 'кинь мемас', 'мем давай', 'есть мемчик?', 'пришли мем', "
     "'скинь что-нибудь смешное'\n"
     "- Talking ABOUT a meme without asking for one ('этот мем смешной', "
     "'мем про это видел', 'откуда этот мем') is MEANINGFUL.\n"
-    "- A request for a photo of the bot itself is PHOTO_REQUEST, not "
-    "MEME_REQUEST.\n\n"
+    "\n"
     "GROUP_PROFILE_REQUEST — the user asks the bot to judge, rate, rank or "
     "assign a themed label to EVERY member of the chat at once, not just one "
     "person:\n"
@@ -126,7 +116,7 @@ FILTER_SYSTEM = (
     "Instructions:\n"
     "1. Analyze the text (can be in Russian or English).\n"
     "2. Reply with ONLY ONE word: 'NOT_ADDRESSED', 'BOT_INSULT', 'BANTER', "
-    "'MEANINGLESS', 'PHOTO_REQUEST', 'MEME_REQUEST', 'GROUP_PROFILE_REQUEST' "
+    "'MEANINGLESS', 'MEME_REQUEST', 'GROUP_PROFILE_REQUEST' "
     "or 'MEANINGFUL'.\n"
     "3. Swearing directed AT THE BOT is BOT_INSULT only when it carries hostility, "
     "contempt or mockery (telling it to shut up, calling it useless/stupid). Swearing "
@@ -139,15 +129,13 @@ FILTER_SYSTEM = (
     "BOT_INSULT — BOT_INSULT is fresh hostility, contempt or mockery the user initiates.\n"
     "6. If unsure between MEANINGLESS and MEANINGFUL, or between BANTER and "
     "MEANINGFUL, err on the side of 'MEANINGFUL'.\n"
-    "7. PHOTO_REQUEST requires an actual request to send a photo of the bot "
-    "itself. If unsure between PHOTO_REQUEST and MEANINGFUL, choose 'MEANINGFUL'.\n"
-    "8. MEME_REQUEST requires an actual request to send a meme. Mentioning or "
+    "7. MEME_REQUEST requires an actual request to send a meme. Mentioning or "
     "discussing a meme is not a request. If unsure between MEME_REQUEST and "
     "MEANINGFUL, choose 'MEANINGFUL'.\n"
-    "9. GROUP_PROFILE_REQUEST requires the request to explicitly cover "
+    "8. GROUP_PROFILE_REQUEST requires the request to explicitly cover "
     "EVERYONE in the chat, not one named person. If unsure between "
     "GROUP_PROFILE_REQUEST and MEANINGFUL, choose 'MEANINGFUL'.\n"
-    "10. NOT_ADDRESSED is only for a message with no question, no request "
+    "9. NOT_ADDRESSED is only for a message with no question, no request "
     "and no second-person address to the bot. If unsure whether the author "
     "is talking to the bot or about it, choose the normal classification, "
     "never 'NOT_ADDRESSED'."
@@ -257,42 +245,6 @@ WORKER_PROMPT = """Ты ассистент для сбора данных. Вы�
 СТРОГО: вызывай ВСЕ нужные инструменты ДО написания любого текста. НИКОГДА не выводи текст между вызовами инструментов.
 Выводи только сырые факты — без разговорных обёрток."""
 
-# English canonical appearance descriptor + fixed style tokens — a generation
-# token string for an image model, not an instruction prompt; the module's
-# Russian-for-user-facing-prompts convention does not apply here. Unused
-# until self-hosted image generation ships; defined now so the identity is
-# complete and stable.
-CHARACTER_VISUAL_PROMPT = (
-    "zhora, rugged slavic village man in his late 30s, thick dark beard, short hair, "
-    "weathered face, olive work jacket over a grey sweater, "
-    "slavic countryside, wooden village house, "
-    "storybook illustration, painterly, soft natural lighting"
-)
-
-# Prepended before episode.image_prompt, not after: on this engine leading
-# tokens dominate composition, so a leading character descriptor reliably
-# produced a close-up portrait with the episode's scene objects (e.g. an
-# animal in the background) dropped entirely — verified locally, see
-# imagegen-service/README.md. Framing the shot wide first gives secondary
-# scene objects room to actually render.
-PHOTO_FRAMING_HINT = "wide shot, "
-
-# Best-of-N selfie judge (src/life/photo_judge.py). English, like the other
-# image-model-adjacent text: the scene prompts it scores are English. The
-# judge weights the *interaction* because SD1.5 drops relations between
-# subjects far more often than the subjects themselves — a photo where
-# everything is present but nothing happens is the failure mode being ranked
-# down. Strict JSON contract, parsed by the shared load_json_object.
-PHOTO_JUDGE_SYSTEM = (
-    "You judge how faithfully a generated image depicts a requested scene. "
-    "Score 0-10: 9-10 the scene matches including the action and any "
-    "interaction between subjects; 6-8 all subjects present but the action or "
-    "interaction is weak or missing; 3-5 some subjects missing or wrong; 0-2 "
-    "the image shows a different scene. Weight the action/interaction "
-    "heaviest. Answer with strictly one JSON object, no other text: "
-    '{"score": N}'
-)
-
 # Meme vetting gate (src/memes/judge.py). English: the judge reasons about the
 # image, not in the chat's voice. One score, not two, because the send decision
 # is binary and both properties are required for a candidate to ship — a
@@ -340,34 +292,6 @@ REPLY_LABEL_SYSTEM = (
     "intended.\n"
     "Output a JSON object only, exactly {\"reaction\": \"<LABEL>\"}. No prose, "
     "no explanation, no extra keys."
-)
-
-# Chat-requested selfie scene writer (src/life/selfie.py). English, like the
-# other image-model-adjacent text: the output is a generation prompt. Same
-# contract as the episode writer's image_prompt — the character descriptor
-# (CHARACTER_VISUAL_PROMPT) is appended separately at generation time, so the
-# scene must never describe the man's appearance.
-SELFIE_SCENE_SYSTEM = (
-    "You write a scene description for an image generation model. The input "
-    "is a chat member's Russian message asking a village man to send a photo "
-    "of himself, optionally followed by a line naming what the man is "
-    "currently busy with.\n"
-    "Rules:\n"
-    "- Output exactly ONE English scene description, a single line: no JSON, "
-    "no quotes, no explanations.\n"
-    "- One frame with one clear action the man explicitly performs, stated "
-    "subject-verb-object first ('man watering his vegetable garden...'), "
-    "then one or two objects and the setting. No lists, no other people or "
-    "creatures unless the request explicitly asks for them — a simple model "
-    "renders the frame, and the simpler the scene, the better it comes out.\n"
-    "- Never describe the man's appearance, clothes or face — they are "
-    "appended separately.\n"
-    "- The setting is a slavic countryside village.\n"
-    "- When the request names a scene, place or activity, render exactly "
-    "that.\n"
-    "- When the request is a bare 'photo of yourself' and a current activity "
-    "is given, show the man doing that activity.\n"
-    "- Otherwise show the man standing in his village yard."
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

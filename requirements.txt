@@ -26,5 +26,5 @@ Pillow>=10.0.0
 fastembed>=0.4.0
 pgvector>=0.3.0
 # zoneinfo's IANA database is not guaranteed present on the slim Docker base;
-# life_post.py schedules in Europe/Kyiv and must resolve DST correctly.
+# APScheduler (behind PTB's JobQueue) resolves timezones through it.
 tzdata>=2024.1
