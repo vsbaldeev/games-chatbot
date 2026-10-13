@@ -8,7 +8,6 @@ from telegram.ext import Application
 from src.jobs.cleanup import cleanup_messages_job
 from src.jobs.feedback import feedback_metrics_job
 from src.jobs.meme import daily_meme_job
-from src.jobs.reply_labels import reply_labels_job
 from src.jobs.roles import CATCH_UP_DELAY_SECONDS, ROLES_RUN_TIME, catch_up_roles_job, weekly_roles_job
 
 
@@ -40,4 +39,3 @@ class MessageCleanupJobManager(JobManagerInterface):
 class FeedbackJobManager(JobManagerInterface):
     def add_jobs(self, app: Application) -> None:
         app.job_queue.run_repeating(feedback_metrics_job, interval=300, first=300)
-        app.job_queue.run_repeating(reply_labels_job, interval=900, first=900)

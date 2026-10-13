@@ -137,33 +137,11 @@ REPLY_LABEL_MODELS: list[str] = [
     "google/gemma-4-31b-it:free",
 ]
 
-# Budget for one response item, sized on the worst case as the models actually
-# render it — pretty-printed, with the longest value in each field:
-#
-#       {
-#         "id": 123456,
-#         "reaction": "NEGATIVE",
-#         "cause": "INVENTED_LIFE"
-#       },
-#
-# The content tokenizes to about 27 pieces ({ " id ": _ 123 456 , _" reaction
-# ": _" NE GATIVE ", _" cause ": _" IN VENT ED _ LIFE " } ,) and the five
-# newline-plus-indent runs add roughly 11 more: ~38 per item, against a
-# measured 35 per item on a real two-item pretty-printed response from the
-# primary leg. 64 keeps ~1.7x margin over that, absorbs the enclosing [ ] and
-# a ```json fence some free-tier models add, and leaves a trailing one-row
-# batch (64 tokens) comfortably able to answer at all.
-#
-# The old value of 15 could not fit one item under any formatting: a ten-row
-# batch got 150 tokens and truncated mid-array, so json.loads failed and every
-# row in that batch burned a retry attempt for a problem none of them had. A
-# trailing single-row batch got 15 tokens and could never succeed.
-#
-# Reasoning tokens are deliberately not budgeted for: make_labeller_llm passes
-# reasoning_effort="none" instead of paying for a <think> block. The earlier
-# claim that 15 tokens "leaves room for one" was impossible at any batch size.
-REPLY_LABEL_MAX_TOKENS_PER_ITEM = 64
-REPLY_LABEL_BATCH_SIZE = 10
+# Budget for the single {"reaction": "NEGATIVE"} object, ~10 tokens even
+# pretty-printed. 64 absorbs a ```json fence some free-tier models add.
+# Reasoning tokens are not budgeted for: make_labeller_llm passes
+# reasoning_effort="none" instead of paying for a <think> block.
+REPLY_LABEL_MAX_TOKENS = 64
 
 # Tool-calling worker fallback chain. No 8B floor: at that size the worker
 # skips tools and fabricates facts from parametric memory — for a

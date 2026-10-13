@@ -1,133 +1,92 @@
-"""Batched reply labelling: prompt assembly and strict response parsing.
+"""Single-reply labelling: payload assembly and strict response parsing.
 
 Parsing is deliberately unforgiving. src/config/models.py records a previous
 incident where a model emitted a "veredict" key typo that silently dropped a
-member from a result; here an unexpected shape leaves the row unlabelled
-instead, so the job retries it rather than storing a guess.
+member from a result; here an unexpected shape returns None, which the caller
+counts as unlabelled rather than storing a guess.
 """
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.feedback.reply_labeller import (
-    build_batch_payload,
-    parse_label_batch,
+    LabellingCallFailed,
+    build_payload,
+    label_reply,
+    parse_label,
 )
 
 
-def make_row(
-    *,
-    reply_message_id: int = 7,
-    reply_content: str = "ну и бред ты несешь",
-    bot_content: str = "Elden Ring вышел в 2021",
-    source: str = "pipeline",
-    trigger: str = "explicit",
-) -> dict:
-    return {
-        "chat_id": 1000,
-        "reply_message_id": reply_message_id,
-        "media_type": "text",
-        "reply_content": reply_content,
-        "bot_content": bot_content,
-        "source": source,
-        "trigger": trigger,
-    }
-
-
-class TestBuildBatchPayload:
-    def test_includes_reply_id_so_the_model_can_key_its_answer(self):
-        payload = build_batch_payload([make_row(reply_message_id=42)])
-        assert "42" in payload
-
+class TestBuildPayload:
     def test_includes_both_messages_and_the_source(self):
-        payload = build_batch_payload([make_row()])
+        payload = build_payload(
+            bot_message="Elden Ring вышел в 2021", reply="ну и бред ты несешь", source="pipeline",
+        )
         assert "ну и бред ты несешь" in payload
         assert "Elden Ring вышел в 2021" in payload
         assert "pipeline" in payload
 
-    def test_every_row_appears(self):
-        payload = build_batch_payload([
-            make_row(reply_message_id=1, reply_content="первый"),
-            make_row(reply_message_id=2, reply_content="второй"),
-        ])
-        assert "первый" in payload
-        assert "второй" in payload
+    def test_is_a_json_object(self):
+        payload = build_payload(bot_message="a", reply="b", source="meme")
+        assert json.loads(payload) == {"bot_message": "a", "source": "meme", "reply": "b"}
 
 
-class TestParseLabelBatch:
-    def test_valid_single_item(self):
-        raw = json.dumps([{"id": 7, "reaction": "NEGATIVE", "cause": "FACTUAL"}])
-        assert parse_label_batch(raw, {7}) == {7: ("NEGATIVE", "FACTUAL")}
+class TestParseLabel:
+    @pytest.mark.parametrize("label", ["POSITIVE", "NEGATIVE", "NEUTRAL", "UNCLEAR"])
+    def test_every_vocabulary_label_is_accepted(self, label):
+        assert parse_label(json.dumps({"reaction": label})) == label
 
-    def test_valid_multiple_items(self):
-        raw = json.dumps([
-            {"id": 1, "reaction": "POSITIVE", "cause": None},
-            {"id": 2, "reaction": "NEGATIVE", "cause": "INVENTED_LIFE"},
-        ])
-        assert parse_label_batch(raw, {1, 2}) == {
-            1: ("POSITIVE", None),
-            2: ("NEGATIVE", "INVENTED_LIFE"),
-        }
+    def test_media_is_out_of_contract(self):
+        assert parse_label(json.dumps({"reaction": "MEDIA"})) is None
 
-    def test_cause_on_a_positive_reaction_is_discarded(self):
-        raw = json.dumps([{"id": 7, "reaction": "POSITIVE", "cause": "TONE"}])
-        assert parse_label_batch(raw, {7}) == {7: ("POSITIVE", None)}
+    def test_unknown_label_is_rejected(self):
+        assert parse_label(json.dumps({"reaction": "ANGRY"})) is None
 
-    def test_missing_cause_on_a_negative_becomes_unclear(self):
-        raw = json.dumps([{"id": 7, "reaction": "NEGATIVE", "cause": None}])
-        assert parse_label_batch(raw, {7}) == {7: ("NEGATIVE", "UNCLEAR")}
+    def test_key_typo_is_rejected(self):
+        assert parse_label(json.dumps({"veredict": "POSITIVE"})) is None
 
-    def test_model_returned_media_is_dropped(self):
-        """MEDIA is a rule label. A model emitting it is out of contract."""
-        raw = json.dumps([{"id": 7, "reaction": "MEDIA", "cause": None}])
-        assert parse_label_batch(raw, {7}) == {}
+    def test_extra_key_is_rejected(self):
+        assert parse_label(json.dumps({"reaction": "NEGATIVE", "cause": "TONE"})) is None
 
-    def test_unknown_id_is_dropped(self):
-        raw = json.dumps([{"id": 999, "reaction": "POSITIVE", "cause": None}])
-        assert parse_label_batch(raw, {7}) == {}
+    def test_array_instead_of_object_is_rejected(self):
+        assert parse_label(json.dumps([{"reaction": "POSITIVE"}])) is None
 
-    def test_duplicate_id_drops_the_whole_batch(self):
-        raw = json.dumps([
-            {"id": 7, "reaction": "POSITIVE", "cause": None},
-            {"id": 7, "reaction": "NEGATIVE", "cause": "TONE"},
-        ])
-        assert parse_label_batch(raw, {7}) == {}
+    def test_non_json_is_rejected(self):
+        assert parse_label("I think it is positive") is None
 
-    def test_key_typo_drops_that_item_only(self):
-        raw = json.dumps([
-            {"id": 1, "veredict": "POSITIVE", "cause": None},
-            {"id": 2, "reaction": "NEUTRAL", "cause": None},
-        ])
-        assert parse_label_batch(raw, {1, 2}) == {2: ("NEUTRAL", None)}
-
-    def test_unknown_reaction_is_dropped(self):
-        raw = json.dumps([{"id": 7, "reaction": "ANGRY", "cause": None}])
-        assert parse_label_batch(raw, {7}) == {}
-
-    def test_unknown_cause_becomes_unclear(self):
-        raw = json.dumps([{"id": 7, "reaction": "NEGATIVE", "cause": "BOREDOM"}])
-        assert parse_label_batch(raw, {7}) == {7: ("NEGATIVE", "UNCLEAR")}
-
-    def test_non_json_yields_nothing(self):
-        assert parse_label_batch("I think the first one is a rejection", {7}) == {}
-
-    def test_json_object_instead_of_array_yields_nothing(self):
-        assert parse_label_batch(json.dumps({"id": 7, "reaction": "POSITIVE"}), {7}) == {}
-
-    def test_empty_response_yields_nothing(self):
-        assert parse_label_batch("", {7}) == {}
+    def test_empty_response_is_rejected(self):
+        assert parse_label("") is None
 
     def test_markdown_fenced_json_is_parsed(self):
-        raw = '```json\n[{"id": 7, "reaction": "NEUTRAL", "cause": null}]\n```'
-        assert parse_label_batch(raw, {7}) == {7: ("NEUTRAL", None)}
+        assert parse_label('```json\n{"reaction": "NEUTRAL"}\n```') == "NEUTRAL"
 
-    def test_neutral_never_carries_a_cause(self):
-        raw = json.dumps([{"id": 7, "reaction": "NEUTRAL", "cause": "TONE"}])
-        assert parse_label_batch(raw, {7}) == {7: ("NEUTRAL", None)}
 
-    def test_unclear_never_carries_a_cause(self):
-        raw = json.dumps([{"id": 7, "reaction": "UNCLEAR", "cause": "PERSONA"}])
-        assert parse_label_batch(raw, {7}) == {7: ("UNCLEAR", None)}
+class TestLabelReply:
+    async def test_missing_api_key_raises_call_failed(self):
+        with patch("src.feedback.reply_labeller.config.OPENROUTER_API_KEY", ""):
+            with pytest.raises(LabellingCallFailed):
+                await label_reply(bot_message="a", reply="b", source="pipeline")
 
-    def test_non_integer_id_is_dropped(self):
-        raw = json.dumps([{"id": "seven", "reaction": "NEUTRAL", "cause": None}])
-        assert parse_label_batch(raw, {7}) == {}
+    async def test_transport_error_raises_call_failed(self):
+        with patch("src.feedback.reply_labeller.config.OPENROUTER_API_KEY", "key"), \
+             patch("src.feedback.reply_labeller.make_labeller_llm", MagicMock()), \
+             patch("src.feedback.reply_labeller.ainvoke_with_backoff",
+                   AsyncMock(side_effect=RuntimeError("boom"))):
+            with pytest.raises(LabellingCallFailed):
+                await label_reply(bot_message="a", reply="b", source="pipeline")
+
+    async def test_returns_parsed_label(self):
+        response = MagicMock(content='{"reaction": "POSITIVE"}')
+        with patch("src.feedback.reply_labeller.config.OPENROUTER_API_KEY", "key"), \
+             patch("src.feedback.reply_labeller.make_labeller_llm", MagicMock()), \
+             patch("src.feedback.reply_labeller.ainvoke_with_backoff", AsyncMock(return_value=response)):
+            assert await label_reply(bot_message="a", reply="b", source="pipeline") == "POSITIVE"
+
+    async def test_unparseable_answer_returns_none(self):
+        response = MagicMock(content="no idea")
+        with patch("src.feedback.reply_labeller.config.OPENROUTER_API_KEY", "key"), \
+             patch("src.feedback.reply_labeller.make_labeller_llm", MagicMock()), \
+             patch("src.feedback.reply_labeller.ainvoke_with_backoff", AsyncMock(return_value=response)):
+            assert await label_reply(bot_message="a", reply="b", source="pipeline") is None
