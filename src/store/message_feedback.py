@@ -1,17 +1,73 @@
-"""Per-message feedback facts: which reaction emoji landed, and whether any
-feedback arrived at all, within the first 15 minutes after a bot message is
-sent. Per-reply detail lives in bot_reply_labels, one row per reply.
+"""Per-message feedback counters for every bot message.
 
-Every mutator's WHERE clause enforces the 15-minute window, so a write
-arriving after the window closed is a silent no-op rather than skewing a
-message's numbers with late noise. Reads (used by the hourly rollup in
-feedback_metrics.py) are unrestricted.
+One row per bot message, written by register() at send time. Reactions and
+replies move counters whenever they arrive, for as long as the row exists —
+there is no time window. `ignored` is kept equal to "every counter is 0" by
+every mutating statement, so removing the last reaction makes a message
+ignored again.
+
+Columns are always chosen from COUNTER_COLUMNS, never interpolated from input.
 """
 
+from src.feedback.sentiment import is_positive_reaction
 from src.store import db as database
 
 RETENTION_DAYS = 60
-FEEDBACK_WINDOW_SQL = "interval '15 minutes'"
+
+COUNTER_COLUMNS: tuple[str, ...] = (
+    "positive_reactions",
+    "negative_reactions",
+    "positive_replies",
+    "negative_replies",
+    "neutral_replies",
+    "media_replies",
+    "unlabelled_replies",
+)
+
+REPLY_KIND_COLUMNS: dict[str, str] = {
+    "positive": "positive_replies",
+    "negative": "negative_replies",
+    "neutral": "neutral_replies",
+    "media": "media_replies",
+    "unlabelled": "unlabelled_replies",
+}
+
+
+def reaction_column(emoji: str) -> str:
+    """Pick the reaction counter for one emoji key."""
+    return "positive_reactions" if is_positive_reaction(emoji) else "negative_reactions"
+
+
+def require_counter(column: str) -> None:
+    """Refuse any column that is not a known counter."""
+    if column not in COUNTER_COLUMNS:
+        raise ValueError(f"not a feedback counter: {column!r}")
+
+
+def increment_sql(column: str) -> str:
+    """UPDATE that adds one to `column`; any increment means the message got a response."""
+    require_counter(column)
+    return f"""
+        UPDATE bot_message_feedback
+        SET {column} = {column} + 1, ignored = FALSE
+        WHERE chat_id = $1 AND message_id = $2
+    """
+
+
+def decrement_sql(column: str) -> str:
+    """UPDATE that subtracts one from `column`, floored at 0, and recomputes `ignored`.
+
+    SET expressions see the pre-update row, so `ignored` is computed from the
+    decremented value of `column` plus the unchanged others.
+    """
+    require_counter(column)
+    decremented = f"GREATEST({column} - 1, 0)"
+    others = " + ".join(other for other in COUNTER_COLUMNS if other != column)
+    return f"""
+        UPDATE bot_message_feedback
+        SET {column} = {decremented}, ignored = ({decremented} + {others} = 0)
+        WHERE chat_id = $1 AND message_id = $2
+    """
 
 
 async def register(
@@ -42,80 +98,32 @@ async def register(
 
 
 async def add_reaction(*, chat_id: int, message_id: int, emoji: str) -> None:
-    """Credit one added reaction, inside the 15-minute window only."""
+    """Count one added reaction. A no-op for a message with no feedback row."""
     async with database.acquire() as conn:
-        await conn.execute(
-            f"""
-            UPDATE bot_message_feedback
-            SET emojis = jsonb_set(emojis, ARRAY[$3], to_jsonb(COALESCE((emojis->>$3)::int, 0) + 1)),
-                first_feedback_at = COALESCE(first_feedback_at, now())
-            WHERE chat_id = $1 AND message_id = $2
-              AND now() <= sent_at + {FEEDBACK_WINDOW_SQL}
-            """,
-            chat_id, message_id, emoji,
-        )
+        await conn.execute(increment_sql(reaction_column(emoji)), chat_id, message_id)
 
 
 async def remove_reaction(*, chat_id: int, message_id: int, emoji: str) -> None:
-    """Credit one removed reaction, inside the 15-minute window only.
-
-    Drops the emoji's key once its count reaches zero, rather than leaving
-    a stale "0" entry in the JSONB map.
-    """
+    """Uncount one removed reaction, never below zero."""
     async with database.acquire() as conn:
-        await conn.execute(
-            f"""
-            UPDATE bot_message_feedback
-            SET emojis = CASE
-                    WHEN COALESCE((emojis->>$3)::int, 0) <= 1 THEN emojis - $3
-                    ELSE jsonb_set(emojis, ARRAY[$3], to_jsonb((emojis->>$3)::int - 1))
-                END
-            WHERE chat_id = $1 AND message_id = $2
-              AND now() <= sent_at + {FEEDBACK_WINDOW_SQL}
-            """,
-            chat_id, message_id, emoji,
-        )
+        await conn.execute(decrement_sql(reaction_column(emoji)), chat_id, message_id)
 
 
-async def add_reply(*, chat_id: int, message_id: int) -> None:
-    """Mark that a reply landed in a bot message's thread.
-
-    No counter any more: the replies themselves live in bot_reply_labels, one
-    row each, which is both the count and the detail. What this still does is
-    stamp first_feedback_at, because close_expired_windows derives `ignored`
-    from it and ignore_rate depends on that.
-    """
+async def add_reply(*, chat_id: int, message_id: int, kind: str) -> None:
+    """Count one reply of `kind` (a key of REPLY_KIND_COLUMNS) on a bot message."""
+    column = REPLY_KIND_COLUMNS[kind]
     async with database.acquire() as conn:
-        await conn.execute(
-            f"""
-            UPDATE bot_message_feedback
-            SET first_feedback_at = COALESCE(first_feedback_at, now())
-            WHERE chat_id = $1 AND message_id = $2
-              AND now() <= sent_at + {FEEDBACK_WINDOW_SQL}
-            """,
+        await conn.execute(increment_sql(column), chat_id, message_id)
+
+
+async def get_origin(*, chat_id: int, message_id: int) -> tuple[str, str] | None:
+    """Return (source, trigger) for a tracked bot message, or None if it has no row."""
+    async with database.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT source, trigger FROM bot_message_feedback WHERE chat_id = $1 AND message_id = $2",
             chat_id, message_id,
         )
-
-
-async def close_expired_windows() -> int:
-    """Set `ignored` on every row whose 15-minute window has just closed.
-
-    ignored = true when no reaction or reply arrived in time (first_feedback_at
-    is still NULL); false otherwise. Rows already decided (ignored IS NOT NULL)
-    are left alone.
-
-    Returns:
-        Number of rows updated.
-    """
-    async with database.acquire() as conn:
-        result = await conn.execute(
-            f"""
-            UPDATE bot_message_feedback
-            SET ignored = (first_feedback_at IS NULL)
-            WHERE ignored IS NULL AND sent_at < now() - {FEEDBACK_WINDOW_SQL}
-            """
-        )
-    return int(result.split()[-1])
+    return None if row is None else (row["source"], row["trigger"])
 
 
 async def cleanup_old() -> int:

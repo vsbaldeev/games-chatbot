@@ -9,7 +9,6 @@ from src.feedback.sentiment import (
     POSITIVE_REACTIONS,
     is_positive_reaction,
     normalize_reaction,
-    positive_reactions_sql_array,
 )
 
 
@@ -42,27 +41,3 @@ class TestIsPositiveReaction:
 
     def test_empty_string_is_negative(self):
         assert is_positive_reaction("") is False
-
-
-class TestPositiveReactionsSqlArray:
-    def test_contains_every_positive_reaction_normalized(self):
-        array = positive_reactions_sql_array()
-        assert set(array) == POSITIVE_REACTIONS
-        assert all("️" not in emoji for emoji in array)
-
-    def test_is_a_list_for_asyncpg_binding(self):
-        assert isinstance(positive_reactions_sql_array(), list)
-
-
-class TestRollupBinding:
-    def test_rollup_sql_binds_the_positive_set_rather_than_inlining_it(self):
-        """One definition of the emoji set: Python, passed as $3.
-
-        An inlined literal in ROLLUP_SQL would drift from POSITIVE_REACTIONS
-        the first time the operator edits one and not the other.
-        """
-        from src.store.feedback_metrics import ROLLUP_SQL
-
-        assert "$3::text[]" in ROLLUP_SQL
-        for emoji in POSITIVE_REACTIONS:
-            assert emoji not in ROLLUP_SQL

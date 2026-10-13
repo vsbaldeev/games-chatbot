@@ -9,7 +9,6 @@ from telegram.ext import Application, ApplicationBuilder, ContextTypes
 from src import log
 from src.agent import worker_agent, response_agent
 from src.app.jobs import (
-    FeedbackJobManager,
     MemeJobManager,
     MessageCleanupJobManager,
     RolesJobManager,
@@ -79,7 +78,6 @@ def main() -> None:
         RolesJobManager(),
         MessageCleanupJobManager(),
         MemeJobManager(),
-        FeedbackJobManager(),
     )
     for job_manager in job_managers:
         job_manager.add_jobs(app)

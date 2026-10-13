@@ -13,7 +13,6 @@ PATCH_TARGETS = {
     "llm_log": "src.jobs.cleanup.llm_log.cleanup_old",
     "prompts": "src.jobs.cleanup.llm_system_prompts.cleanup_unreferenced",
     "feedback": "src.jobs.cleanup.message_feedback.cleanup_old",
-    "metrics": "src.jobs.cleanup.feedback_metrics.cleanup_old",
     "labels": "src.jobs.cleanup.reply_labels.cleanup_old",
 }
 
@@ -26,13 +25,11 @@ class TestCleanupMessagesJob:
              patch(PATCH_TARGETS["llm_log"], AsyncMock(return_value=1)) as llm_log_cleanup, \
              patch(PATCH_TARGETS["prompts"], AsyncMock(return_value=1)) as prompts_cleanup, \
              patch(PATCH_TARGETS["feedback"], AsyncMock(return_value=1)) as feedback_cleanup, \
-             patch(PATCH_TARGETS["metrics"], AsyncMock(return_value=1)) as metrics_cleanup, \
              patch(PATCH_TARGETS["labels"], AsyncMock(return_value=1)) as labels_cleanup:
             await cleanup_messages_job(context=None)
         llm_log_cleanup.assert_awaited_once()
         prompts_cleanup.assert_awaited_once()
         feedback_cleanup.assert_awaited_once()
-        metrics_cleanup.assert_awaited_once()
         labels_cleanup.assert_awaited_once()
 
     async def test_llm_log_pruned_before_system_prompts(self):
@@ -53,7 +50,6 @@ class TestCleanupMessagesJob:
              patch(PATCH_TARGETS["llm_log"], side_effect=record_llm_log), \
              patch(PATCH_TARGETS["prompts"], side_effect=record_prompts), \
              patch(PATCH_TARGETS["feedback"], AsyncMock(return_value=1)), \
-             patch(PATCH_TARGETS["metrics"], AsyncMock(return_value=1)), \
              patch(PATCH_TARGETS["labels"], AsyncMock(return_value=1)):
             await cleanup_messages_job(context=None)
         assert call_order == ["llm_log", "prompts"]

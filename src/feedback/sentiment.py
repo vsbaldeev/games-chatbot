@@ -45,13 +45,3 @@ def is_positive_reaction(emoji: str) -> bool:
         else, including an empty string, is negative.
     """
     return normalize_reaction(emoji) in POSITIVE_REACTIONS
-
-
-def positive_reactions_sql_array() -> list[str]:
-    """Return the positive set as a list for binding into rollup SQL.
-
-    asyncpg binds a Python list to a Postgres array, so the emoji set has
-    exactly one definition — this module — rather than being duplicated
-    into the rollup query as a literal.
-    """
-    return sorted(POSITIVE_REACTIONS)

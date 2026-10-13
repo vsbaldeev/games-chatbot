@@ -5,8 +5,7 @@ Requires the bot to be a group admin — Telegram only delivers
 Update.ALL_TYPES, see src/app/app.py). Telegram sends the full old/new
 reaction lists on every update, never a single delta, so the delta is
 computed here and applied to bot_message_feedback (a no-op for any message
-that isn't the bot's, or whose 15-minute window has closed — see
-src.store.message_feedback).
+that isn't a tracked bot message — see src.store.message_feedback).
 """
 
 from telegram import ReactionType, Update
@@ -59,9 +58,8 @@ def diff_reactions(
 async def handle_message_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Apply an emoji-reaction change to the reacted-to message's feedback row.
 
-    A no-op outside groups, and (via message_feedback's own window guard) a
-    no-op for a reaction on a message that isn't a tracked bot message, or
-    whose 15-minute feedback window has already closed.
+    A no-op outside groups, and a no-op for a reaction on a message that
+    isn't a tracked bot message.
     """
     if update.effective_chat is None or update.effective_chat.type not in GROUP_CHAT_TYPES:
         return
