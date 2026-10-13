@@ -90,3 +90,18 @@ class TestLabelReply:
              patch("src.feedback.reply_labeller.make_labeller_llm", MagicMock()), \
              patch("src.feedback.reply_labeller.ainvoke_with_backoff", AsyncMock(return_value=response)):
             assert await label_reply(bot_message="a", reply="b", source="pipeline") is None
+
+
+class TestParseLabelHostileShapes:
+    def test_list_valued_reaction_is_rejected_not_raised(self):
+        assert parse_label(json.dumps({"reaction": ["POSITIVE"]})) is None
+
+    def test_dict_valued_reaction_is_rejected_not_raised(self):
+        assert parse_label(json.dumps({"reaction": {"label": "POSITIVE"}})) is None
+
+    async def test_content_block_list_answer_is_unparseable_not_raised(self):
+        response = MagicMock(content=[{"type": "text", "text": '{"reaction": "POSITIVE"}'}])
+        with patch("src.feedback.reply_labeller.config.OPENROUTER_API_KEY", "key"), \
+             patch("src.feedback.reply_labeller.make_labeller_llm", MagicMock()), \
+             patch("src.feedback.reply_labeller.ainvoke_with_backoff", AsyncMock(return_value=response)):
+            assert await label_reply(bot_message="a", reply="b", source="pipeline") is None

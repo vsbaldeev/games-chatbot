@@ -64,6 +64,9 @@ def strip_code_fence(raw: str) -> str:
 
 def parse_label(raw: str) -> str | None:
     """Parse the model's answer into one label, or None if it breaks the contract."""
+    if not isinstance(raw, str):
+        logger.warning("Reply labelling: response content was not text")
+        return None
     try:
         parsed = json.loads(strip_code_fence(raw))
     except (json.JSONDecodeError, TypeError):
@@ -73,7 +76,7 @@ def parse_label(raw: str) -> str | None:
         logger.warning("Reply labelling: response had the wrong shape")
         return None
     reaction = parsed["reaction"]
-    return reaction if reaction in MODEL_REACTIONS else None
+    return reaction if isinstance(reaction, str) and reaction in MODEL_REACTIONS else None
 
 
 def make_labeller_llm(max_tokens: int) -> ChatOpenAI:

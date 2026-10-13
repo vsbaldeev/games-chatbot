@@ -5,8 +5,8 @@ seven are approval, every other reaction counts as negative. That is a
 deliberate over-count, not an oversight — see the design doc's decision 4.
 
 POSITIVE_REACTIONS is stored already normalized (no U+FE0F), because Telegram
-sends some reactions with the variation selector and some without. Both the
-Python membership test and the rollup SQL compare on the normalized form.
+sends some reactions with the variation selector and some without. The
+membership test compares on the normalized form.
 """
 
 VARIATION_SELECTOR = "️"

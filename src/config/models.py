@@ -105,13 +105,13 @@ MEMORY_MODEL_FALLBACKS: list[str] = [
 TAG_MODEL = "qwen/qwen3.8-27b"
 
 # Reply reaction labelling (src/feedback/reply_labeller.py). OpenRouter-only,
-# deliberately: this is an offline batched job behind a 15-minute schedule, so
-# a 429 costs nothing — the row stays pending and the next run picks it up.
-# That makes it the one call site where a saturating free pool is the right
-# choice, and the one that must never share TAG_MODEL's already-crowded Groq
-# bucket (see TAG_MODEL above): measurement must never degrade chat replies.
-# Two legs on independent backends (NVIDIA and Google AI Studio) so saturation
-# in one pool does not stall the queue — checked live on 2026-10-12, when the
+# deliberately: it must never share TAG_MODEL's already-crowded Groq bucket
+# (see TAG_MODEL above) — measurement must never degrade chat replies. The call
+# is made once per reply, in a background task, with no retry: a 429 or an
+# outage permanently costs that reply its label (it is counted in
+# unlabelled_replies), so a saturated free pool shows up there rather than being
+# retried later. Two legs on independent backends (NVIDIA and Google AI Studio)
+# so saturation in one pool does not take out the other — checked live on 2026-10-12, when the
 # whole Google AI Studio free pool was returning 429 while NVIDIA answered
 # normally, which is exactly the failure this split exists for.
 #
