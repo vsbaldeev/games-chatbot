@@ -28,12 +28,10 @@ incoming message
     │              voice / video_note / video → content = placeholder, file_id stored
     │
     ├─ always, when the message is a reply (any media type): src.feedback.replies.track_reply
-    │              walks the reply chain (unified_messages.get_chain) and credits every
-    │              bot ancestor's bot_message_feedback row; it also enqueues the reply
-    │              itself as one unlabelled bot_reply_labels row, attributed to its
-    │              nearest bot ancestor. No model call on this path at all: the
-    │              inline correction classifier is deleted, and src/jobs/reply_labels.py
-    │              labels the row offline within 15 minutes — see src/feedback/README.md
+    │              walks the reply chain (unified_messages.get_chain), finds the nearest
+    │              bot message and spawns a background task that labels the reply and
+    │              bumps one counter on that message's bot_message_feedback row. No model
+    │              call on this path itself — see src/feedback/README.md
     │
     ├─ text
     │     ├─ YouTube Shorts link      → should_respond=True,  trigger="youtube_short"

@@ -58,7 +58,7 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/pipeline/](src/pipeline/README.md) | LangGraph StateGraph — message processing nodes and graph wiring |
 | [src/app/](src/app/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
-| [src/feedback/](src/feedback/README.md) | Implicit user-feedback tracking — reaction emoji, reply reactions labelled by cause, and silence |
+| [src/feedback/](src/feedback/README.md) | Implicit user-feedback tracking — per-message counters for reaction emoji, labelled replies, and silence |
 | [src/commands/](src/commands/README.md) | Command handlers — /duel |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup, yt-dlp refresh |
 | [src/life/](src/life/README.md) | Chat-requested selfies — scene writing, best-of-N generation, vision judge |
