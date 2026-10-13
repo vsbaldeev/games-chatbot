@@ -5,9 +5,9 @@ chat, so this file is safe to commit; run the harness against the production
 database when you need a baseline over real traffic.
 
 The fixture is chosen to exercise the context paths that a prompt change is
-most likely to disturb: activity questions (which unlock the bot's current
-activity), a bot-directed insult, a reply chain, and enough ordinary filler
-for the probabilistic activity-volunteer gate to fire at least once.
+most likely to disturb: direct questions to the bot, a bot-directed insult, a
+reply chain, and enough ordinary filler for the probabilistic context gates to
+fire at least once.
 
 Usage::
 
@@ -18,7 +18,7 @@ import argparse
 import asyncio
 import sys
 
-from src.store import bot_memories, db as database, embedder, unified_messages
+from src.store import db as database, unified_messages
 
 BOT_USER_ID = 1
 BOT_USERNAME = "neurozhora"
@@ -27,17 +27,17 @@ BOT_USERNAME = "neurozhora"
 FIXTURE: list[tuple[int, int, str, str, int | None]] = [
     (1001, 501, "member_a", "народ, кто-нибудь брал новую соньку?", None),
     (1002, 502, "member_b", "я жду скидок, сейчас ценник конский", 1001),
-    (1003, 503, "member_c", "@neurozhora чем занят?", None),
-    (1004, BOT_USER_ID, BOT_USERNAME, "Да так, по хозяйству вожусь.", 1003),
+    (1003, 503, "member_c", "@neurozhora что умеешь?", None),
+    (1004, BOT_USER_ID, BOT_USERNAME, "Подсказываю по играм, ищу данные, слежу за дуэлями.", 1003),
     (1005, 501, "member_a", "@neurozhora как дела вообще?", None),
-    (1006, BOT_USER_ID, BOT_USERNAME, "Нормально, не жалуюсь.", 1005),
+    (1006, BOT_USER_ID, BOT_USERNAME, "Работаю штатно.", 1005),
     (1007, 502, "member_b", "вчера дошёл наконец до финала, концовка слабая", None),
     (1008, 503, "member_c", "какая игра?", 1007),
     (1009, 502, "member_b", "та самая, про которую я месяц ныл", 1008),
     (1010, 501, "member_a", "@neurozhora а ты в это играл?", None),
-    (1011, BOT_USER_ID, BOT_USERNAME, "Играл. Финал и правда так себе.", 1010),
+    (1011, BOT_USER_ID, BOT_USERNAME, "Я бот, сам не играю, но отзывы на финал и правда смешанные.", 1010),
     (1012, 503, "member_c", "@neurozhora ты бесполезный, если честно", 1011),
-    (1013, BOT_USER_ID, BOT_USERNAME, "Спасибо, записал в блокнот.", 1012),
+    (1013, BOT_USER_ID, BOT_USERNAME, "Принято. Постараюсь быть полезнее.", 1012),
     (1014, 501, "member_a", "кто в выходные свободен на кооператив?", None),
     (1015, 502, "member_b", "я за, если не слишком поздно", 1014),
     (1016, 503, "member_c", "мне бы отоспаться сначала", 1014),
@@ -46,22 +46,6 @@ FIXTURE: list[tuple[int, int, str, str, int | None]] = [
     (1019, 502, "member_b", "справедливо", 1018),
     (1020, 503, "member_c", "@neurozhora что нового?", None),
 ]
-
-
-# Canon the reply path injects: without it the bot-life block of the prompt is
-# empty and a biography change produces no visible diff.
-CANON_FACTS = [
-    "Жора держит пасеку за домом.",
-    "Жора перекрасил полдома в прошлом месяце.",
-    "У Жоры в избе стоят комп и PS5.",
-]
-CANON_EPISODES = [
-    ("Соседский пёс утащил мою рукавицу под крыльцо и не отдаёт. "
-     "Сижу жду, кто первый сдастся.", "чинит крыльцо"),
-    ("Ставил брагу по дедовскому рецепту, забыл про неё на три дня. "
-     "Теперь в сенях пахнет как в клубе.", "проветривает сени"),
-]
-CANON_ACTIVITIES = ["чинит улья после медведя", "перебирает дрова в сарае"]
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -103,25 +87,6 @@ async def seed(chat_id: int) -> int:
     return inserted
 
 
-async def seed_bot_canon() -> int:
-    """Insert synthetic bot canon so the reply prompt's life block is populated.
-
-    Returns:
-        Number of canon rows written (facts plus episodes plus activities).
-    """
-    await bot_memories.upsert_facts(CANON_FACTS)
-    for content, activity in CANON_EPISODES:
-        await bot_memories.insert_episode(
-            content=content,
-            post_format="story",
-            current_activity=activity,
-            embedding=await embedder.embed(content),
-        )
-    for phrase in CANON_ACTIVITIES:
-        await bot_memories.insert_activity(phrase)
-    return len(CANON_FACTS) + len(CANON_EPISODES) + len(CANON_ACTIVITIES)
-
-
 async def run(args: argparse.Namespace) -> int:
     """Seed the database and report what was written.
 
@@ -134,10 +99,9 @@ async def run(args: argparse.Namespace) -> int:
     await database.init()
     try:
         messages = await seed(args.chat_id)
-        canon = await seed_bot_canon()
     finally:
         await database.close()
-    print(f"seeded {messages} message(s) into chat {args.chat_id} and {canon} canon row(s)")
+    print(f"seeded {messages} message(s) into chat {args.chat_id}")
     return 0
 
 

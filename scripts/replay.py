@@ -35,9 +35,9 @@ from src.store import db as database
 
 SEPARATOR = "=" * 78
 DEFAULT_LIMIT = 40
-# Fixed so the 10% activity-volunteer roll in ContextBuilder lands identically
-# on both sides of a diff. Without it every run reshuffles which messages carry
-# the activity line and the diff is unreadable.
+# Fixed so the probabilistic gates in ContextBuilder land identically on both
+# sides of a diff. Without it every run reshuffles which messages carry the
+# gated context and the diff is unreadable.
 DEFAULT_SEED = 20260810
 
 
