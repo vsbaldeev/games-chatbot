@@ -1,27 +1,14 @@
 Telegram group chat bot for a Russian-speaking PS5 friend group.
 
-The bot is НейроЖора — Жора for short — a sarcastic gaming assistant written as a
-do-it-all guy from an unnamed Slavic village: he answers game questions with dry
-humour, needles the members, and decides on his own when a joke is worth making
-(gentle by default, roasting only when someone invites it) or when to stay quiet.
-
-The village is his manner, not his subject. Жора used to post episodes from an
-invented village life three times a week and to weave that biography into ordinary
-replies; the chat read it as noise, so the whole feature was retired on 2026-08-10
-and he now speaks only when spoken to (see `src/life/README.md` for the decision
-and what was removed). What survives is the voice — and the photos.
-
-Members can ask Жора for a photo of himself («сфоткай себя», «покажи свой
-огород»): the filter classifies the request, Жора immediately answers in
-character that he went to take the shot, and the generated photo arrives as a
-reply minutes later (CPU generation is slow). Photo requests are the heaviest
-signal of the per-user attention budget — a rapid second request gets an
-in-character refusal instead of a second render — and a single global
-generation slot keeps concurrent requests from queueing behind each other.
-Between posts, a silent daily job invents a new season-appropriate activity
-phrase each morning with no chat post, so the answer changes daily instead of
-sitting frozen for up to a week — and a dated history of recent activities
-lets Жора answer "what did you do yesterday" consistently too.
+The bot is НейроЖора — Жора for short — a gaming assistant for the group: it
+answers game questions, looks things up, and reacts with a little dry humour only
+when a message gives it something to react to (gentle by default, roasting only
+when someone invites it), or stays quiet. It presents itself as an AI assistant
+and has no character backstory: an earlier village-man persona («Жора»), with
+its invented life posts, selfies and voice, was retired because the chat read it
+as noise and wanted a helpful assistant (see the 2026-10-13 removal). The name
+survives only as a handle: addressing the bot by «Жора»/«НейроЖора» or its
+`@username` still counts as talking to it. It speaks only when spoken to.
 Tracks per-user stats, extracts long-term memories, and routes every message through
 a typed LangGraph pipeline. YouTube Shorts, Instagram Reels, and long-form YouTube
 links posted in the chat are watched for everyone: the bot downloads the clip
@@ -47,9 +34,7 @@ doesn't automatically count as addressing the bot the way replying to its
 other messages does, since it's often just chat among members about the
 video rather than talk to the bot.
 Voice messages and
-video notes are answered in kind: the reply comes back as a voice note spoken
-by a local Silero v5 Russian TTS voice, degrading to plain text whenever the
-reply is unspeakable (too long, no Cyrillic) or synthesis fails.
+video notes are transcribed and answered in text.
 
 ## Architecture
 
@@ -61,14 +46,10 @@ reply is unspeakable (too long, no Cyrillic) or synthesis fails.
 | [src/feedback/](src/feedback/README.md) | Implicit user-feedback tracking — per-message counters for reaction emoji, labelled replies, and silence |
 | [src/commands/](src/commands/README.md) | Command handlers — /duel |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup, yt-dlp refresh |
-| [src/life/](src/life/README.md) | Chat-requested selfies — scene writing, best-of-N generation, vision judge |
 | [src/group_profile/](src/group_profile/README.md) | Chat-requested group profiling — one user-supplied rubric applied to every member via a single LLM call |
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
 | [src/achievements/](src/achievements/README.md) | Duel achievements + stat counters (consumed by roast material) |
-| [src/tts/](src/tts/README.md) | Text-to-speech — local Silero v5 Russian synthesis for voice-in-kind replies |
-| [src/imagegen/](src/imagegen/README.md) | HTTP client for the imagegen service — never-raise, photo posts degrade to text |
-| [imagegen-service/](imagegen-service/README.md) | Self-hosted CPU image generation — FastAPI + diffusers + LCM-LoRA, separate container |
 | [src/downloads/](src/downloads/README.md) | HTTP client for the download service — never-raise, Shorts/Reel/YouTube summaries degrade to silence |
 | [download-service/](download-service/README.md) | Self-hosted yt-dlp downloads — FastAPI, separate container, self-updating |
 | [src/config/](src/config/) | Configuration — credentials, model registry ([models.py](src/config/models.py)), and every LLM prompt text ([prompts.py](src/config/prompts.py)) |
@@ -89,8 +70,6 @@ LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.8-27
 LLM (roles)  Groq openai/gpt-oss-120b (also used for on-request group profiling, src/group_profile/)
 LLM (filter) Groq qwen/qwen3.8-27b (reasoning disabled) → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
 STT          Groq whisper-large-v3
-TTS          Silero v5 Russian (local, CPU torch, speaker aidar; OGG/Opus via PyAV)
-Image gen    Stable Diffusion 1.5 (DreamShaper 8), DPM++ 2M Karras 20 steps, self-hosted CPU service (diffusers/FastAPI, async job API); best-of-3 candidates ranked by the vision judge
 Vision       Groq qwen/qwen3.8-27b (reasoning disabled — thinking would eat the whole token budget) → OpenRouter qwen/qwen3-vl-32b-instruct (cross-provider fallback; make_vision_llm)
 Security     Groq llama-prompt-guard-2-86m
 Video frames PyAV (in-process, no subprocess)
@@ -100,7 +79,7 @@ Game data    IGDB (Twitch OAuth), Steam public API, psdeals.net RSS
 Media data   TMDB, AniList GraphQL, OpenCritic
 Web search   Tavily (falls back to DuckDuckGo)
 Storage      PostgreSQL + pgvector + asyncpg (connection pool, min 2 / max 10)
-Hosting      VPS / Docker Compose (bot + postgres + pot-provider + download-service + imagegen containers)
+Hosting      VPS / Docker Compose (bot + postgres + pot-provider + download-service containers)
 ```
 
 ## Running
@@ -116,13 +95,11 @@ docker compose logs -f
 ```
 
 Required env vars: `TELEGRAM_TOKEN`, `GROQ_API_KEY`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BOT_USERNAME`, `POSTGRES_PASSWORD`.
-Optional: `DATABASE_URL` (defaults to `postgresql://chatbot:changeme@localhost:5432/chatbot`), `TAVILY_API_KEY`, `TMDB_API_KEY`,
-`TTS_MODEL_PATH` (defaults to `.cache/silero/v5_ru.pt`; downloaded on first start locally, pre-baked in the Docker image).
+Optional: `DATABASE_URL` (defaults to `postgresql://chatbot:changeme@localhost:5432/chatbot`), `TAVILY_API_KEY`, `TMDB_API_KEY`.
 
-Voice replies run on CPU-only PyTorch (`torch==2.9.1+cpu` from the PyTorch wheel
-index on Linux) — the bot container's memory limit is 2g to fit the torch runtime
-plus the resident Silero model. A TTS load failure is not fatal: the bot starts and
-answers everything in text.
+The bot container's memory limit (2g) was sized for CPU-only PyTorch and the
+Silero TTS model, both since removed; it can likely be lowered once real usage
+is measured.
 
 ### Logging
 
@@ -135,8 +112,7 @@ derived from the Telegram update id. Every handled message produces exactly one
 14.07 21:03:12 I 842137 pipeline  chat=-100123 user=@vasya kind=voice msg=5121 trigger=explicit filter=MEANINGFUL tier=0 guard=ok action=replied len=214 dur=3.42s
 ```
 
-`action` is `replied`, `joked`, `replied+photo` (a photo-request ack whose
-background selfie generation was launched), `ignored` (with `reason=…`:
+`action` is `replied`, `joked`, `ignored` (with `reason=…`:
 `not_addressed`, `meaningless`, `wound_down`, `guard_blocked`, …) or
 `error:<kind>`.
 
@@ -182,8 +158,6 @@ The first field is what went out — `reply`, `joke`, or `life:<format>` for a
 scheduled post. Voice posts log both halves (`[caption] … [spoken] …`), since the
 caption alone doesn't tell you what was said. These are DEBUG records, per the
 policy above; the canonical INFO line still carries only `len=`.
-
-The imagegen sidecar keeps uvicorn's own logging and is not affected.
 
 ## Database migrations
 

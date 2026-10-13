@@ -26,7 +26,7 @@ sending.py
                                      already-sent message
                                      `source` is required on both (feedback
                                      source tag: "notice" | "meme" |
-                                     "group_profile" | "selfie" | ...) — see
+                                     "group_profile" | ...) — see
                                      src.store.message_feedback.register
 
 messages.py
@@ -54,23 +54,15 @@ messages.py
                                      and options in full, read for real rather than a bare
                                      placeholder
 
-voice_reply.py
-    try_send_voice_reply(msg, text) — answer a voice/video_note trigger in kind:
-                                      synthesize the reply via src/tts (Silero v5)
-                                      and send it with reply_voice; returns None on
-                                      any failure so deliver_response falls back to
-                                      the plain text reply
-
 messages.py (deliver_response)
     deliver_response(final_state, msg, clean) — dispatches the pipeline's
                                       reply. A link trigger (youtube_short /
                                       social_link) whose fetch produced
                                       content is handed off to
                                       link_repost.deliver_link_message;
-                                      voice/video_note triggers try a
-                                      synthesized voice reply first
-                                      (voice_reply.py, falling back to text);
                                       everything else is a plain text reply
+                                      (voice/video_note triggers included —
+                                      the bot never answers with audio)
 
 link_repost.py
     deliver_link_message(msg, summary, video, username, url, is_bare,
@@ -178,15 +170,6 @@ deterministic floor MEANINGLESS/BANTER get). An @mention skips this whole
 path: it clears `broadcast_reply` at the router, so the bot is always
 addressed unambiguously.
 
-## Chat-requested selfies
-
-When the pipeline accepted a photo request (`photo_request` state flag set by
-the filter, no selfie already in flight), `run_pipeline` launches
-`src/life/selfie.deliver_selfie` as a fire-and-forget task — but only after
-`deliver_and_record` actually delivered the in-character «ща сфоткаю» ack, so
-a pipeline failure never leaves a photo without its promise. The canonical
-log line records the run as `action=replied+photo`.
-
 ## Chat-requested memes
 
 When the pipeline accepted a meme request (`meme_request` state flag set by the
@@ -203,8 +186,8 @@ honest canned line from `MEME_FAILED_REPLIES` goes out instead. That fallback
 is load-bearing: the `/meme` command was retired, so silence here would leave
 a direct request unanswered with no other way to ask.
 
-Like the selfie path, this is fire-and-forget, so the canonical log line emits
-before the meme actually lands.
+This is fire-and-forget, so the canonical log line emits before the meme
+actually lands.
 
 ## Chat-requested group profiling
 
@@ -222,8 +205,8 @@ If that returns `None` (no members at all) or raises, an honest canned line
 from `GROUP_PROFILE_FAILED_REPLIES` goes out instead, same principle as the
 meme path's fallback: a direct request must never end in silence.
 
-Like the meme and selfie paths, this is fire-and-forget, so the canonical log
-line emits before the profile message actually lands.
+Like the meme path, this is fire-and-forget, so the canonical log line emits
+before the profile message actually lands.
 
 ## Pipeline error handling
 

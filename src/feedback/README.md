@@ -66,7 +66,7 @@ sentiment.py  — POSITIVE_REACTIONS (❤👍😂🔥💯😅😁) and
 - Registration of every bot message for tracking: `src.store.message_feedback.register`,
   called from `send_and_store`/`edit_and_store` (`src/events/sending.py`),
   `deliver_and_record` (`src/events/messages.py`), `src/memes/sender.py`,
-  `src/life/selfie.py`, and `src/jobs/roles.py`.
+  and `src/jobs/roles.py`.
 - The response LLM trace (exact prompt/response per pipeline reply):
   `src.store.llm_log`/`llm_system_prompts`, written by `deliver_and_record`.
 - Retention: `src/jobs/cleanup.py`.
@@ -115,5 +115,5 @@ ORDER BY messages DESC;
 ```
 
 Add `AND source = 'pipeline'` to see only conversational messages, excluding
-memes, selfies, weekly roles and notices. Those carry `trigger = '-'` and land in
+memes, weekly roles and notices. Those carry `trigger = '-'` and land in
 their own row otherwise.

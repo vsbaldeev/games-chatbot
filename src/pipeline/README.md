@@ -311,9 +311,6 @@ filter  (runs after ingester)
     │       → should_respond=False, filter_verdict="NOT_ADDRESSED", no emoji,
     │         no attention-budget charge (the bot was never addressed in the first place)
     ├─ text, LLM → BOT_INSULT (insult/provocation aimed at the bot) → engagement gate
-    ├─ text, LLM → PHOTO_REQUEST (asks for a photo of the bot itself —
-    │       «сфоткай себя», «покажи свой огород»; pictures of anything else
-    │       stay MEANINGFUL) → engagement gate
     ├─ text, LLM → MEME_REQUEST (asks the bot to send a meme — «скинь мем»,
     │       «кинь мемас»; merely talking about a meme stays MEANINGFUL)
     │       → engagement gate
@@ -352,10 +349,9 @@ store/engagement.py, table engagement_scores): one leaky-bucket attention
 score per (chat_id, user_id), persisted in Postgres so a redeploy never resets
 a wound-down user. Every addressed verdict (and every double-confirmed
 overheard insult, and explicitly addressed transcribed media as MEANINGFUL)
-charges a weight — PHOTO_REQUEST 4.5 (each accepted request occupies the
-single shared imagegen worker for minutes), GROUP_PROFILE_REQUEST 3.0 (one
-LLM call plus a store query per chat member — real cost, but not a scarce
-shared resource like the imagegen worker), BOT_INSULT 3.0, BANTER/MEANINGLESS
+charges a weight — GROUP_PROFILE_REQUEST 3.0 (one LLM call plus a store
+query per chat member — real cost, but not a scarce shared resource),
+BOT_INSULT 3.0, BANTER/MEANINGLESS
 2.0, MEANINGFUL 1.0, MEME_REQUEST 1.0 (asking for a meme is an ordinary thing
 to do, not a scarce favour) — decayed with a 30-min half-life in a single atomic
 UPSERT; the post-charge
@@ -373,14 +369,6 @@ keep reciting the score. Store errors fail open to the full tier.
     │       and any BANTER verdict additionally set wind_down=True: a
     │       mirrored counter-insult mid-thread never earns a fresh full
     │       comeback (that is what fuels roast-battle loops).
-    │       PHOTO_REQUEST at this tier sets photo_request=True plus a
-    │       photo_in_flight peek of the selfie generation slot: the worker is
-    │       skipped, the reply is an in-character «ща сфоткаю» ack («уже
-    │       фоткаю» when a selfie is already rendering), and after the ack is
-    │       delivered the events layer fire-and-forgets
-    │       src/life/selfie.deliver_selfie (weight 4.5 → a fresh user's first
-    │       request ships a photo, a rapid second one lands in the brush-off
-    │       refusal below)
     │       MEME_REQUEST at this tier sets meme_request=True: the worker is
     │       skipped, the response node short-circuits to an EMPTY reply (the
     │       meme is the whole answer — a «держи мем» line would be filler and
@@ -398,12 +386,10 @@ keep reciting the score. Store errors fail open to the full tier.
     │       rendered result. This and MEME_REQUEST are the only paths that
     │       answer with no response-node text at all.
     ├─ BRUSH_OFF tier → should_respond=True + wind_down=True — the response
-    │       node injects a close-the-conversation hint (one short in-character
+    │       node injects a close-the-conversation hint (one short
     │       phrase, no questions, no invitations) and the worker is skipped;
     │       BANTER at this tier degrades straight to the bored emoji reaction;
-    │       a PHOTO_REQUEST here gets an explicit in-character photo refusal
-    │       directive instead of the generic brush-off — no generation runs;
-    │       a MEME_REQUEST likewise gets a meme refusal directive (which
+    │       a MEME_REQUEST here gets a meme refusal directive (which
     │       forbids inventing a meme in text) and no meme is sent; a
     │       GROUP_PROFILE_REQUEST gets the same treatment via its own refusal
     │       directive (forbids inventing roles/scores/verdicts in text)
@@ -499,7 +485,7 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
     │          (wind_down — one short closing phrase needs no tools), Shorts/
     │          social-link summaries (trigger="youtube_short"/"social_link" — the
     │          source material is already in processed_text; tools would only
-    │          add junk), photo/meme requests (photo_request/meme_request — no
+    │          add junk), meme requests (meme_request — no
     │          text to attach findings to) and group-profile requests
     │          (group_profile_request — it runs its own dedicated LLM call over
     │          the roster's own dossiers, not IGDB-style tool facts) → empty output

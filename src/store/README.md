@@ -92,10 +92,9 @@ thread_history (
 INDEX idx_thread_history_lookup ON (thread_id, created_at)
 Retention: 60 days (cleanup_messages_job)
 
--- RETIRED 2026-08-10 (Жора's scheduled life posts, see src/life/README.md).
--- The bot_memories table still exists in the database: no migration drops it,
--- so the canon survives if the feature is ever revived. Nothing reads or
--- writes it any more — src/store/bot_memories.py was deleted.
+-- bot_memories (the retired Жора persona's life canon) was dropped by
+-- migration v5_0007 (2026-10-13); nothing has read or written it since
+-- 2026-08-10.
 
 -- One leaky-bucket attention score per (chat, user) for the conversation
 -- wind-down engine (src/pipeline/engagement_gate.py). Decay (30-min
@@ -169,7 +168,7 @@ INDEX idx_bot_llm_log_created ON (created_at)
 bot_message_feedback (
     chat_id             BIGINT      NOT NULL,
     message_id          BIGINT      NOT NULL,
-    source              TEXT        NOT NULL,   -- "pipeline" | "meme" | "selfie" | "roles" | "group_profile" | "notice"
+    source              TEXT        NOT NULL,   -- "pipeline" | "meme" | "roles" | "group_profile" | "notice"
     trigger             TEXT        NOT NULL DEFAULT '-',
     filter_verdict      TEXT        NOT NULL DEFAULT '-',
     sent_at             TIMESTAMPTZ NOT NULL DEFAULT now(),

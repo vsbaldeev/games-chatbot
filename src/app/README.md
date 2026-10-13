@@ -107,7 +107,6 @@ src/events/     handle_text_message and friends — the per-media-type update ha
 src/jobs/       the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
 src/agent/      worker/response LLM agents, initialised in __on_startup
 src/store/      Postgres access — db.init() opens the pool __on_startup depends on
-src/tts/        voice reply synthesis, initialised in __on_startup
 ```
 
 To trace a feature end to end: find its entry in the tables above, then open the matching file
