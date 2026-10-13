@@ -1,34 +1,81 @@
-"""Reply-to-bot thread tracking.
+"""Reply-to-bot counting.
 
 Lives outside src.events deliberately: this module is called from
 src.pipeline.router, and src.pipeline never imports src.events (the
 dependency runs the other way — src.events imports src.pipeline.graph).
 
-unified_messages.get_chain already walks the reply_to_msg_id chain from a
-message up to its root, oldest-first, capped at CHAIN_DEPTH_LIMIT hops — the
-same helper the context builder uses for reply-chain assembly, reused here
-rather than re-querying.
-
-Labelling is not done here. track_reply enqueues the reply into
-bot_reply_labels and returns; src/jobs/reply_labels.py labels it within
-fifteen minutes. That keeps every model call off the message-handling path,
-so a labelling outage cannot slow or break a reply.
+track_reply finds the nearest bot message in the reply chain and hands the
+reply to a background task, so a labelling call can never slow or break the
+reply path. The task labels the reply (one OpenRouter call for text, a rule
+for everything else) and bumps one counter on that bot message's
+bot_message_feedback row. Only the nearest bot message is credited, so a long
+back-and-forth does not inflate every earlier turn.
 """
 
+import asyncio
+
 from src import log
-from src.store import message_feedback, reply_labels, unified_messages
+from src.feedback.reply_labeller import LabellingCallFailed, label_reply
+from src.store import message_feedback, unified_messages
 
 logger = log.get_logger(__name__)
 
+# Triggers whose replies are not measured at all: Reels and long-form YouTube
+# summaries are not a signal the operator reads, so labelling replies to them
+# would spend model calls for nothing.
+EXCLUDED_TRIGGERS: frozenset[str] = frozenset({"social_link"})
+
+LABEL_KINDS: dict[str, str] = {
+    "POSITIVE": "positive",
+    "NEGATIVE": "negative",
+    "NEUTRAL": "neutral",
+}
+
+# Strong references to in-flight counting tasks: the event loop only keeps a
+# weak one, so an unreferenced task can be garbage-collected mid-call.
+BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def nearest_bot_ancestor(chain: list[dict], bot_id: int) -> dict | None:
+    """Return the newest bot message in an oldest-first chain, or None."""
+    for message in reversed(chain):
+        if message["user_id"] == bot_id:
+            return message
+    return None
+
+
+async def classify_reply(*, bot_message: dict, reply: dict, source: str) -> str:
+    """Decide which reply counter this reply bumps (a key of REPLY_KIND_COLUMNS)."""
+    if reply["media_type"] != "text":
+        return "media"
+    if not reply["content"].strip():
+        return "unlabelled"
+    try:
+        label = await label_reply(bot_message=bot_message["content"], reply=reply["content"], source=source)
+    except LabellingCallFailed as error:
+        logger.warning("Reply labelling call failed for message %s: %s", reply["message_id"], error)
+        return "unlabelled"
+    return LABEL_KINDS.get(label, "unlabelled")
+
+
+async def count_reply(*, chat_id: int, bot_message: dict, reply: dict) -> None:
+    """Label one reply and bump the matching counter. Never raises."""
+    bot_message_id = bot_message["message_id"]
+    try:
+        origin = await message_feedback.get_origin(chat_id=chat_id, message_id=bot_message_id)
+        if origin is None:
+            return
+        source, trigger = origin
+        if trigger in EXCLUDED_TRIGGERS:
+            return
+        kind = await classify_reply(bot_message=bot_message, reply=reply, source=source)
+        await message_feedback.add_reply(chat_id=chat_id, message_id=bot_message_id, kind=kind)
+    except Exception as error:
+        logger.warning("Failed to count reply %s on bot message %s: %s", reply["message_id"], bot_message_id, error)
+
 
 async def track_reply(*, chat_id: int, message_id: int, bot_id: int) -> None:
-    """Credit every bot message in the reply chain leading up to `message_id`.
-
-    A reply chain can pass through more than one bot message (the member
-    answers the bot, the bot answers back, the member replies again) — every
-    bot ancestor is credited, each at its own hop distance below the
-    triggering message, so a long back-and-forth counts toward every turn
-    it actually continues, not just the newest one.
+    """Start counting a reply against the nearest bot message in its chain.
 
     Args:
         chat_id: Chat the reply was posted in.
@@ -37,30 +84,15 @@ async def track_reply(*, chat_id: int, message_id: int, bot_id: int) -> None:
     """
     try:
         chain = await unified_messages.get_chain(chat_id=chat_id, message_id=message_id)
-    except Exception as err:
-        logger.warning("Failed to load reply chain for message %s: %s", message_id, err)
+    except Exception as error:
+        logger.warning("Failed to load reply chain for message %s: %s", message_id, error)
         return
-    # chain is oldest-first and includes message_id itself as the last entry;
-    # depth is measured from the triggering message, so the last entry (the
-    # reply) is excluded from the ancestor walk below, but kept as `reply`
-    # for the enqueue call — get_chain already fetched its row, so enqueuing
-    # it costs no second query.
+    if not chain:
+        return
     reply = chain[-1]
-    ancestors = chain[:-1]
-    try:
-        enqueued = False
-        for depth, ancestor in enumerate(reversed(ancestors), start=1):
-            if ancestor["user_id"] != bot_id:
-                continue
-            await message_feedback.add_reply(chat_id=chat_id, message_id=ancestor["message_id"])
-            if not enqueued:
-                await reply_labels.enqueue(
-                    chat_id=chat_id,
-                    reply_message_id=reply["message_id"],
-                    bot_message_id=ancestor["message_id"],
-                    depth=depth,
-                    media_type=reply["media_type"],
-                )
-                enqueued = True
-    except Exception as err:
-        logger.warning("Failed to credit reply for message %s: %s", message_id, err)
+    bot_message = nearest_bot_ancestor(chain[:-1], bot_id)
+    if bot_message is None:
+        return
+    task = asyncio.create_task(count_reply(chat_id=chat_id, bot_message=bot_message, reply=reply))
+    BACKGROUND_TASKS.add(task)
+    task.add_done_callback(BACKGROUND_TASKS.discard)

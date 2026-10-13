@@ -2,7 +2,7 @@
 facts, and the feedback table."""
 
 from src import log
-from src.store import llm_log, llm_system_prompts, message_feedback, reply_labels, thread_history, unified_messages, user_memories
+from src.store import llm_log, llm_system_prompts, message_feedback, thread_history, unified_messages, user_memories
 
 logger = log.get_logger(__name__)
 
@@ -41,9 +41,4 @@ async def cleanup_messages_job(context) -> None:
     logger.info(
         "Cleanup: deleted %d old feedback rows (retention=%dd)",
         deleted_feedback, message_feedback.RETENTION_DAYS,
-    )
-    deleted_labels = await reply_labels.cleanup_old()
-    logger.info(
-        "Cleanup: deleted %d old reply label rows (retention=%dd)",
-        deleted_labels, reply_labels.RETENTION_DAYS,
     )
