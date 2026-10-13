@@ -34,24 +34,27 @@ class TestResponsePromptGroundedHumor:
         assert "зацепиться" in RESPONSE_PROMPT
 
 
-class TestResponsePromptHasNoBiography:
-    """Verify the reply prompt never tells Жора to narrate his own life.
+class TestResponsePromptIsAnAssistant:
+    """Verify the reply prompt presents an AI assistant, not a village character.
 
-    Members read the invented biography as noise (2026-08-10 decision): the
-    scheduled life posts were retired and the reply prompt's standing order to
-    improvise village activities was replaced by a deflect-and-redirect rule.
+    Members disliked the Жора persona and read the bot as an assistant, so the
+    character sheet, the village biography and the bot-and-Жора dual identity
+    were removed (2026-10-13 decision).
     """
 
-    def test_does_not_instruct_improvising_village_life(self):
-        """Assert the improvise-something-rural instruction is gone."""
-        assert "импровизируй что-то будничное деревенское" not in RESPONSE_PROMPT
+    def test_has_no_village_character(self):
+        """Assert the village persona text is gone from the prompt."""
+        assert "деревн" not in RESPONSE_PROMPT
+        assert "глухой славянской" not in RESPONSE_PROMPT
 
-    def test_forbids_volunteering_his_own_affairs(self):
-        """Assert the prompt explicitly bans unprompted self-narration."""
-        assert "Про свою жизнь" in RESPONSE_PROMPT
-        assert "сам не рассказывай" in RESPONSE_PROMPT
+    def test_forbids_inventing_a_biography(self):
+        """Assert the prompt bans narrating a life the bot does not have."""
+        assert "Никакой выдуманной биографии" in RESPONSE_PROMPT
 
-    def test_keeps_the_village_voice(self):
-        """Assert the character's manner survives the biography's removal."""
+    def test_admits_being_an_ai(self):
+        """Assert the prompt states the bot is an AI assistant."""
+        assert "ИИ-ассистент" in RESPONSE_PROMPT
+
+    def test_keeps_the_name_as_an_address_handle(self):
+        """Assert the name survives so that addressing the bot by it works."""
         assert "Жора" in RESPONSE_PROMPT
-        assert "сарказм" in RESPONSE_PROMPT.lower()
