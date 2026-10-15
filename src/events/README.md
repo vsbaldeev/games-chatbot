@@ -236,6 +236,15 @@ Additional rules:
   that happens after the notification already fired but before the node
   returns (the exception itself, not the graph state) carries the same
   message via `err.search_notification_msg`, set in `WorkerNode.__call__`.
+- Every delivered pipeline reply and every failure notice that reaches the chat
+  also gets a `bot_message_content` row (`recorder.record`, from
+  `src.message_content`): `deliver_and_record` records the reply through
+  `record_content`, `notify_pipeline_failure` records the notice under the id
+  of the message that carries it (the edited search notification, or the new
+  message). A limit notice that the cooldown degraded to a 😴 reaction sends no
+  message and writes no row; an unaddressed failure sends nothing and writes
+  no row. The recorder never raises, so a failed metrics write cannot affect
+  delivery. See src/message_content/README.md.
 
 ## Stat columns tracked per media type
 

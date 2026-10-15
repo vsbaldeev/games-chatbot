@@ -8,6 +8,8 @@ re-tested here.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from types import SimpleNamespace
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
@@ -18,11 +20,13 @@ from src.events.messages import (
     deliver_and_record,
     deliver_response,
     derive_reply_media_type,
+    notice_kind,
     notify_pipeline_failure,
     passive_voice_extract,
     send_limit_notice,
 )
 from src.events.sending import edit_and_store, send_and_store
+from src.pipeline.state import ContentKind, WorkerStatus
 from tests.builders import make_incoming, make_state
 
 TRANSCRIBE_VOICE_PATCH_TARGET = "src.events.messages.transcribe_voice"
@@ -379,6 +383,126 @@ class TestDeliverAndRecordFeedbackCapture:
         with patch(INSERT_PATCH_TARGET, AsyncMock()), \
              patch(PROMPT_ENSURE_PATCH_TARGET, AsyncMock(side_effect=RuntimeError("db down"))):
             await deliver_and_record(state, msg, bot_id=999, response_text="y")  # must not raise
+
+
+RECORD_CONTENT_PATCH_TARGET = "src.events.messages.recorder.record"
+
+
+class TestDeliverAndRecordContentRecording:
+    async def test_records_a_response_with_its_question_and_worker_status(self):
+        msg = make_msg()
+        incoming = make_incoming(raw_text="когда выйдет GTA 6?", processed_text=None)
+        state = make_state(
+            incoming, response_trigger="explicit", filter_verdict="MEANINGFUL", worker_status=WorkerStatus.OK,
+        )
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(FEEDBACK_REGISTER_PATCH_TARGET, AsyncMock()), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await deliver_and_record(state, msg, bot_id=999, response_text="Привет!")
+        record.assert_awaited_once_with(
+            chat_id=msg.chat_id, message_id=999, content_kind=ContentKind.RESPONSE,
+            worker_status=WorkerStatus.OK, trigger="explicit",
+            question="когда выйдет GTA 6?", response="Привет!",
+        )
+
+    async def test_canned_guard_reply_records_prompt_injection_kind_without_worker_status(self):
+        msg = make_msg()
+        state = make_state(
+            make_incoming(), response_trigger="explicit",
+            content_kind=ContentKind.PROMPT_INJECTION_REPLY,
+        )
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(FEEDBACK_REGISTER_PATCH_TARGET, AsyncMock()), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await deliver_and_record(state, msg, bot_id=999, response_text="Не, это без меня.")
+        kwargs = record.await_args.kwargs
+        assert kwargs["content_kind"] == ContentKind.PROMPT_INJECTION_REPLY
+        assert kwargs["worker_status"] is None
+
+    async def test_wind_down_reply_records_wind_down_kind(self):
+        msg = make_msg()
+        state = make_state(
+            make_incoming(), response_trigger="explicit", wind_down=True, worker_status=WorkerStatus.SKIPPED,
+        )
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(FEEDBACK_REGISTER_PATCH_TARGET, AsyncMock()), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await deliver_and_record(state, msg, bot_id=999, response_text="Всё, хватит.")
+        assert record.await_args.kwargs["content_kind"] == ContentKind.WIND_DOWN_REPLY
+
+    async def test_voice_question_is_the_transcript(self):
+        msg = make_msg()
+        incoming = make_incoming(raw_text=None, processed_text="сколько проходить Hades?", media_type="voice")
+        state = make_state(incoming, response_trigger="explicit", worker_status=WorkerStatus.OK)
+        with patch(INSERT_PATCH_TARGET, AsyncMock()), \
+             patch(FEEDBACK_REGISTER_PATCH_TARGET, AsyncMock()), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await deliver_and_record(state, msg, bot_id=999, response_text="Часов 20.")
+        assert record.await_args.kwargs["question"] == "сколько проходить Hades?"
+
+
+class TestNotifyPipelineFailureRecordsContent:
+    @pytest.mark.parametrize("chat_id, error, expected_kind", [
+        (900011, RateLimitError("x"), ContentKind.LIMIT_NOTICE),
+        (900012, DailyLimitError("x"), ContentKind.LIMIT_NOTICE),
+        (900013, ContextLengthError("x"), ContentKind.CONTEXT_LIMIT_NOTICE),
+        (900014, ValueError("boom"), ContentKind.ERROR),
+    ])
+    async def test_notice_is_recorded_with_its_kind(self, chat_id, error, expected_kind):
+        msg = make_failing_msg()
+        sent = MagicMock(message_id=777)
+        with patch("src.events.messages.send_and_store", AsyncMock(return_value=sent)), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await notify_pipeline_failure(error, msg, chat_id, True, None)
+        record.assert_awaited_once()
+        kwargs = record.await_args.kwargs
+        assert kwargs["message_id"] == 777
+        assert kwargs["content_kind"] == expected_kind
+        assert kwargs["worker_status"] is None
+
+    def test_error_subclass_keeps_its_parents_notice_kind(self):
+        class SpecificRateLimit(RateLimitError):
+            pass
+
+        assert notice_kind(SpecificRateLimit("x")) == ContentKind.LIMIT_NOTICE
+
+    async def test_edited_notification_is_recorded_by_its_id(self):
+        msg = make_failing_msg()
+        notification = make_notification(message_id=4242)
+        with patch(MESSAGES_INSERT_PATCH_TARGET, new_callable=AsyncMock), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await notify_pipeline_failure(RateLimitError("x"), msg, 900020, True, notification)
+        assert record.await_args.kwargs["message_id"] == 4242
+        assert record.await_args.kwargs["content_kind"] == ContentKind.LIMIT_NOTICE
+
+    async def test_cooldown_reaction_writes_no_row(self):
+        """Inside the cooldown the user gets a 😴 reaction, not a message — nothing to record."""
+        msg = make_failing_msg()
+        msg.set_reaction = AsyncMock()
+        sent = MagicMock(message_id=801)
+        with patch("src.events.messages.send_and_store", AsyncMock(return_value=sent)), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await notify_pipeline_failure(RateLimitError("x"), msg, 900030, True, None)
+            await notify_pipeline_failure(RateLimitError("x"), msg, 900030, True, None)
+        assert record.await_count == 1
+        msg.set_reaction.assert_awaited_once_with("😴")
+
+    async def test_unaddressed_failure_writes_no_row(self):
+        msg = make_failing_msg()
+        with patch("src.events.messages.send_and_store", AsyncMock()), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await notify_pipeline_failure(RateLimitError("x"), msg, 900040, False, None)
+        record.assert_not_awaited()
+
+    async def test_worker_status_is_passed_through(self):
+        msg = make_failing_msg()
+        sent = MagicMock(message_id=802)
+        with patch("src.events.messages.send_and_store", AsyncMock(return_value=sent)), \
+             patch(RECORD_CONTENT_PATCH_TARGET, AsyncMock()) as record:
+            await notify_pipeline_failure(
+                ValueError("boom"), msg, 900050, True, None, worker_status=WorkerStatus.OK,
+            )
+        assert record.await_args.kwargs["worker_status"] == WorkerStatus.OK
 
 
 FEEDBACK_REGISTER_SENDING_TARGET = "src.events.sending.message_feedback.register"

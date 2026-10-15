@@ -31,6 +31,8 @@ from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES
 from src.events.sending import edit_and_store, send_and_store
 from src.group_profile.profile import run_group_profile
 from src.memes.sender import send_meme
+from src.message_content import recorder
+from src.message_content.kinds import content_kind_for, question_text
 from src.pipeline.router import is_explicitly_addressed
 from src.store import llm_log, llm_system_prompts, message_feedback, unified_messages
 from src.utils.ttl_gate import TtlGate
@@ -73,7 +75,7 @@ def is_reply_to_game_message(update: Update) -> bool:
 
 
 from src.pipeline.response_node import strip_markdown, strip_speaker_prefix, strip_writing_tics
-from src.pipeline.state import BotState, IncomingMessage
+from src.pipeline.state import BotState, ContentKind, IncomingMessage, WorkerStatus
 from src.store import thread_history
 
 REPLY_PLACEHOLDERS = {
@@ -271,7 +273,7 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
 
 async def send_limit_notice(
     msg, chat_id: int, notice_text: str, *, notification_msg=None
-) -> None:
+) -> int | None:
     """Send a quota/rate-limit notice, throttled to one per chat per cooldown.
 
     The first notice within ``LIMIT_NOTICE_COOLDOWN_SECONDS`` goes out as a
@@ -290,18 +292,23 @@ async def send_limit_notice(
             meaningful rather than left hanging. The cooldown window is
             still recorded, so a later non-notification hit within it still
             degrades to the reaction.
+
+    Returns:
+        The id of the message that carries the notice, or None when the
+        cooldown degraded it to a reaction (no message was sent).
     """
     if notification_msg is not None:
         quota_notice_gate.seen(chat_id)
         await edit_and_store(notification_msg, chat_id, notice_text, source="notice", reply_to=msg.message_id)
-        return
+        return notification_msg.message_id
     if not quota_notice_gate.seen(chat_id):
-        await send_and_store(msg.get_bot(), chat_id, notice_text, source="notice", reply_to=msg.message_id)
-        return
+        sent = await send_and_store(msg.get_bot(), chat_id, notice_text, source="notice", reply_to=msg.message_id)
+        return sent.message_id
     try:
         await msg.set_reaction("😴")
     except Exception as err:
         logger.warning("Failed to react with cooldown emoji in chat %s: %s", chat_id, err)
+    return None
 
 
 def build_context_length_notice(msg) -> str:
@@ -352,6 +359,29 @@ async def deliver_and_record(final_state, msg, bot_id: int, response_text: str) 
         link_material=link_material,
     )
     await _record_feedback(final_state, msg, sent_id)
+    await record_content(final_state, msg, sent_id, clean)
+
+
+async def record_content(final_state, msg, sent_id: int, delivered_text: str) -> None:
+    """Record what kind of message was just delivered and how its worker stage ended.
+
+    The recorder never raises, so this cannot affect delivery.
+
+    Args:
+        final_state: Final pipeline state; drives the content kind.
+        msg: The triggering ``telegram.Message``.
+        sent_id: Id of the delivered bot message.
+        delivered_text: The cleaned text actually sent to the chat.
+    """
+    await recorder.record(
+        chat_id=msg.chat_id,
+        message_id=sent_id,
+        content_kind=content_kind_for(final_state),
+        worker_status=final_state.get("worker_status"),
+        trigger=final_state.get("response_trigger") or "-",
+        question=question_text(final_state),
+        response=delivered_text,
+    )
 
 
 async def _record_feedback(final_state, msg, sent_id: int) -> None:
@@ -482,8 +512,53 @@ def launch_group_profile_task(bot, chat_id: int, reply_to_msg_id: int, rubric: s
     asyncio.create_task(deliver_group_profile(bot, chat_id, reply_to_msg_id, rubric))
 
 
+def notice_kind(error: Exception) -> ContentKind:
+    """The content kind of the notice an error produces: limit, context overflow, or generic error."""
+    if isinstance(error, (DailyLimitError, RateLimitError)):
+        return ContentKind.LIMIT_NOTICE
+    if isinstance(error, ContextLengthError):
+        return ContentKind.CONTEXT_LIMIT_NOTICE
+    return ContentKind.ERROR
+
+
+def log_pipeline_failure(error: Exception, chat_id: int) -> str:
+    """Log a pipeline failure at the level its kind deserves and name the kind.
+
+    Returns:
+        Short error kind for the canonical log line, e.g. ``"DailyLimit"``.
+    """
+    if isinstance(error, DailyLimitError):
+        logger.warning("Daily token quota exhausted for chat %s", chat_id)
+        return "DailyLimit"
+    if isinstance(error, ContextLengthError):
+        logger.warning("Context length exceeded for chat %s", chat_id)
+        return "ContextLength"
+    if isinstance(error, RateLimitError):
+        logger.warning("Rate limit reached for chat %s", chat_id)
+        return "RateLimit"
+    logger.error("Pipeline error for chat %s: %s", chat_id, error, exc_info=True)
+    return "Exception"
+
+
+async def deliver_failure_notice(error: Exception, msg, chat_id: int, notification_msg) -> int | None:
+    """Send (or edit into ``notification_msg``) the notice matching ``error``.
+
+    Returns:
+        The id of the message carrying the notice, or None when the limit
+        cooldown degraded it to a reaction.
+    """
+    if isinstance(error, DailyLimitError):
+        return await send_limit_notice(msg, chat_id, DAILY_LIMIT_NOTICE, notification_msg=notification_msg)
+    if isinstance(error, RateLimitError):
+        return await send_limit_notice(msg, chat_id, RATE_LIMIT_NOTICE, notification_msg=notification_msg)
+    if isinstance(error, ContextLengthError):
+        return await _send_or_edit_notice(msg, chat_id, build_context_length_notice(msg), notification_msg)
+    return await _send_or_edit_notice(msg, chat_id, GENERIC_FAILURE_NOTICE, notification_msg)
+
+
 async def notify_pipeline_failure(
-    error: Exception, msg, chat_id: int, addressed: bool, notification_msg=None
+    error: Exception, msg, chat_id: int, addressed: bool, notification_msg=None,
+    worker_status: WorkerStatus | None = None,
 ) -> str:
     """Log a pipeline failure, notify the chat when addressed, name the kind.
 
@@ -499,37 +574,34 @@ async def notify_pipeline_failure(
             it in place instead of sending a second message, so the user
             never sees the search indicator hang unresolved alongside an
             unrelated failure reply.
+        worker_status: How the worker stage ended before the failure, or None
+            when the pipeline failed before it finished; recorded with the notice.
 
     Returns:
         Short error kind for the canonical log line, e.g. ``"DailyLimit"``.
     """
-    if isinstance(error, DailyLimitError):
-        logger.warning("Daily token quota exhausted for chat %s", chat_id)
-        if addressed:
-            await send_limit_notice(msg, chat_id, DAILY_LIMIT_NOTICE, notification_msg=notification_msg)
-        return "DailyLimit"
-    if isinstance(error, ContextLengthError):
-        logger.warning("Context length exceeded for chat %s", chat_id)
-        if addressed:
-            await _send_or_edit_notice(msg, chat_id, build_context_length_notice(msg), notification_msg)
-        return "ContextLength"
-    if isinstance(error, RateLimitError):
-        logger.warning("Rate limit reached for chat %s", chat_id)
-        if addressed:
-            await send_limit_notice(msg, chat_id, RATE_LIMIT_NOTICE, notification_msg=notification_msg)
-        return "RateLimit"
-    logger.error("Pipeline error for chat %s: %s", chat_id, error, exc_info=True)
+    error_kind = log_pipeline_failure(error, chat_id)
     if addressed:
-        await _send_or_edit_notice(msg, chat_id, GENERIC_FAILURE_NOTICE, notification_msg)
-    return "Exception"
+        notice_id = await deliver_failure_notice(error, msg, chat_id, notification_msg)
+        if notice_id is not None:
+            await recorder.record(
+                chat_id=chat_id, message_id=notice_id,
+                content_kind=notice_kind(error), worker_status=worker_status,
+            )
+    return error_kind
 
 
-async def _send_or_edit_notice(msg, chat_id: int, text: str, notification_msg) -> None:
-    """Deliver a failure notice, editing ``notification_msg`` if given instead of sending anew."""
+async def _send_or_edit_notice(msg, chat_id: int, text: str, notification_msg) -> int:
+    """Deliver a failure notice, editing ``notification_msg`` if given instead of sending anew.
+
+    Returns:
+        The id of the message that carries the notice.
+    """
     if notification_msg is not None:
         await edit_and_store(notification_msg, chat_id, text, source="notice", reply_to=msg.message_id)
-        return
-    await send_and_store(msg.get_bot(), chat_id, text, source="notice", reply_to=msg.message_id)
+        return notification_msg.message_id
+    sent = await send_and_store(msg.get_bot(), chat_id, text, source="notice", reply_to=msg.message_id)
+    return sent.message_id
 
 
 async def run_pipeline(
@@ -597,7 +669,10 @@ async def run_pipeline(
         notification_msg = final_state.get("search_notification_msg") or getattr(
             error, "search_notification_msg", None
         )
-        error_kind = await notify_pipeline_failure(error, msg, chat.id, addressed, notification_msg)
+        error_kind = await notify_pipeline_failure(
+            error, msg, chat.id, addressed, notification_msg,
+            worker_status=final_state.get("worker_status"),
+        )
         canonical.emit(final_state, f"error:{error_kind}", time.monotonic() - started_at)
         return False
     canonical.emit(final_state, "ignored", time.monotonic() - started_at)
