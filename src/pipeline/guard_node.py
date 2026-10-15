@@ -30,7 +30,7 @@ import random
 from groq import AsyncGroq
 
 from src import config, log
-from src.pipeline.state import BotState
+from src.pipeline.state import BotState, ContentKind
 from src.store import user_memories
 from src.utils.ttl_gate import TtlGate
 
@@ -66,7 +66,8 @@ class GuardNode:
 
         Returns:
             State update dict with ``blocked`` and, for blocked explicit
-            triggers, a canned deflection in ``response``.
+            triggers, a canned deflection in ``response`` tagged
+            ``content_kind = PROMPT_INJECTION_REPLY``.
         """
         msg = state["incoming"]
         # Typed text only: for media messages raw_text carries the caption;
@@ -85,7 +86,11 @@ class GuardNode:
                 flags = guard_flag_gate.hit((msg["chat_id"], msg["user_id"]))
                 if flags >= HACK_FLAGS_BEFORE_FACT:
                     asyncio.create_task(self.__record_hack_attempt(msg))
-                return {"blocked": True, "response": random.choice(GUARD_REFUSALS)}
+                return {
+                    "blocked": True,
+                    "response": random.choice(GUARD_REFUSALS),
+                    "content_kind": ContentKind.PROMPT_INJECTION_REPLY,
+                }
             return {"blocked": True, "drop_reason": "guard_blocked"}
 
         return {"blocked": False}

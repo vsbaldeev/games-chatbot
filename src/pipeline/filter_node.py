@@ -98,7 +98,7 @@ from src.pipeline import engagement_gate
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import is_explicitly_addressed, looks_like_request
-from src.pipeline.state import BotState
+from src.pipeline.state import BotState, ContentKind
 from src.store import unified_messages
 from src.utils.ttl_gate import TtlGate
 
@@ -557,7 +557,11 @@ class MeaninglessFilterNode:
                 "Filter: no Shorts content for message %s, explicit trigger — canned failure reply",
                 message_id,
             )
-            return {"should_respond": False, "response": random.choice(SHORTS_FAILED_REPLIES)}
+            return {
+                "should_respond": False,
+                "response": random.choice(SHORTS_FAILED_REPLIES),
+                "content_kind": ContentKind.MEDIA_FAILURE_NOTICE,
+            }
         logger.info("Filter: no Shorts content for message %s, skipping silently", message_id)
         return {"should_respond": False, "drop_reason": "shorts_failed"}
 
@@ -589,7 +593,11 @@ class MeaninglessFilterNode:
                 "Filter: no social-link content for message %s, explicit trigger — canned failure reply",
                 message_id,
             )
-            return {"should_respond": False, "response": random.choice(SOCIAL_LINK_FAILED_REPLIES)}
+            return {
+                "should_respond": False,
+                "response": random.choice(SOCIAL_LINK_FAILED_REPLIES),
+                "content_kind": ContentKind.MEDIA_FAILURE_NOTICE,
+            }
         logger.info("Filter: no social-link content for message %s, skipping silently", message_id)
         return {"should_respond": False, "drop_reason": "social_link_failed"}
 
@@ -621,7 +629,11 @@ class MeaninglessFilterNode:
                 state["incoming"]["message_id"],
             )
             pool = VISION_FAILED_REPLIES if media_type == "photo" else TRANSCRIPTION_FAILED_REPLIES
-            return {"should_respond": False, "response": random.choice(pool)}
+            return {
+                "should_respond": False,
+                "response": random.choice(pool),
+                "content_kind": ContentKind.MEDIA_FAILURE_NOTICE,
+            }
         logger.info(
             "Filter: no transcription for %s message %s, skipping",
             media_type,
@@ -795,6 +807,7 @@ class MeaninglessFilterNode:
                 return {
                     "should_respond": False,
                     "response": random.choice(GROUP_PROFILE_COOLDOWN_REPLIES),
+                    "content_kind": ContentKind.CAP_NOTICE,
                 }
             update["group_profile_request"] = True
         elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:

@@ -16,6 +16,7 @@ from telegram import ReactionTypeEmoji
 
 from src import config
 from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES
+from src.pipeline.state import ContentKind
 from src.pipeline import engagement_gate
 from src.pipeline.filter_node import (
     FILTER_SYSTEM,
@@ -177,6 +178,20 @@ class TestMediaMessages:
         result = await node(state)
         assert result["should_respond"] is False
         assert result["response"] in TRANSCRIPTION_FAILED_REPLIES
+        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
+
+    async def test_no_vision_explicit_photo_is_a_media_failure_notice(self):
+        from src.pipeline.filter_node import VISION_FAILED_REPLIES
+
+        node, _ = make_node_with_mock_llm()
+        state = make_state(
+            make_incoming(media_type="photo", processed_text=None),
+            should_respond=True,
+            response_trigger="explicit",
+        )
+        result = await node(state)
+        assert result["response"] in VISION_FAILED_REPLIES
+        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
 
     async def test_no_transcription_explicit_does_not_fire_reaction(self):
         node, _ = make_node_with_mock_llm()
@@ -448,6 +463,7 @@ class TestGroupProfileRequestFlags:
             )
         assert second["should_respond"] is False
         assert second["response"] in GROUP_PROFILE_COOLDOWN_REPLIES
+        assert second["content_kind"] == ContentKind.CAP_NOTICE
         assert "group_profile_request" not in second
 
     def test_different_chats_do_not_share_the_cooldown(self):
@@ -533,6 +549,24 @@ class TestYoutubeShortDispatchCharacterization:
         result = await node(state)
         assert result == {"should_respond": False, "drop_reason": "shorts_failed"}
 
+    async def test_no_content_and_addressed_gets_canned_media_failure_notice(self):
+        from src.pipeline.filter_node import SHORTS_FAILED_REPLIES
+
+        node = make_filter_node()
+        telegram_message = MagicMock(text="@testbot https://www.youtube.com/shorts/abc", caption=None)
+        telegram_message.reply_to_message = None
+        incoming = make_incoming(
+            raw_text="@testbot https://www.youtube.com/shorts/abc", telegram_message=telegram_message,
+        )
+        state = make_state(
+            incoming, should_respond=True, response_trigger="youtube_short",
+            youtube_short_content=None,
+        )
+        result = await node(state)
+        assert result["should_respond"] is False
+        assert result["response"] in SHORTS_FAILED_REPLIES
+        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
+
 
 class TestSocialLinkDispatch:
     async def test_content_present_sets_social_link_verdict(self):
@@ -576,6 +610,7 @@ class TestSocialLinkDispatch:
         result = await node(state)
         assert result["should_respond"] is False
         assert result["response"]  # one of SOCIAL_LINK_FAILED_REPLIES
+        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
 
 
 class TestNotAddressedVerdict:

@@ -17,6 +17,7 @@ import pytest
 
 from src.pipeline.router import INSTAGRAM_REEL_DAILY_CAP_REPLIES, MessageRouter
 from src.pipeline.social_links.instagram_reel import INSTAGRAM_REEL_DAILY_CAP
+from src.pipeline.state import ContentKind
 from tests.builders import make_incoming, make_telegram_message
 
 BOT_USERNAME = "testbot"
@@ -266,6 +267,7 @@ class TestSocialLinkDailyCap:
         result = router._MessageRouter__detect_social_link(over_cap_msg)
         assert result["should_respond"] is False
         assert result["response"] in INSTAGRAM_REEL_DAILY_CAP_REPLIES
+        assert result["content_kind"] == ContentKind.CAP_NOTICE
 
     def test_cap_remaining_counts_down_from_a_clean_chat(self, router):
         chat_id = 90003

@@ -51,7 +51,7 @@ from typing import Any
 from src import log
 from src.feedback.replies import track_reply
 from src.pipeline import shorts, social_links
-from src.pipeline.state import BotState, IncomingMessage
+from src.pipeline.state import BotState, ContentKind, IncomingMessage
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
@@ -457,6 +457,7 @@ class MessageRouter:
         return {
             "should_respond": False,
             "response": random.choice(INSTAGRAM_REEL_DAILY_CAP_REPLIES),
+            "content_kind": ContentKind.CAP_NOTICE,
         }
 
     async def __load_replied_bot_row(self, chat_id: int, reply: Any) -> dict | None:
