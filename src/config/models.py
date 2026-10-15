@@ -143,6 +143,12 @@ REPLY_LABEL_MODELS: list[str] = [
 # reasoning_effort="none" instead of paying for a <think> block.
 REPLY_LABEL_MAX_TOKENS = 64
 
+# Response labelling (src/message_content/response_labeller.py) reuses
+# REPLY_LABEL_MODELS — same OpenRouter-only reasoning as above: measurement must
+# never take Groq quota from chat replies. Same budget too: one {"label": "..."}
+# object, with headroom for a code fence.
+RESPONSE_LABEL_MAX_TOKENS = 64
+
 # Tool-calling worker fallback chain. No 8B floor: at that size the worker
 # skips tools and fabricates facts from parametric memory — for a
 # fact-gatherer, no data beats fake data; exhaustion raises an honest

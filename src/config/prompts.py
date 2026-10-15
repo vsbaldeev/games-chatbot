@@ -294,6 +294,24 @@ REPLY_LABEL_SYSTEM = (
     "no explanation, no extra keys."
 )
 
+RESPONSE_LABEL_SYSTEM = (
+    "You judge whether a bot's reply answered the question it was given, in a "
+    "Russian-speaking gaming group chat. The bot is a helpful gaming assistant.\n"
+    "Input is a JSON object with the member's question and the bot's reply.\n"
+    "label is exactly one of:\n"
+    "  ANSWERED — the reply engages with the question and gives something "
+    "usable. A joking or casual tone that still delivers the facts is ANSWERED.\n"
+    "  REFUSED — the reply explicitly declines to help or to discuss the topic.\n"
+    "  NON_ANSWER — no refusal, but nothing usable: a dodge, a vague \"don't "
+    "know\" or \"it depends\", a change of subject, an answer about a different "
+    "thing than was asked, or only a counter-question asking for clarification.\n"
+    "  UNCLEAR — you genuinely cannot tell.\n"
+    "Judge only whether the question got answered, not whether the facts are "
+    "true.\n"
+    "Output a JSON object only, exactly {\"label\": \"<LABEL>\"}. No prose, "
+    "no explanation, no extra keys."
+)
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Response persona (src/agent/response.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
