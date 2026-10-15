@@ -112,6 +112,10 @@ reply) and `notify_pipeline_failure` (limit, context and error notices), both in
 - Probes in `tests/integration/message_content/` are cleaner than real chat
   messages and read optimistically. Before trusting the REFUSED / NON_ANSWER
   rates, hand-label ~50 real `response` rows from `bot_llm_log` and compare.
+- The labeller sees only the member's message and the reply, not the thread. A
+  terse follow-up («а почему?») judged against a reply that leans on the
+  conversation can come out NON_ANSWER or UNCLEAR, so those two labels slightly
+  overstate real misses on follow-up questions.
 - No backfill: the table starts empty at deploy, and retention is 60 days.
 - A search-notification message edited into its final text is recorded once,
   under its original id; a later edit does not overwrite the row.
