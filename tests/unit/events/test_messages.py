@@ -505,6 +505,35 @@ class TestNotifyPipelineFailureRecordsContent:
         assert record.await_args.kwargs["worker_status"] == WorkerStatus.OK
 
 
+class TestRunPipelineFailureWiring:
+    """A failure after the worker finished must reach the notice's content row
+    with the status the worker reached — run_pipeline streams the graph so
+    final_state still holds it when a later node raises."""
+
+    async def test_failure_notice_gets_the_worker_status_the_pipeline_reached(self):
+        from src.events import messages
+
+        async def failing_stream(initial_state, stream_mode):
+            yield {**initial_state, "worker_status": WorkerStatus.CONTEXT_OVERFLOW}
+            raise RateLimitError("response model exhausted")
+
+        pipeline = MagicMock()
+        pipeline.astream = failing_stream
+        update = MagicMock(update_id=123456)
+        update.message.reply_to_message = None
+        context = MagicMock()
+        incoming = make_incoming()
+        with patch.object(messages, "PIPELINE", pipeline), \
+             patch.object(messages, "derive_thread_id", AsyncMock(return_value="t")), \
+             patch.object(messages, "build_pipeline_state", MagicMock(return_value=make_state(incoming))), \
+             patch.object(messages, "is_explicitly_addressed", MagicMock(return_value=True)), \
+             patch.object(messages, "canonical"), \
+             patch.object(messages, "notify_pipeline_failure", AsyncMock(return_value="RateLimit")) as notify:
+            handled = await messages.run_pipeline(update, context, "text", None)
+        assert handled is False
+        assert notify.await_args.kwargs["worker_status"] == WorkerStatus.CONTEXT_OVERFLOW
+
+
 FEEDBACK_REGISTER_SENDING_TARGET = "src.events.sending.message_feedback.register"
 
 
