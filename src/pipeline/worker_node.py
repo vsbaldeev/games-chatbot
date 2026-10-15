@@ -9,13 +9,34 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from src import log
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError
 from src.pipeline.response_node import neutralize_speaker_lines, row_speaker, truncate_row_content
-from src.pipeline.state import BotState
+from src.pipeline.state import BotState, WorkerStatus
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
 SEARCH_TOOLS = frozenset({"web_search"})
 RECENT_FILL_LIMIT = 10
+
+
+def worker_is_skipped(state: BotState) -> bool:
+    """True when the reply needs no tool facts: personality-only replies and link summaries."""
+    return bool(
+        state.get("is_bot_insult")
+        or state.get("wind_down")
+        or state.get("meme_request")
+        or state.get("group_profile_request")
+        or state.get("response_trigger") in ("youtube_short", "social_link")
+    )
+
+
+def empty_worker_update(status: WorkerStatus) -> dict:
+    """State update for every path that leaves the response without worker facts."""
+    return {
+        "worker_output": "",
+        "search_notification_msg": None,
+        "worker_tools_used": False,
+        "worker_status": status,
+    }
 
 
 def log_worker_call(worker_input: str, output: str, tools_used: bool) -> None:
@@ -98,20 +119,16 @@ class WorkerNode:
             Dict with keys ``worker_output`` (str), ``search_notification_msg``
             (the sent Telegram Message or None) and ``worker_tools_used``
             (True when at least one tool actually ran; False on all error
-            and skip paths).
+            and skip paths) and ``worker_status`` (a WorkerStatus: OK when the
+            worker ran, SKIPPED when it was deliberately not used,
+            CONTEXT_OVERFLOW / FAILED when an error was absorbed and the
+            response has no worker facts behind it).
 
         Raises:
             DailyLimitError: Propagated from ``agent.invoke_worker`` on daily quota exhaustion.
             RateLimitError: Propagated from ``agent.invoke_worker`` on transient rate limits.
         """
-        if (
-            state.get("is_bot_insult")
-            or state.get("wind_down")
-            or state.get("meme_request")
-            or state.get("group_profile_request")
-            or state.get("response_trigger") == "youtube_short"
-            or state.get("response_trigger") == "social_link"
-        ):
+        if worker_is_skipped(state):
             # A comeback needs personality, not IGDB lookups: skipping the
             # worker avoids a «🔍 Ищу…» notification before the burn and junk
             # search output steering it. Same for Shorts and social-link
@@ -122,7 +139,7 @@ class WorkerNode:
             # so gathered facts would have nowhere to go. Same for a group-
             # profile request — it runs its own dedicated LLM call over the
             # roster's own dossiers, not IGDB-style tool facts.
-            return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
+            return empty_worker_update(WorkerStatus.SKIPPED)
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")
         tg_message = msg["update"].message
@@ -137,10 +154,11 @@ class WorkerNode:
                 "worker_output": output,
                 "search_notification_msg": notification_msg,
                 "worker_tools_used": tools_used,
+                "worker_status": WorkerStatus.OK,
             }
         except ContextLengthError as err:
             logger.warning("Worker context too long: %s", err)
-            return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
+            return empty_worker_update(WorkerStatus.CONTEXT_OVERFLOW)
         except (DailyLimitError, RateLimitError) as err:
             # Raising here skips this node's state patch entirely, so a
             # search notification already sent by the callback above would
@@ -151,7 +169,7 @@ class WorkerNode:
             raise
         except Exception as err:
             logger.error("Worker failed: %s", err, exc_info=True)
-            return {"worker_output": "", "search_notification_msg": None, "worker_tools_used": False}
+            return empty_worker_update(WorkerStatus.FAILED)
 
     def __build_worker_input(self, msg: dict, context, response_trigger: Literal["explicit", "insult_check", "random"] = "explicit") -> str:
         """Assemble the prompt string sent to the worker agent.

@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.agent import ContextLengthError, DailyLimitError, RateLimitError, WORKER_PROMPT
+from src.pipeline.state import WorkerStatus
 from src.pipeline.worker_node import WorkerNode
 from tests.builders import make_incoming, make_message_row, make_state, make_telegram_message
 
@@ -177,6 +178,12 @@ class TestWorkerNodeOutput:
         assert result["worker_output"] == "GTA 6 выходит 19 ноября 2026."
         assert result["worker_tools_used"] is True
 
+    async def test_success_reports_ok(self):
+        agent = MagicMock()
+        agent.invoke_worker = AsyncMock(return_value=("факты", False))
+        result = await WorkerNode(agent)(make_worker_state())
+        assert result["worker_status"] == WorkerStatus.OK
+
 
 class TestContextLengthErrorHandling:
     """When invoke_worker raises ContextLengthError WorkerNode must absorb it
@@ -188,6 +195,20 @@ class TestContextLengthErrorHandling:
         result = await WorkerNode(agent)(make_worker_state())
         assert result["worker_output"] == ""
         assert result["search_notification_msg"] is None
+        assert result["worker_status"] == WorkerStatus.CONTEXT_OVERFLOW
+
+
+class TestUnexpectedFailure:
+    """An unexpected exception is absorbed so the pipeline can still answer,
+    but the status records that the answer has no worker facts behind it."""
+
+    async def test_unexpected_exception_reports_failed(self):
+        agent = MagicMock()
+        agent.invoke_worker = AsyncMock(side_effect=RuntimeError("tool crashed"))
+        result = await WorkerNode(agent)(make_worker_state())
+        assert result["worker_output"] == ""
+        assert result["worker_tools_used"] is False
+        assert result["worker_status"] == WorkerStatus.FAILED
 
 
 class TestErrorPropagation:
@@ -244,6 +265,7 @@ class TestSkipConditions:
         result = await node(state)
         assert result == {
             "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+            "worker_status": WorkerStatus.SKIPPED,
         }
 
     async def test_social_link_trigger_skips_worker(self):
@@ -253,6 +275,7 @@ class TestSkipConditions:
         result = await node(state)
         assert result == {
             "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+            "worker_status": WorkerStatus.SKIPPED,
         }
 
     async def test_group_profile_request_skips_worker(self):
@@ -262,4 +285,19 @@ class TestSkipConditions:
         result = await node(state)
         assert result == {
             "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+            "worker_status": WorkerStatus.SKIPPED,
         }
+
+    @pytest.mark.parametrize("flag", ["is_bot_insult", "wind_down", "meme_request", "group_profile_request"])
+    async def test_directive_flags_report_skipped(self, flag):
+        node = WorkerNode(agent=MagicMock())
+        state = make_state(make_incoming(raw_text="что-то"), should_respond=True, **{flag: True})
+        result = await node(state)
+        assert result["worker_status"] == WorkerStatus.SKIPPED
+
+    @pytest.mark.parametrize("trigger", ["youtube_short", "social_link"])
+    async def test_link_triggers_report_skipped(self, trigger):
+        node = WorkerNode(agent=MagicMock())
+        state = make_state(make_incoming(raw_text="https://example.com"), should_respond=True, response_trigger=trigger)
+        result = await node(state)
+        assert result["worker_status"] == WorkerStatus.SKIPPED
