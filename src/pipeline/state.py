@@ -5,9 +5,34 @@ BotState flows through every node:
   Router → Ingester → ContextBuilder → Agent → MemoryWriter
 """
 
+from enum import StrEnum
 from typing import Any
 
 from typing_extensions import NotRequired, TypedDict
+
+
+class ContentKind(StrEnum):
+    """Why a bot message exists — one value per row of bot_message_content."""
+
+    RESPONSE = "response"                          # free-form reply written by the response LLM
+    LINK_SUMMARY = "link_summary"                  # Shorts / Instagram / YouTube summary, nobody asked a question
+    WIND_DOWN_REPLY = "wind_down_reply"            # LLM reply under the wind-down directive
+    INSULT_REPLY = "insult_reply"                  # LLM reply under the BOT_INSULT directive
+    PROMPT_INJECTION_REPLY = "prompt_injection_reply"  # canned reply after the guard flagged the message (may be a false positive)
+    LIMIT_NOTICE = "limit_notice"                  # Groq daily-quota / rate-limit notice
+    CONTEXT_LIMIT_NOTICE = "context_limit_notice"  # context-window overflow notice
+    CAP_NOTICE = "cap_notice"                      # Instagram daily cap, group-profile cooldown
+    MEDIA_FAILURE_NOTICE = "media_failure_notice"  # could not transcribe / see / fetch
+    ERROR = "error"                                # generic failure line
+
+
+class WorkerStatus(StrEnum):
+    """How the worker stage ended; absent when it never finished."""
+
+    OK = "ok"                              # worker ran
+    SKIPPED = "skipped"                    # deliberately not used (insult, wind-down, meme, group profile, links)
+    CONTEXT_OVERFLOW = "context_overflow"  # ContextLengthError absorbed, empty worker output
+    FAILED = "failed"                      # unexpected exception absorbed, empty worker output
 
 
 class IncomingMessage(TypedDict):
@@ -74,4 +99,6 @@ class BotState(TypedDict):
     drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line
     media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified
     voice_low_confidence: NotRequired[bool]  # True when Whisper's mean segment confidence was low for a voice transcript; response_node softens its reaction accordingly
+    content_kind: NotRequired[ContentKind]  # set only by nodes that put a canned text in `response` (guard, filter, router); LLM-written kinds are derived at delivery
+    worker_status: NotRequired[WorkerStatus]  # set by WorkerNode on every run; absent when the worker never finished
     response_trace: NotRequired[dict | None]  # exact prompt/response of the response LLM call, set by ResponseNode/LanguageCorrectionNode; None when no response LLM call ran (meme/group-profile requests)

@@ -185,6 +185,28 @@ bot_message_feedback (
 INDEX idx_bot_message_feedback_sent ON (sent_at)
 ```
 
+```sql
+-- One row per bot message that answers a pipeline turn: what kind of message
+-- it is and how it was produced. Written once by register() at send time;
+-- response_label is filled later by a background classifier. Kept apart from
+-- bot_message_feedback (whose counters keep moving) and joined to it on
+-- (chat_id, message_id) — no foreign key, each table has its own retention.
+-- Memes, weekly roles and group-profile messages are not recorded.
+-- Retention: 60 days. See src/message_content/README.md.
+bot_message_content (
+    chat_id         BIGINT      NOT NULL,
+    message_id      BIGINT      NOT NULL,
+    content_kind    TEXT        NOT NULL,  -- response | link_summary | wind_down_reply | insult_reply
+                                           -- | prompt_injection_reply | limit_notice | context_limit_notice
+                                           -- | cap_notice | media_failure_notice | error
+    worker_status   TEXT,                  -- ok | skipped | context_overflow | failed; NULL = worker never finished
+    response_label  TEXT,                  -- ANSWERED | REFUSED | NON_ANSWER | UNCLEAR; only for explicit `response`, NULL until labelled
+    sent_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (chat_id, message_id)
+)
+INDEX idx_bot_message_content_sent ON (sent_at)
+```
+
 The JSONB column `history_messages` is written as `json.dumps(...)`
 text with an explicit `$N::jsonb` cast — no JSONB codec is registered on the
 connection pool (`db.py` only registers pgvector's), so asyncpg would
@@ -213,4 +235,5 @@ embedder.py         embed(text) — fastembed MiniLM-L12 ONNX, returns list[floa
 llm_system_prompts.py hash_prompt (pure sha256), ensure (upsert, ON CONFLICT DO NOTHING), cleanup_unreferenced
 llm_log.py           insert_call (one response-LLM call per bot message), cleanup_old (60-day retention, RETENTION_DAYS)
 message_feedback.py  register, add_reaction / remove_reaction (decrement floored at 0), add_reply(kind) (kind is a key of REPLY_KIND_COLUMNS), get_origin (source, trigger), cleanup_old (60-day retention, RETENTION_DAYS). Every mutator keeps `ignored` equal to "every counter is 0"; columns come from the fixed COUNTER_COLUMNS tuple, never from input
+message_content.py   register (idempotent insert), set_response_label, cleanup_old (60-day retention, RETENTION_DAYS)
 ```

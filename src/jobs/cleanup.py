@@ -1,8 +1,10 @@
 """Daily cleanup job — prunes old messages, thread history, stale memory
-facts, and the feedback table."""
+facts, and the feedback and content tables."""
 
 from src import log
-from src.store import llm_log, llm_system_prompts, message_feedback, thread_history, unified_messages, user_memories
+from src.store import (
+    llm_log, llm_system_prompts, message_content, message_feedback, thread_history, unified_messages, user_memories,
+)
 
 logger = log.get_logger(__name__)
 
@@ -41,4 +43,9 @@ async def cleanup_messages_job(context) -> None:
     logger.info(
         "Cleanup: deleted %d old feedback rows (retention=%dd)",
         deleted_feedback, message_feedback.RETENTION_DAYS,
+    )
+    deleted_content = await message_content.cleanup_old()
+    logger.info(
+        "Cleanup: deleted %d old message content rows (retention=%dd)",
+        deleted_content, message_content.RETENTION_DAYS,
     )
