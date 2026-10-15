@@ -44,6 +44,7 @@ video notes are transcribed and answered in text.
 | [src/app/](src/app/README.md) | Application wiring — handler registration, job setup, startup lifecycle |
 | [src/events/](src/events/README.md) | Telegram event handlers — member tracking, reactions, messages |
 | [src/feedback/](src/feedback/README.md) | Implicit user-feedback tracking — per-message counters for reaction emoji, labelled replies, and silence |
+| [src/message_content/](src/message_content/README.md) | Content metrics — per-message record of what the bot sent (kind, worker outcome, answered/refused/non-answer) |
 | [src/commands/](src/commands/README.md) | Command handlers — /duel |
 | [src/jobs/](src/jobs/README.md) | Scheduled jobs — weekly roles, daily meme, cleanup, yt-dlp refresh |
 | [src/group_profile/](src/group_profile/README.md) | Chat-requested group profiling — one user-supplied rubric applied to every member via a single LLM call |

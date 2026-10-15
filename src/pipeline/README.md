@@ -12,6 +12,14 @@ router ──► ingester ──► filter ──► guard ──► context_bui
 
 Conditional exits exist at every node — see the detailed diagrams below.
 
+Nodes that answer with a fixed text instead of the response LLM also stamp
+`content_kind` in the state update, so the delivered message can be told apart
+in `bot_message_content` (src/message_content/README.md): the guard's deflection
+is `prompt_injection_reply`; the filter's «не расслышал / не разглядел / не
+смог посмотреть» replies are `media_failure_notice` and its group-profile
+cooldown refusal is `cap_notice`; the router's Instagram daily-cap reply is
+`cap_notice`.
+
 ---
 
 ## Router
@@ -413,7 +421,8 @@ guard   llama-prompt-guard-2-86m
     ├─ text empty / score < 0.9 → blocked=False → context_builder
     ├─ score ≥ 0.9 + trigger="explicit"
     │       → blocked=True, response = random neutral deflection (no guilt
-    │         presumed — false positives are inherent at 86M params)
+    │         presumed — false positives are inherent at 86M params),
+    │         content_kind=PROMPT_INJECTION_REPLY
     │       → hack-attempt memory fact only on the 2nd flag per (chat, user)
     │         within 24h (TtlGate hit counter); first flag blocks only  → END
     ├─ score ≥ 0.9 + trigger="random" / "insult_check"
@@ -481,6 +490,11 @@ worker   ReAct agent with all 13 tools (IGDB, Steam, PS Store, TMDB, AniList, we
     │          random triggers receive only the reply chain — no recent history bleed
     ├─ provenance: invoke_worker returns (output, tools_used) from a mechanical
     │          ToolMessage scan → worker_tools_used in state
+    ├─ always reports worker_status in state: ok (ran), skipped (see next
+    │          line), context_overflow (ContextLengthError absorbed) or failed
+    │          (unexpected exception absorbed) — the last two leave the response
+    │          without worker facts and are otherwise silent; recorded in
+    │          bot_message_content (src/message_content/README.md)
     ├─ skipped entirely on insult paths (is_bot_insult), wind-down brush-offs
     │          (wind_down — one short closing phrase needs no tools), Shorts/
     │          social-link summaries (trigger="youtube_short"/"social_link" — the
@@ -738,6 +752,8 @@ BotState:
     is_flat_thread: bool               # True when the message is not a reply; skips thread-history reads
     worker_output: str | None
     worker_tools_used: bool            # True when the worker actually ran a tool (mechanical ToolMessage scan)
+    worker_status: WorkerStatus        # ok | skipped | context_overflow | failed, set by the worker node; absent when it never finished
+    content_kind: ContentKind          # set only by nodes that put a canned text in `response` (guard, filter, router); LLM-written kinds are derived at delivery (src/message_content/kinds.py)
     search_notification_msg: Any | None  # Telegram Message used as search indicator
     response: str | None
     response_messages: list | None     # LangChain messages passed from response → language_correction

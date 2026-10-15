@@ -67,6 +67,9 @@ sentiment.py  — POSITIVE_REACTIONS (❤👍😂🔥💯😅😁) and
   called from `send_and_store`/`edit_and_store` (`src/events/sending.py`),
   `deliver_and_record` (`src/events/messages.py`), `src/memes/sender.py`,
   and `src/jobs/roles.py`.
+- Content metrics (what the bot sent, as opposed to how members reacted):
+  `src/message_content/README.md` — a separate `bot_message_content` table that
+  joins to this one on `(chat_id, message_id)`.
 - The response LLM trace (exact prompt/response per pipeline reply):
   `src.store.llm_log`/`llm_system_prompts`, written by `deliver_and_record`.
 - Retention: `src/jobs/cleanup.py`.
