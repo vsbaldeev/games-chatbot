@@ -20,8 +20,8 @@ from src.agent.language import (
     normalize_homoglyphs,
 )
 from src.agent.compress import compress_to_budget
-from src.agent.worker import WORKER_PROMPT, WorkerAgent, worker_agent
-from src.agent.response import RESPONSE_PROMPT, ResponseAgent, response_agent
+from src.agent.worker import WORKER_PROMPT, WorkerAgent
+from src.agent.response import RESPONSE_PROMPT, ResponseAgent
 from src.agent.vision import make_vision_llm
 
 __all__ = [
@@ -45,9 +45,7 @@ __all__ = [
     "compress_to_budget",
     "WORKER_PROMPT",
     "WorkerAgent",
-    "worker_agent",
     "RESPONSE_PROMPT",
     "ResponseAgent",
-    "response_agent",
     "make_vision_llm",
 ]

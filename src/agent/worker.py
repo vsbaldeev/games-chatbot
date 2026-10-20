@@ -23,23 +23,20 @@ logger = log.get_logger(__name__)
 class WorkerAgent:
     """Manages the tool-calling executor that gathers facts for the pipeline.
 
-    Owns the LangChain agent with retry/fallback middleware.  Accepts an
-    injectable ``worker_executor`` for testing so production ``init()`` is never
-    required in unit tests.
+    Owns the LangChain agent with retry/fallback middleware, built on
+    construction. Accepts an injectable ``worker_executor`` for testing so unit
+    tests never build a real Groq-backed executor.
     """
 
     def __init__(self, *, worker_executor=None) -> None:
-        """Initialize with an optional pre-built executor.
+        """Build the worker executor from configuration unless one is injected.
 
         Args:
             worker_executor: Pre-built agent executor (for testing).
         """
+        if worker_executor is None:
+            worker_executor = WorkerAgent.__build_executor()
         self.__worker_executor = worker_executor
-
-    async def init(self) -> None:
-        """Build the worker executor from configuration."""
-        self.__worker_executor = WorkerAgent.__build_executor()
-        logger.info("WorkerAgent initialized with model: %s", config.WORKER_MODEL_FALLBACKS[0])
 
     async def invoke_worker(self, prompt: str, *, callbacks=None) -> tuple[str, bool]:
         """Run the executor and return the output text with tool provenance.
@@ -59,13 +56,10 @@ class WorkerAgent:
             returned no content), and True when at least one tool call ran.
 
         Raises:
-            RuntimeError: If called before ``init()``.
             ContextLengthError: If the prompt exceeds the model's context window.
             DailyLimitError: If all models have exhausted their daily token quota.
             RateLimitError: If rate-limit retries are exhausted on all models.
         """
-        if self.__worker_executor is None:
-            raise RuntimeError("WorkerAgent.init() must be called before invoking worker")
         run_config = {"callbacks": callbacks} if callbacks else {}
         result = await guarded_ainvoke(
             self.__worker_executor,
@@ -110,6 +104,3 @@ class WorkerAgent:
         )
         logger.info("Worker executor built with model: %s", config.WORKER_MODEL_FALLBACKS[0])
         return executor
-
-
-worker_agent = WorkerAgent()

@@ -7,12 +7,12 @@ from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, ContextTypes
 
 from src import log
-from src.agent import worker_agent, response_agent
 from src.app.jobs import (
     MemeJobManager,
     MessageCleanupJobManager,
     RolesJobManager,
 )
+from src.app.pipeline import PipelineManager
 from src.store import db as database
 
 log.setup()
@@ -35,9 +35,7 @@ async def __on_startup(application: Application) -> None:
     # The database schema is owned by Alembic migrations (`alembic upgrade head`),
     # applied before the bot process starts — the bot no longer creates tables.
     await database.init()
-    await worker_agent.init()
-    await response_agent.init()
-    logger.info("Bot started, all agents and jobs initialized")
+    logger.info("Bot started, database initialized")
 
 
 async def __on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -68,6 +66,8 @@ def main() -> None:
         .build()
     )
     app.add_error_handler(__on_error)
+
+    PipelineManager().attach(app)
 
     for manager in [EventHandlerManager(), CommandHandlerManager(), MessageHandlerManager()]:
         manager.add_handlers(app)

@@ -24,13 +24,11 @@ for key, value in dotenv_values(DOTENV_PATH).items():
 
 
 @pytest.fixture
-async def worker_agent():
-    """Build and initialize a WorkerAgent backed by real Groq credentials.
+def worker_agent():
+    """Build a WorkerAgent backed by real Groq credentials.
 
     Returns:
-        Initialized WorkerAgent ready for invoke_worker calls.
+        WorkerAgent ready for invoke_worker calls.
     """
     from src.agent.worker import WorkerAgent
-    agent = WorkerAgent()
-    await agent.init()
-    return agent
+    return WorkerAgent()

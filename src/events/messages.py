@@ -14,15 +14,13 @@ import asyncio
 
 from src import achievements, config
 from src.agent import (
-    worker_agent,
-    response_agent,
     ContextLengthError,
     DailyLimitError,
     RateLimitError,
     normalize_homoglyphs,
 )
 from src.pipeline import canonical
-from src.pipeline.graph import build_pipeline
+from src.pipeline.graph import get_pipeline
 from src.events.link_repost import AmbiguousDeliveryError, deliver_link_message, resolve_link_delivery
 from src.events.members import get_username
 from src.pipeline.ingester import transcribe_voice
@@ -36,8 +34,6 @@ from src.message_content.kinds import content_kind_for, question_text
 from src.pipeline.router import is_explicitly_addressed
 from src.store import llm_log, llm_system_prompts, message_feedback, unified_messages
 from src.utils.ttl_gate import TtlGate
-
-PIPELINE = build_pipeline(worker_agent, response_agent)
 
 MOSCOW_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
@@ -637,7 +633,7 @@ async def run_pipeline(
         # search_notification_msg — for the except block below. A plain
         # ainvoke() raising mid-graph returns nothing at all, stranding the
         # 🔍 Ищу… message with no way to resolve it.
-        async for state_update in PIPELINE.astream(initial_state, stream_mode="values"):
+        async for state_update in get_pipeline(context).astream(initial_state, stream_mode="values"):
             final_state = state_update
         response = final_state.get("response") or ""
         if response.strip():

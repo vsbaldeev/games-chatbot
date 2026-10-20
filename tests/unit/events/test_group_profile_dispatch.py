@@ -96,10 +96,10 @@ def make_update() -> MagicMock:
 
 
 def pipeline_returning(state: dict):
-    """Patch the module PIPELINE so ainvoke resolves to the given final state."""
+    """Patch get_pipeline so ainvoke resolves to the given final state."""
     pipeline = MagicMock()
     pipeline.ainvoke = AsyncMock(return_value=state)
-    return patch.object(messages, "PIPELINE", pipeline)
+    return patch.object(messages, "get_pipeline", MagicMock(return_value=pipeline))
 
 
 async def run_with_final_state(final_state: dict, update: MagicMock):

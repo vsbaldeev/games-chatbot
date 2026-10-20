@@ -523,7 +523,7 @@ class TestRunPipelineFailureWiring:
         update.message.reply_to_message = None
         context = MagicMock()
         incoming = make_incoming()
-        with patch.object(messages, "PIPELINE", pipeline), \
+        with patch.object(messages, "get_pipeline", MagicMock(return_value=pipeline)), \
              patch.object(messages, "derive_thread_id", AsyncMock(return_value="t")), \
              patch.object(messages, "build_pipeline_state", MagicMock(return_value=make_state(incoming))), \
              patch.object(messages, "is_explicitly_addressed", MagicMock(return_value=True)), \

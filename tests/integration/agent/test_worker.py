@@ -3,8 +3,8 @@
 These tests consume Groq tokens. Run in isolation:
     pytest tests/integration/test_worker_agent.py
 
-The worker_agent fixture (from conftest.py) initializes once per test function
-using real credentials loaded from .env.
+The worker_agent fixture (from conftest.py) builds a WorkerAgent once per test
+function using real credentials loaded from .env.
 """
 
 import pytest
@@ -13,14 +13,13 @@ from src.agent.worker import WorkerAgent
 
 
 @pytest.mark.integration
-async def test_worker_agent_init_succeeds():
-    """WorkerAgent.init() must complete without error when given real Groq credentials.
+def test_worker_agent_construction_succeeds():
+    """WorkerAgent() must complete without error when given real Groq credentials.
 
     Verifies that the API key is accepted and the executor is built successfully.
-    No LLM call is made during init — it only constructs the LangChain agent.
+    No LLM call is made on construction — it only builds the LangChain agent.
     """
-    agent = WorkerAgent()
-    await agent.init()
+    WorkerAgent()
 
 
 @pytest.mark.integration

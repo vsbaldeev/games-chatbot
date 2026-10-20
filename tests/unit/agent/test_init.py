@@ -281,20 +281,6 @@ class TestModelAttemptLogger:
         assert "web_search" in caplog.text
 
 
-class TestWorkerAgent:
-    async def test_invoke_worker_raises_before_init(self):
-        """invoke_worker must fail immediately when no executor has been built."""
-        with pytest.raises(RuntimeError):
-            await WorkerAgent().invoke_worker("prompt")
-
-
-class TestResponseAgent:
-    async def test_invoke_response_raises_before_init(self):
-        """invoke_response must fail immediately when no executor has been built."""
-        with pytest.raises(RuntimeError):
-            await ResponseAgent().invoke_response([])
-
-
 def make_worker_agent(*, content=None, error=None):
     """Return a WorkerAgent with an injected mock executor."""
     last_message = MagicMock()

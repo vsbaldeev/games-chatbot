@@ -21,6 +21,13 @@ that bundles several related `add_handler`/job-scheduling calls behind one
 one long flat list of registrations.
 
 
+**PipelineManager** — the one manager that registers a resource instead of handlers or jobs.
+`PipelineManager().attach(app)` builds the worker/response agents and the LangGraph pipeline once
+and stores the compiled graph in `app.bot_data`. Every handler and job callback reaches it through
+`context.bot_data`; code outside this package uses `src.pipeline.graph.get_pipeline(context)`
+instead of the raw key. The agents are only used inside the pipeline nodes, so they are not
+exposed separately.
+
 ## Handler managers (handlers.py)
 
 Each class implements `HandlerManagerInterface.add_handlers(app)`. `EventHandlerManager` runs
@@ -105,7 +112,7 @@ packages, each with its own README:
 src/commands/   /help, /duel and other slash-command handlers
 src/events/     handle_text_message and friends — the per-media-type update handlers
 src/jobs/       the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
-src/agent/      worker/response LLM agents, initialised in __on_startup
+src/agent/      worker/response LLM agents, built by PipelineManager.attach
 src/store/      Postgres access — db.init() opens the pool __on_startup depends on
 ```
 

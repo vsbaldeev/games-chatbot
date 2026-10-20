@@ -18,6 +18,8 @@ Graph edges:
 """
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from telegram.ext import ContextTypes
 
 from src import config, log
 from src.agent import needs_russian_correction
@@ -33,6 +35,8 @@ from src.pipeline.state import BotState
 from src.pipeline.worker_node import WorkerNode
 
 logger = log.get_logger(__name__)
+
+PIPELINE_BOT_DATA_KEY = "pipeline"
 
 
 def route_after_router(state: BotState) -> str:
@@ -66,7 +70,19 @@ def route_after_response(state: BotState) -> str:
     return "memory_writer"
 
 
-def build_pipeline(worker_agent, response_agent) -> StateGraph:
+def get_pipeline(context: ContextTypes.DEFAULT_TYPE) -> CompiledStateGraph:
+    """Return the compiled pipeline that ``src.app`` attached to the application.
+
+    Args:
+        context: The handler or job callback context.
+
+    Returns:
+        The graph built once at startup by ``PipelineManager.attach``.
+    """
+    return context.bot_data[PIPELINE_BOT_DATA_KEY]
+
+
+def build_pipeline(worker_agent, response_agent) -> CompiledStateGraph:
     """Build and compile the pipeline graph. Call once at startup."""
     graph = StateGraph(BotState)
 

@@ -22,22 +22,20 @@ class ResponseAgent:
     """Manages the personality LLM that turns worker facts into chat replies.
 
     Mirrors WorkerAgent: owns a LangChain agent executor with retry/fallback
-    middleware. Accepts an injectable ``response_executor`` for testing so
-    production ``init()`` is never required in unit tests.
+    middleware, built on construction. Accepts an injectable
+    ``response_executor`` for testing so unit tests never build a real
+    Groq-backed executor.
     """
 
     def __init__(self, *, response_executor=None) -> None:
-        """Initialize with an optional pre-built executor.
+        """Build the response executor from configuration unless one is injected.
 
         Args:
             response_executor: Pre-built agent executor (for testing).
         """
+        if response_executor is None:
+            response_executor = ResponseAgent.__build_executor()
         self.__response_executor = response_executor
-
-    async def init(self) -> None:
-        """Build the response executor from configuration."""
-        self.__response_executor = ResponseAgent.__build_executor()
-        logger.info("ResponseAgent initialized with model: %s", config.RESPONSE_MODEL_FALLBACKS[0])
 
     async def invoke_response(self, messages: list, usage_sink: dict | None = None) -> str:
         """Run the response executor and return the final reply text.
@@ -61,13 +59,10 @@ class ResponseAgent:
             Reply text. Empty string when the model returns no content.
 
         Raises:
-            RuntimeError: If called before ``init()``.
             ContextLengthError: If the prompt exceeds the model's context window.
             DailyLimitError: If all models have exhausted their daily token quota.
             RateLimitError: If rate-limit retries are exhausted on all models.
         """
-        if self.__response_executor is None:
-            raise RuntimeError("ResponseAgent.init() must be called before invoking response executor")
         result = await guarded_ainvoke(self.__response_executor, {"messages": messages})
         last_message = result["messages"][-1]
         if usage_sink is not None:
@@ -137,6 +132,3 @@ class ResponseAgent:
         )
         logger.info("Response executor built with model: %s", config.RESPONSE_MODEL_FALLBACKS[0])
         return executor
-
-
-response_agent = ResponseAgent()
