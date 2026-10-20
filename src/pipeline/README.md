@@ -12,6 +12,13 @@ router ──► ingester ──► filter ──► guard ──► context_bui
 
 Conditional exits exist at every node — see the detailed diagrams below.
 
+The worker and response LLM agents live in `agents/` (`WorkerAgent`,
+`ResponseAgent`): each builds its LangChain executor on construction, and
+`src.app.pipeline.PipelineManager` creates them once and hands them to
+`build_pipeline` (the response agent serves both the `response` and
+`language_correction` nodes). They depend on the shared LLM-call code in
+`src/agent` (renamed `src/llm` in a later step), never the reverse.
+
 Nodes that answer with a fixed text instead of the response LLM also stamp
 `content_kind` in the state update, so the delivered message can be told apart
 in `bot_message_content` (src/message_content/README.md): the guard's deflection

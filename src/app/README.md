@@ -109,11 +109,11 @@ Each class implements `JobManagerInterface.add_jobs(app)` and registers on `app.
 packages, each with its own README:
 
 ```
-src/commands/   /help, /duel and other slash-command handlers
-src/events/     handle_text_message and friends — the per-media-type update handlers
-src/jobs/       the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
-src/agent/      worker/response LLM agents, built by PipelineManager.attach
-src/store/      Postgres access — db.init() opens the pool __on_startup depends on
+src/commands/         /help, /duel and other slash-command handlers
+src/events/           handle_text_message and friends — the per-media-type update handlers
+src/jobs/             the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
+src/pipeline/agents/  worker/response LLM agents, built by PipelineManager.attach
+src/store/            Postgres access — db.init() opens the pool __on_startup depends on
 ```
 
 To trace a feature end to end: find its entry in the tables above, then open the matching file

@@ -9,7 +9,7 @@ function using real credentials loaded from .env.
 
 import pytest
 
-from src.agent.worker import WorkerAgent
+from src.pipeline.agents import WorkerAgent
 
 
 @pytest.mark.integration

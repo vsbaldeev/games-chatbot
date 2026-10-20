@@ -17,7 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent import ContextLengthError, DailyLimitError, RateLimitError, WORKER_PROMPT
+from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.config.prompts import WORKER_PROMPT
 from src.pipeline.state import WorkerStatus
 from src.pipeline.worker_node import WorkerNode
 from tests.builders import make_incoming, make_message_row, make_state, make_telegram_message
