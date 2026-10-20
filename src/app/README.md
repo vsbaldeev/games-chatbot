@@ -21,13 +21,13 @@ that bundles several related `add_handler`/job-scheduling calls behind one
 one long flat list of registrations.
 
 
-# Handler managers (handlers.py)
+## Handler managers (handlers.py)
 
 Each class implements `HandlerManagerInterface.add_handlers(app)`. `EventHandlerManager` runs
 first and registers `register_sender_as_member` in group `-1` so every update is seen before the normal
 handler groups run.
 
-## EventHandlerManager
+### EventHandlerManager
 
 Registers first, in group `-1`, so `register_sender_as_member` sees every update before the default-group
 handlers run.
@@ -38,7 +38,7 @@ handlers run.
 | new chat member, groups only | `register_users_from_join_message` | `0` | registers each joined user in `chat_members` |
 | message reaction (add/remove emoji) | `handle_message_reaction` | `0` | `MessageReactionHandler` has no `filters` parameter, so the group-only check happens inside the handler itself (`src/events/reactions.py`); applies the reaction delta to `bot_message_feedback` — requires the bot to be a group admin, or Telegram never sends these updates |
 
-## CommandHandlerManager
+### CommandHandlerManager
 
 | Update / trigger | Handler | Group | Notes |
 |---|---|---|---|
@@ -46,7 +46,7 @@ handlers run.
 | `/duel`, groups only | `games.cmd_duel` | `0` | emoji duel picker |
 | callback query, `duel_*` pattern | `games.handle_duel_callback` | `0` | duel inline buttons |
 
-## MessageHandlerManager
+### MessageHandlerManager
 
 | Update / trigger | Handler | Group | Notes |
 |---|---|---|---|
@@ -64,7 +64,7 @@ handlers run.
 | venue, groups only | `handle_venue_message` | `0` | placeholder includes the title and address |
 | poll, groups only | `handle_poll_message` | `0` | content is the question and options in full, not a bare placeholder |
 
-## Ignored updates
+### Ignored updates
 
 Not registered by any manager above — PTB drops these silently, no error.
 
@@ -72,25 +72,25 @@ Not registered by any manager above — PTB drops these silently, no error.
 |---|---|
 | any command/text/media in a private or channel chat | `group_only` (`filters.ChatType.GROUPS`) excludes `PRIVATE`/`CHANNEL`; only `register_sender_as_member` still fires there, since it has no chat-type filter |
 
-# Scheduled jobs (jobs.py)
+## Scheduled jobs (jobs.py)
 
 Each class implements `JobManagerInterface.add_jobs(app)` and registers on `app.job_queue`
 (APScheduler under the hood).
 
-## RolesJobManager
+### RolesJobManager
 
 | Trigger | Job | Notes |
 |---|---|---|
 | daily 14:00 UTC | `weekly_roles_job` | exits early unless the day is Sunday |
 | once, 30s after startup | `catch_up_roles_job` | recovers a missed Sunday run (e.g. the bot was down at 14:00 UTC) by comparing the newest stored tag timestamp against the last scheduled Sunday run; no-ops if already up to date |
 
-## MemeJobManager
+### MemeJobManager
 
 | Trigger | Job | Notes |
 |---|---|---|
 | daily 15:00 UTC | `daily_meme_job` | sends one fresh meme per chat |
 
-## MessageCleanupJobManager
+### MessageCleanupJobManager
 
 | Trigger | Job | Notes |
 |---|---|---|
