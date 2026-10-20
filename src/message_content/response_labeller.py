@@ -17,7 +17,7 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src import config, log
-from src.agent import ainvoke_with_backoff
+from src.llm import ainvoke_with_backoff
 from src.config.prompts import RESPONSE_LABEL_SYSTEM
 from src.feedback.reply_labeller import LabellingCallFailed, make_labeller_llm, strip_code_fence
 

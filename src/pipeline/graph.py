@@ -22,7 +22,7 @@ from langgraph.graph.state import CompiledStateGraph
 from telegram.ext import ContextTypes
 
 from src import config, log
-from src.agent import needs_russian_correction
+from src.llm import needs_russian_correction
 from src.pipeline.context_builder import ContextBuilder
 from src.pipeline.filter_node import MeaninglessFilterNode
 from src.pipeline.guard_node import GuardNode

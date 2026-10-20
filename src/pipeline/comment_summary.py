@@ -6,7 +6,7 @@ by src.pipeline.shorts, src.pipeline.social_links.instagram_reel and
 src.pipeline.social_links.youtube_video — previously each had its own
 verbatim-quote implementation (two near-duplicates, one per label).
 
-Best effort by contract, same as src.agent.compress.compress_to_budget: any
+Best effort by contract, same as src.llm.compress.compress_to_budget: any
 failure or empty output degrades to "", so a comment-summary failure can
 only drop that section, never break the caller's content block.
 """
@@ -15,8 +15,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent import ainvoke_with_backoff
-from src.agent.language import normalize_homoglyphs
+from src.llm import ainvoke_with_backoff
+from src.llm.language import normalize_homoglyphs
 from src.config.prompts import COMMENT_SUMMARY_SYSTEM
 
 logger = log.get_logger(__name__)

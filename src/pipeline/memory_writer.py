@@ -62,8 +62,8 @@ from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
 
 from src import achievements, config, log
-from src.agent import ainvoke_with_backoff
-from src.agent.middleware import strip_thinking
+from src.llm import ainvoke_with_backoff
+from src.llm.middleware import strip_thinking
 from src.config.prompts import (
     CROSS_USER_EXTRACTION_SYSTEM,
     EXTRACTION_SYSTEM,

@@ -27,7 +27,7 @@ import re
 import telegram.error
 
 from src import log
-from src.agent.compress import compress_to_budget
+from src.llm.compress import compress_to_budget
 
 logger = log.get_logger(__name__)
 

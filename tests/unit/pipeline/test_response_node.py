@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.llm import ContextLengthError, DailyLimitError, RateLimitError
 from src.config.prompts import (
     LINK_REPLY_GROUNDING_INSTRUCTION,
     SHORTS_TRIGGER_INSTRUCTION,

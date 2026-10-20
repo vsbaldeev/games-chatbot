@@ -17,8 +17,8 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src import achievements, config, log
-from src.agent import ainvoke_with_backoff
-from src.agent.language import normalize_homoglyphs
+from src.llm import ainvoke_with_backoff
+from src.llm.language import normalize_homoglyphs
 from src.config.prompts import ROLES_SYSTEM_PROMPT, TAG_MAX_CHARS
 from src.store import message_feedback, unified_messages, user_tags
 from src.store.user_memories import get_facts_for_users

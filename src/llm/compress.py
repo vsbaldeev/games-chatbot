@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent.middleware import ainvoke_with_backoff, strip_thinking
+from src.llm.middleware import ainvoke_with_backoff, strip_thinking
 from src.config.prompts import CAPTION_COMPRESS_SYSTEM
 
 logger = log.get_logger(__name__)

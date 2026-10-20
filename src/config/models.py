@@ -23,7 +23,7 @@ VISION_MODEL = "qwen/qwen3.8-27b"
 
 # Cross-provider fallback for the vision model, used when Groq's daily quota
 # for VISION_MODEL is exhausted or the API is unreachable (see
-# src.agent.vision.make_vision_llm). Closest size match on OpenRouter, and an
+# src.llm.vision.make_vision_llm). Closest size match on OpenRouter, and an
 # "instruct" (non-reasoning) variant, so no reasoning_effort workaround is
 # needed on this leg. Requires OPENROUTER_API_KEY; without it vision calls
 # stay Groq-only. Same OPENROUTER_BASE_URL as the text filter's fallback.
@@ -216,7 +216,7 @@ MEME_JUDGE_MAX_TOKENS = 50  # the verdict is just {"score": N}
 MEME_JUDGE_PASS_SCORE = 7
 MEME_JUDGE_ATTEMPTS = 3
 
-# Caption compressor (src/agent/compress.py). One small call that rewrites an
+# Caption compressor (src/llm/compress.py). One small call that rewrites an
 # over-budget video caption shorter without dropping meaning — cutting mid-
 # sentence is the thing this exists to avoid. Was llama-3.3-70b-versatile
 # (decommissioned by Groq 2026-08-16); openai/gpt-oss-120b is the

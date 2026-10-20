@@ -6,7 +6,7 @@ import groq
 import pytest
 from langchain_core.messages import HumanMessage
 
-from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.llm import ContextLengthError, DailyLimitError, RateLimitError
 from src.pipeline.agents import ResponseAgent, WorkerAgent
 from tests.builders import make_bad_request_error, make_rate_limit_error
 

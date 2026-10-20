@@ -12,7 +12,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src import log
-from src.agent.exceptions import ContextLengthError, DailyLimitError, RateLimitError
+from src.llm.exceptions import ContextLengthError, DailyLimitError, RateLimitError
 
 logger = log.get_logger(__name__)
 

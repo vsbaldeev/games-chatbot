@@ -46,10 +46,10 @@ generate.py    generate_verdicts(rubric, materials_by_uid) -> dict[int, dict]
                max_tokens=2048 free for the JSON body, closing off the
                truncation failure mode entirely rather than budgeting around
                it. Transient TPM 429s are retried with backoff
-               (src.agent.ainvoke_with_backoff), since a truncated call's
+               (src.llm.ainvoke_with_backoff), since a truncated call's
                re-ask in fill_missing_verdicts is a second full-size request
                inside the same rate-limit window. Output is passed through
-               normalize_homoglyphs (src.agent.language) — this model
+               normalize_homoglyphs (src.llm.language) — this model
                occasionally splices a Latin/Greek glyph into an otherwise-
                Cyrillic word, the same deterministic repair already applied
                to RESPONSE output.

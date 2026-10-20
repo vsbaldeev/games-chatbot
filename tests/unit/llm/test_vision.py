@@ -7,9 +7,9 @@ from langchain_core.runnables.fallbacks import RunnableWithFallbacks
 from langchain_groq import ChatGroq
 
 from src import config
-from src.agent.vision import make_vision_llm
+from src.llm.vision import make_vision_llm
 
-OPENROUTER_KEY_TARGET = "src.agent.vision.config.OPENROUTER_API_KEY"
+OPENROUTER_KEY_TARGET = "src.llm.vision.config.OPENROUTER_API_KEY"
 
 
 class TestMakeVisionLlm:
@@ -24,7 +24,7 @@ class TestMakeVisionLlm:
     def test_without_openrouter_key_logs_warning(self, caplog):
         with (
             patch(OPENROUTER_KEY_TARGET, ""),
-            caplog.at_level(logging.WARNING, logger="src.agent.vision"),
+            caplog.at_level(logging.WARNING, logger="src.llm.vision"),
         ):
             make_vision_llm(max_tokens=200)
         assert "OPENROUTER_API_KEY unset" in caplog.text

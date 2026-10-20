@@ -19,7 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from src import config, log
-from src.agent import ainvoke_with_backoff
+from src.llm import ainvoke_with_backoff
 from src.config.prompts import REPLY_LABEL_SYSTEM
 
 logger = log.get_logger(__name__)

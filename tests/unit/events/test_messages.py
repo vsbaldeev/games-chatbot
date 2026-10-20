@@ -12,7 +12,7 @@ import pytest
 
 from types import SimpleNamespace
 
-from src.agent import ContextLengthError, DailyLimitError, RateLimitError
+from src.llm import ContextLengthError, DailyLimitError, RateLimitError
 from src.events.messages import (
     GENERIC_FAILURE_NOTICE,
     RATE_LIMIT_NOTICE,

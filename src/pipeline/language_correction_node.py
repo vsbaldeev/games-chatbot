@@ -3,7 +3,7 @@
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent import DailyLimitError, RateLimitError, normalize_homoglyphs
+from src.llm import DailyLimitError, RateLimitError, normalize_homoglyphs
 from src.config.prompts import LANGUAGE_CORRECTION_PROMPT
 from src.pipeline.response_node import persist_thread_turn
 from src.pipeline.state import BotState

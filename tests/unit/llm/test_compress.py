@@ -2,9 +2,9 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.agent.compress import compress_to_budget
+from src.llm.compress import compress_to_budget
 
-INVOKE_PATCH_TARGET = "src.agent.compress.ainvoke_with_backoff"
+INVOKE_PATCH_TARGET = "src.llm.compress.ainvoke_with_backoff"
 
 
 def make_result(content: str) -> MagicMock:

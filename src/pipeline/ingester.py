@@ -59,7 +59,7 @@ from groq import AsyncGroq
 from langchain_core.messages import HumanMessage
 
 from src import config
-from src.agent.vision import make_vision_llm
+from src.llm.vision import make_vision_llm
 from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
 from src.pipeline import shorts, social_links
 from src.pipeline.comment_summary import summarize_comments

@@ -11,8 +11,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from src import config, log
-from src.agent import ainvoke_with_backoff
-from src.agent.language import normalize_homoglyphs
+from src.llm import ainvoke_with_backoff
+from src.llm.language import normalize_homoglyphs
 from src.group_profile.roast_material import MemberMaterial, format_member_material
 from src.config.prompts import (
     GROUP_PROFILE_SYSTEM,

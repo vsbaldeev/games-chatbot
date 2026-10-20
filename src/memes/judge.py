@@ -15,7 +15,7 @@ import base64
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src import config, log
-from src.agent.vision import make_vision_llm
+from src.llm.vision import make_vision_llm
 from src.config.prompts import MEME_JUDGE_SYSTEM
 from src.utils.llm_json import load_json_object
 

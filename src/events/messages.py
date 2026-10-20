@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 import asyncio
 
 from src import achievements, config
-from src.agent import (
+from src.llm import (
     ContextLengthError,
     DailyLimitError,
     RateLimitError,

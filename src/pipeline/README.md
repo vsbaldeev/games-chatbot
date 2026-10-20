@@ -17,7 +17,7 @@ The worker and response LLM agents live in `agents/` (`WorkerAgent`,
 `src.app.pipeline.PipelineManager` creates them once and hands them to
 `build_pipeline` (the response agent serves both the `response` and
 `language_correction` nodes). They depend on the shared LLM-call code in
-`src/agent` (renamed `src/llm` in a later step), never the reverse.
+`src/llm`, never the reverse.
 
 Nodes that answer with a fixed text instead of the response LLM also stamp
 `content_kind` in the state update, so the delivered message can be told apart
@@ -219,7 +219,7 @@ frame extraction (PyAV)
     without frames the transcript is labelled "[Аудиодорожка видео — возможно
     музыка или речь за кадром]:" so lyrics are not read as the sender's words
 
-vision LLM fallback (src.agent.vision.make_vision_llm)
+vision LLM fallback (src.llm.vision.make_vision_llm)
     every vision call in this file (photo, sticker, video/video_note frames)
     goes through the shared factory: Groq primary (qwen/qwen3.8-27b,
     reasoning_effort="none") with an OpenRouter fallback

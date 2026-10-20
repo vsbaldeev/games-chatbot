@@ -124,7 +124,7 @@ safe rather than merely rare.
 
 `fit_caption` fits the text inside the relevant Telegram limit through a
 three-rung ladder: send as composed when it already fits; otherwise compress
-the summary against the remaining budget via `src/agent/compress.py`
+the summary against the remaining budget via `src/llm/compress.py`
 (LLM-based compression); and only if the compressor still overshoots,
 `truncate_at_sentence` cuts it deterministically at the last sentence
 boundary inside the budget (or appends an ellipsis when none exists) as a

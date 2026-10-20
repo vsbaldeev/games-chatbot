@@ -6,7 +6,7 @@ from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
 from src import config, log
-from src.agent.middleware import (
+from src.llm.middleware import (
     GroqContextGuard,
     ModelAttemptLogger,
     ThinkingStripper,

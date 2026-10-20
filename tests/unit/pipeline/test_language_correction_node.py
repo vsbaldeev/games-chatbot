@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agent import DailyLimitError, RateLimitError
+from src.llm import DailyLimitError, RateLimitError
 from src.config.prompts import LANGUAGE_CORRECTION_PROMPT
 from src.pipeline.language_correction_node import LanguageCorrectionNode
 

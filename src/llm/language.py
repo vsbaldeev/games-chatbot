@@ -5,7 +5,7 @@ import re
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.agent.middleware import strip_thinking
+from src.llm.middleware import strip_thinking
 from src.config.prompts import LANGUAGE_CORRECTION_PROMPT
 
 logger = log.get_logger(__name__)

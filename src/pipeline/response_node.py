@@ -8,7 +8,7 @@ import time
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config, log
-from src.agent import needs_russian_correction, normalize_homoglyphs
+from src.llm import needs_russian_correction, normalize_homoglyphs
 from src.config.prompts import (
     LINK_REPLY_GROUNDING_INSTRUCTION,
     SHORTS_TRIGGER_INSTRUCTION,

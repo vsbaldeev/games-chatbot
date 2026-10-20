@@ -412,7 +412,7 @@ WEEKLY_ROLES_RULE = (
 # the downloaded video itself (src/events/link_repost.py), so it is read
 # BEFORE anyone watches — retell, never react. The character budget keeps the
 # common case inside Telegram's 1024-char caption limit without needing the
-# compression pass in src/agent/compress.py.
+# compression pass in src/llm/compress.py.
 SHORTS_TRIGGER_INSTRUCTION = (
     "скинул ссылку на YouTube Shorts. Ниже — его текст и то, что удалось "
     "вытащить из ролика (расшифровка звука и описание кадров могут быть "
@@ -442,7 +442,7 @@ SOCIAL_LINK_RETELL_INSTRUCTION = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Language correction retry (src/agent/language.py,
+# Language correction retry (src/llm/language.py,
 # src/pipeline/language_correction_node.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -599,7 +599,7 @@ GROUP_PROFILE_FAILED_REPLIES = [
 ]
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Caption compression (src/agent/compress.py)
+# Caption compression (src/llm/compress.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Formatted with the remaining character budget. Compression, not truncation:

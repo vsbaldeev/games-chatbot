@@ -28,9 +28,9 @@ members who share a name can never collapse into one entry.
    budget workaround instead — see git history); "none" leaves the whole
    max_tokens=2048 free for the JSON body rather than budgeting reasoning
    against it. Transient TPM 429s are retried with backoff
-   (src.agent.ainvoke_with_backoff), since a truncated call's re-ask is a
+   (src.llm.ainvoke_with_backoff), since a truncated call's re-ask is a
    second full-size request in the same window. Output is passed through
-   normalize_homoglyphs (src.agent.language) — this model occasionally
+   normalize_homoglyphs (src.llm.language) — this model occasionally
    splices a Latin/Greek glyph into an otherwise-Cyrillic word
 4. fill_missing_roles: members the LLM omitted are re-asked once, then any still
    missing get the neutral FALLBACK_ROLE + reason — every eligible member ends up tagged

@@ -140,7 +140,7 @@ Env knobs (set on the bot service in `docker-compose.yml`):
   everything else at `LOG_LEVEL=DEBUG`. Raise it to `DEBUG` only when debugging
   the HTTP layer itself.
 - `OPENAI_LOG_LEVEL` — default `WARNING`, same reasoning as `GROQ_LOG_LEVEL`. The
-  vision fallback factory (`src/agent/vision.py`) and every other OpenAI-compatible
+  vision fallback factory (`src/llm/vision.py`) and every other OpenAI-compatible
   call site route through the `openai` SDK, whose DEBUG request-body logs embed the
   same base64 image payloads.
 

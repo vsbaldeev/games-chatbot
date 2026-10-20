@@ -1,5 +1,5 @@
-"""Tests for agent utility functions: strip_thinking, apply_language_correction,
-should_retry, GroqContextGuard, and Agent.
+"""Tests for LLM utility functions: strip_thinking, apply_language_correction,
+should_retry, guarded_ainvoke and the agent middleware.
 
 Regression for the Qwen3 thinking-block leak: the model emits <think>...</think>
 in its raw output and the bot was forwarding that entire block to the user instead
@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage as LCAIMessage
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
-from src.agent import (
+from src.llm import (
     ContextLengthError,
     DailyLimitError,
     GroqContextGuard,
@@ -217,7 +217,7 @@ class TestModelAttemptLogger:
             ChatOpenAI(model="z-ai/glm-5.2:free", api_key="x", base_url="https://openrouter.ai/api/v1")
         )
         handler = AsyncMock(return_value=SimpleNamespace(result=[LCAIMessage(content="привет")]))
-        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+        with caplog.at_level(logging.DEBUG, logger="src.llm.middleware"):
             result = await ModelAttemptLogger().awrap_model_call(request, handler)
         assert result.result[0].content == "привет"
         assert "openrouter.ai/z-ai/glm-5.2:free" in caplog.text
@@ -225,7 +225,7 @@ class TestModelAttemptLogger:
     async def test_failed_groq_call_logs_provider_and_model_at_warning_then_reraises(self, caplog):
         request = make_model_request(ChatGroq(model="openai/gpt-oss-120b", api_key="x"))
         handler = AsyncMock(side_effect=ValueError("boom"))
-        with caplog.at_level(logging.WARNING, logger="src.agent.middleware"), pytest.raises(ValueError):
+        with caplog.at_level(logging.WARNING, logger="src.llm.middleware"), pytest.raises(ValueError):
             await ModelAttemptLogger().awrap_model_call(request, handler)
         assert "groq.com/openai/gpt-oss-120b" in caplog.text
 
@@ -236,7 +236,7 @@ class TestModelAttemptLogger:
             ChatOpenAI(model="google/gemma-4-31b-it:free", api_key="x", base_url="https://openrouter.ai/api/v1")
         )
         handler = AsyncMock(return_value=SimpleNamespace(result=[LCAIMessage(content="ok")]))
-        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+        with caplog.at_level(logging.DEBUG, logger="src.llm.middleware"):
             await ModelAttemptLogger().awrap_model_call(gemma_request, handler)
         assert "google/gemma-4-31b-it:free" in caplog.text
         assert "z-ai/glm-5.2:free" not in caplog.text
@@ -247,7 +247,7 @@ class TestModelAttemptLogger:
             messages=[HumanMessage(content="когда выйдет GTA 6?")],
         )
         handler = AsyncMock(return_value=SimpleNamespace(result=[LCAIMessage(content="19 ноября 2026")]))
-        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+        with caplog.at_level(logging.DEBUG, logger="src.llm.middleware"):
             await ModelAttemptLogger().awrap_model_call(request, handler)
         assert "когда выйдет GTA 6?" in caplog.text
         assert "19 ноября 2026" in caplog.text
@@ -258,7 +258,7 @@ class TestModelAttemptLogger:
             messages=[HumanMessage(content="что там по игре?")],
         )
         handler = AsyncMock(side_effect=ValueError("boom"))
-        with caplog.at_level(logging.WARNING, logger="src.agent.middleware"), pytest.raises(ValueError):
+        with caplog.at_level(logging.WARNING, logger="src.llm.middleware"), pytest.raises(ValueError):
             await ModelAttemptLogger().awrap_model_call(request, handler)
         assert "что там по игре?" in caplog.text
 
@@ -274,7 +274,7 @@ class TestModelAttemptLogger:
             tool_calls=[{"name": "web_search", "args": {"query": "GTA 6 developer"}, "id": "1"}],
         )
         handler = AsyncMock(return_value=SimpleNamespace(result=[tool_call_message]))
-        with caplog.at_level(logging.DEBUG, logger="src.agent.middleware"):
+        with caplog.at_level(logging.DEBUG, logger="src.llm.middleware"):
             await ModelAttemptLogger().awrap_model_call(request, handler)
         assert "web_search" in caplog.text
 

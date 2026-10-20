@@ -37,7 +37,7 @@ MUTED_LOGGERS = ("httpx", "httpcore", "telegram.ext.ExtBot", "apscheduler")
 GROQ_LOGGER = "groq"
 
 # Same problem, same fix, for the OpenAI SDK — the vision fallback factory
-# (src/agent/vision.py) routes through it, and its request bodies embed the
+# (src/llm/vision.py) routes through it, and its request bodies embed the
 # same base64 image payloads at DEBUG.
 OPENAI_LOGGER = "openai"
 
