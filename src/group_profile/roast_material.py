@@ -5,9 +5,9 @@ the existing stores and formats them into one compact prompt block. Every
 section degrades to empty when its data is absent, so callers can drop the
 formatted block straight into a prompt without conditionals.
 
-Originally shared by the comedian (autonomous humor, since removed) and the
-offense auto-roast (also retired) — kept as a reusable building block for
-future roast/humor features, not currently wired to anything.
+Feeds the group-profile dossier (``roster.gather_roster`` collects it,
+``generate.build_dossier_line`` formats it). Originally shared with the
+comedian and the offense auto-roast, both since removed.
 """
 
 from dataclasses import dataclass, field

@@ -11,7 +11,7 @@ Covers the generation pipeline in isolation, with the LLM round-trip
 import json
 from unittest.mock import AsyncMock, patch
 
-from src.agent.roast_material import MemberMaterial
+from src.group_profile.roast_material import MemberMaterial
 from src.group_profile import generate
 
 CALL_MODEL = "src.group_profile.generate.call_profile_model"

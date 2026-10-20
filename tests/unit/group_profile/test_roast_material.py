@@ -10,7 +10,7 @@ degrade cleanly to empty.
 
 from unittest.mock import AsyncMock, patch
 
-from src.agent.roast_material import (
+from src.group_profile.roast_material import (
     MAX_QUOTES,
     MAX_STAT_HIGHLIGHTS,
     MemberMaterial,
@@ -88,12 +88,12 @@ class TestFormatMemberMaterial:
 
 class TestGatherMemberMaterial:
     async def test_composes_all_sources(self):
-        with patch("src.agent.roast_material.get_facts", AsyncMock(return_value=["факт1"])), \
-             patch("src.agent.roast_material.unified_messages.get_user_messages",
+        with patch("src.group_profile.roast_material.get_facts", AsyncMock(return_value=["факт1"])), \
+             patch("src.group_profile.roast_material.unified_messages.get_user_messages",
                    AsyncMock(return_value=["цитата"])), \
-             patch("src.agent.roast_material.user_tags.get_tag",
+             patch("src.group_profile.roast_material.user_tags.get_tag",
                    AsyncMock(return_value={"tag": "Молчун", "reason": "тихий"})), \
-             patch("src.agent.roast_material.achievements.get_user_stats",
+             patch("src.group_profile.roast_material.achievements.get_user_stats",
                    AsyncMock(return_value={"duel_wins": 2})):
             material = await gather_member_material(CHAT_ID, USER_ID, "vasya")
         assert material.username == "vasya"
@@ -104,11 +104,11 @@ class TestGatherMemberMaterial:
         assert material.is_empty is False
 
     async def test_missing_everything_yields_empty_material(self):
-        with patch("src.agent.roast_material.get_facts", AsyncMock(return_value=[])), \
-             patch("src.agent.roast_material.unified_messages.get_user_messages",
+        with patch("src.group_profile.roast_material.get_facts", AsyncMock(return_value=[])), \
+             patch("src.group_profile.roast_material.unified_messages.get_user_messages",
                    AsyncMock(return_value=[])), \
-             patch("src.agent.roast_material.user_tags.get_tag", AsyncMock(return_value=None)), \
-             patch("src.agent.roast_material.achievements.get_user_stats",
+             patch("src.group_profile.roast_material.user_tags.get_tag", AsyncMock(return_value=None)), \
+             patch("src.group_profile.roast_material.achievements.get_user_stats",
                    AsyncMock(return_value={})):
             material = await gather_member_material(CHAT_ID, USER_ID, "ghost")
         assert material.is_empty is True

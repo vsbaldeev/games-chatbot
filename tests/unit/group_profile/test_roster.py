@@ -8,7 +8,7 @@ member impossible by construction.
 
 from unittest.mock import AsyncMock, patch
 
-from src.agent.roast_material import MemberMaterial
+from src.group_profile.roast_material import MemberMaterial
 from src.group_profile import roster
 
 GET_MEMBERS = "src.group_profile.roster.achievements.get_chat_members"

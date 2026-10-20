@@ -7,8 +7,8 @@ achievement keys.
 
 Only the duel achievements survive: the passive-counter and silence achievements
 were retired because they tallied behaviour and mocked absence instead of driving
-engagement. The remaining stat counters (see TRACKABLE_STATS) are still tracked
-for `roast_material.py`, currently unwired but kept as a reusable building block.
+engagement. The remaining stat counters (see TRACKABLE_STATS) are still tracked;
+the group-profile dossier reads them via `src/group_profile/roast_material.py`.
 """
 
 from dataclasses import dataclass

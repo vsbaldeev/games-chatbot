@@ -3,9 +3,8 @@ Achievement system: stat tracking, rule evaluation, and unlock announcements.
 Only **duel** achievements remain. The passive-counter achievements
 (photos/videos/voice/stickers/forwards/night/essays) and the silence achievements
 were retired — they tallied behaviour and mocked absence instead of driving
-engagement. The stat **counters** are still tracked (see TRACKABLE_STATS) for
-`src/agent/roast_material.py`, currently unwired but kept as a reusable
-building block.
+engagement. The stat **counters** are still tracked (see TRACKABLE_STATS); the
+group-profile dossier reads them via `src/group_profile/roast_material.py`.
 
 TRACKABLE_STATS and MAX_TRACKABLE_STATS act as allowlists — increment_stat() and
 update_max_stat() raise ValueError for any column not in those sets.

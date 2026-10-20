@@ -10,7 +10,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from src import achievements
-from src.agent.roast_material import MemberMaterial, gather_member_material
+from src.group_profile.roast_material import MemberMaterial, gather_member_material
 
 
 @dataclass

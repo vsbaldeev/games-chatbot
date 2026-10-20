@@ -29,7 +29,7 @@ in-character refusal with no generation at all.
 ```
 roster.py     gather_roster(chat_id) -> ChatRoster
                loads every registered chat member and splits them by whether
-               src.agent.roast_material.gather_member_material found any
+               src.group_profile.roast_material.gather_member_material found any
                facts, quotes, weekly role or notable stats. Members with
                nothing are excluded from the LLM call entirely — see
                "Unknown members" below.
