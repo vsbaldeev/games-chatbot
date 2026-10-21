@@ -213,7 +213,7 @@ def make_filter_llm(model: str) -> Runnable:
     at all, so a Groq quota exhaustion or outage must not turn into silence.
     The fallback runs the same weights through OpenRouter; without
     ``OPENROUTER_API_KEY`` the Groq client is returned bare and
-    ``ClassifyNode.__classify`` degrades on its own (fail-open to MEANINGFUL).
+    ``ClassifyNode.classify_text`` degrades on its own (fail-open to MEANINGFUL).
 
     Any ``groq.APIError`` triggers the failover — rate limits, daily-quota
     429s a same-model retry can never recover from, connection errors and
@@ -253,6 +253,83 @@ def make_filter_llm(model: str) -> Runnable:
     return primary_llm.with_fallbacks([fallback_llm], exceptions_to_handle=(groq.APIError,))
 
 
+def downgrade_group_profile_request(state: BotState, text: str, decision: Verdict) -> Verdict:
+    """Downgrade a GROUP_PROFILE_REQUEST verdict lacking a whole-chat marker.
+
+    Args:
+        state: Current pipeline state.
+        text: Raw message text.
+        decision: Verdict returned by ``classify_text``.
+
+    Returns:
+        ``"MEANINGFUL"`` when ``decision`` is GROUP_PROFILE_REQUEST but the
+        text names no whole-chat marker; ``decision`` unchanged otherwise.
+    """
+    if decision != Verdict.GROUP_PROFILE_REQUEST or GROUP_PROFILE_MARKER_RE.search(text):
+        return decision
+    logger.debug(
+        "Filter[classify]: message %s classified GROUP_PROFILE_REQUEST without a "
+        "whole-chat marker — downgrading to MEANINGFUL",
+        state["incoming"]["message_id"],
+    )
+    return Verdict.MEANINGFUL
+
+
+def downgrade_not_addressed(state: BotState, text: str, decision: Verdict) -> Verdict:
+    """Downgrade a NOT_ADDRESSED verdict outside a broadcast reply, or on a real request.
+
+    Ordinary conversation can never be silenced by this verdict: it is
+    honoured only when the router flagged the message as an un-mentioned
+    reply to a broadcast (see ``__resolve_not_addressed``) — and even
+    then only when the text does not look like a genuine question or
+    imperative request. This mirrors the MEANINGLESS/BANTER override in
+    ``ClassifyNode.classify_addressed``, applied here as well because NOT_ADDRESSED
+    is the only verdict that produces total silence, so a classifier
+    misfire on it deserves the same deterministic floor.
+
+    Args:
+        state: Current pipeline state.
+        text: Raw message text.
+        decision: Verdict returned by ``classify_text``.
+
+    Returns:
+        ``"MEANINGFUL"`` when ``decision`` is NOT_ADDRESSED but the
+        message is not a broadcast reply, or looks like a question or
+        request; ``decision`` unchanged otherwise.
+    """
+    if decision != Verdict.NOT_ADDRESSED:
+        return decision
+    if state.get("broadcast_reply") and not looks_like_request(text):
+        return decision
+    logger.debug(
+        "Filter[classify]: message %s classified NOT_ADDRESSED — downgrading to "
+        "MEANINGFUL (not a broadcast reply, or looks like a request)",
+        state["incoming"]["message_id"],
+    )
+    return Verdict.MEANINGFUL
+
+
+async def enrich_replied_media(replied_to: dict | None, state: BotState) -> dict | None:
+    """Vision-enrich an unenriched replied-to photo or sticker for the classifier.
+
+    Delegates to ``ingester.enrich_media_row``, which no-ops for other
+    media types, already-enriched rows, fallback rows without a file_id,
+    and vision failures — and caches the result to the store, so the
+    context builder reuses it instead of calling vision again.
+
+    Args:
+        replied_to: Row of the message being replied to, or None.
+        state: Current pipeline state, providing the bot instance.
+
+    Returns:
+        The (possibly enriched) row, or None when there was no reply.
+    """
+    if replied_to is None:
+        return None
+    bot = state["context_types"].bot
+    return await enrich_media_row(replied_to, state["incoming"]["chat_id"], bot)
+
+
 class ClassifyNode:
     """LLM classifier for text messages: addressed replies and overheard bot-word mentions."""
 
@@ -287,15 +364,15 @@ class ClassifyNode:
         if state.get("response_trigger") == "insult_check":
             recent = await self.__fetch_recent_context(state["incoming"])
             overheard_input = build_overheard_input(text, recent)
-            decision = await self.__classify(overheard_input, OVERHEARD_SYSTEM)
+            decision = await self.classify_text(overheard_input, OVERHEARD_SYSTEM)
             return await self.__resolve_overheard(state, decision, overheard_input)
 
-        decision = await self.__classify_addressed(state, text)
+        decision = await self.classify_addressed(state, text)
         if decision == Verdict.NOT_ADDRESSED:
             return self.__resolve_not_addressed(state)
         return {"filter_verdict": decision}
 
-    async def __classify_addressed(self, state: BotState, text: str) -> str:
+    async def classify_addressed(self, state: BotState, text: str) -> Verdict:
         """Classify an addressed message with reply context and a request override.
 
         Loads the replied-to message (if any) so the classifier sees what the
@@ -322,10 +399,10 @@ class ClassifyNode:
             ``"NOT_ADDRESSED"`` or ``"MEANINGFUL"``.
         """
         replied_to = await self.__fetch_replied_to(state["incoming"])
-        replied_to = await self.__enrich_replied_media(replied_to, state)
-        decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
-        decision = self.__downgrade_group_profile_request(state, text, decision)
-        decision = self.__downgrade_not_addressed(state, text, decision)
+        replied_to = await enrich_replied_media(replied_to, state)
+        decision = await self.classify_text(build_filter_input(text, replied_to), FILTER_SYSTEM)
+        decision = downgrade_group_profile_request(state, text, decision)
+        decision = downgrade_not_addressed(state, text, decision)
         if decision in (Verdict.MEANINGLESS, Verdict.BANTER) and looks_like_request(text):
             logger.debug(
                 "Filter[classify]: message %s is a question/request — overriding %s to MEANINGFUL",
@@ -333,80 +410,6 @@ class ClassifyNode:
             )
             return Verdict.MEANINGFUL
         return decision
-
-    def __downgrade_group_profile_request(self, state: BotState, text: str, decision: str) -> str:
-        """Downgrade a GROUP_PROFILE_REQUEST verdict lacking a whole-chat marker.
-
-        Args:
-            state: Current pipeline state.
-            text: Raw message text.
-            decision: Verdict returned by ``__classify``.
-
-        Returns:
-            ``"MEANINGFUL"`` when ``decision`` is GROUP_PROFILE_REQUEST but the
-            text names no whole-chat marker; ``decision`` unchanged otherwise.
-        """
-        if decision != Verdict.GROUP_PROFILE_REQUEST or GROUP_PROFILE_MARKER_RE.search(text):
-            return decision
-        logger.debug(
-            "Filter[classify]: message %s classified GROUP_PROFILE_REQUEST without a "
-            "whole-chat marker — downgrading to MEANINGFUL",
-            state["incoming"]["message_id"],
-        )
-        return Verdict.MEANINGFUL
-
-    def __downgrade_not_addressed(self, state: BotState, text: str, decision: str) -> str:
-        """Downgrade a NOT_ADDRESSED verdict outside a broadcast reply, or on a real request.
-
-        Ordinary conversation can never be silenced by this verdict: it is
-        honoured only when the router flagged the message as an un-mentioned
-        reply to a broadcast (see ``__resolve_not_addressed``) — and even
-        then only when the text does not look like a genuine question or
-        imperative request. This mirrors the MEANINGLESS/BANTER override in
-        ``__classify_addressed``, applied here as well because NOT_ADDRESSED
-        is the only verdict that produces total silence, so a classifier
-        misfire on it deserves the same deterministic floor.
-
-        Args:
-            state: Current pipeline state.
-            text: Raw message text.
-            decision: Verdict returned by ``__classify``.
-
-        Returns:
-            ``"MEANINGFUL"`` when ``decision`` is NOT_ADDRESSED but the
-            message is not a broadcast reply, or looks like a question or
-            request; ``decision`` unchanged otherwise.
-        """
-        if decision != Verdict.NOT_ADDRESSED:
-            return decision
-        if state.get("broadcast_reply") and not looks_like_request(text):
-            return decision
-        logger.debug(
-            "Filter[classify]: message %s classified NOT_ADDRESSED — downgrading to "
-            "MEANINGFUL (not a broadcast reply, or looks like a request)",
-            state["incoming"]["message_id"],
-        )
-        return Verdict.MEANINGFUL
-
-    async def __enrich_replied_media(self, replied_to: dict | None, state: BotState) -> dict | None:
-        """Vision-enrich an unenriched replied-to photo or sticker for the classifier.
-
-        Delegates to ``ingester.enrich_media_row``, which no-ops for other
-        media types, already-enriched rows, fallback rows without a file_id,
-        and vision failures — and caches the result to the store, so the
-        context builder reuses it instead of calling vision again.
-
-        Args:
-            replied_to: Row of the message being replied to, or None.
-            state: Current pipeline state, providing the bot instance.
-
-        Returns:
-            The (possibly enriched) row, or None when there was no reply.
-        """
-        if replied_to is None:
-            return None
-        bot = state["context_types"].bot
-        return await enrich_media_row(replied_to, state["incoming"]["chat_id"], bot)
 
     async def __fetch_replied_to(self, msg: dict) -> dict | None:
         """Load the message this one replies to: stored row first, update fallback second.
@@ -548,7 +551,7 @@ class ClassifyNode:
         self.__extract_passive_facts(state["incoming"])
         return {"should_respond": False, "drop_reason": "overheard_dropped"}
 
-    async def __classify(self, text: str, system_prompt: str) -> str:
+    async def classify_text(self, text: str, system_prompt: str) -> Verdict:
         """Classify the message text with the filter LLM.
 
         Args:
