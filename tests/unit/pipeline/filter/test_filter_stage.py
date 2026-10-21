@@ -15,7 +15,7 @@ patched at the memory writer's boundary.
 
 import asyncio
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from langgraph.graph import END, START, StateGraph
 
