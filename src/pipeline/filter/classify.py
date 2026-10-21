@@ -1,7 +1,6 @@
 """
-ClassifyNode — filter-stage node that classifies a text message with an LLM.
+ClassifyNode — filter-stage node that classifies a text message addressed to the bot.
 
-Classification depends on how the message entered the pipeline:
   - Addressed messages (@mention / reply to the bot) are classified as
     MEANINGLESS (emoji reaction, no reply), BANTER (content-free jab that
     only keeps the exchange going), BOT_INSULT or MEANINGFUL (normal reply).
@@ -38,14 +37,6 @@ Classification depends on how the message entered the pipeline:
     is the one verdict that produces total silence, so a classifier misfire
     on it is the costliest to leave unguarded. Everywhere else the verdict
     is downgraded to MEANINGFUL, preserving this node's fail-open bias.
-  - Overheard messages routed by the router's bot-word check
-    (response_trigger="insult_check") are classified with the last few chat
-    messages as context, so the model can tell this bot from game bots,
-    other Telegram bots and people playing «как бот». A BOT_INSULT verdict
-    acts only after a stronger model confirms it on the same input
-    (disagreement or a confirmation error resolves to silence); everything
-    else is dropped silently — no emoji reaction, because the bot was never
-    addressed and reacting would be noise.
 
 The node only decides the verdict (``filter_verdict``) or ends the run; the
 attention-budget charge and the reaction happen in ``budget.charge_budget``.
@@ -61,7 +52,7 @@ from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
 from src import config, log
-from src.config.prompts import FILTER_SYSTEM, OVERHEARD_SYSTEM
+from src.config.prompts import FILTER_SYSTEM
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import looks_like_request
@@ -94,11 +85,6 @@ GROUP_PROFILE_MARKER_RE = re.compile(
     r"each\s+of\s+(?:us|you)|all\s+of\s+(?:us|you))\b",
     re.IGNORECASE,
 )
-
-# Overheard bot-word checks see the last few chat messages so the classifier
-# can resolve which bot (or person playing «как бот») is being talked about.
-OVERHEARD_CONTEXT_LIMIT = 5
-OVERHEARD_CONTEXT_CHAR_LIMIT = 120
 
 
 def replied_to_display_content(replied_to: dict) -> str:
@@ -153,34 +139,6 @@ def build_filter_input(text: str, replied_to: dict | None) -> str:
     )
 
 
-def build_overheard_input(text: str, recent: list[dict]) -> str:
-    """Assemble the human message for the overheard bot-word classifier.
-
-    Args:
-        text: The overheard message text under classification.
-        recent: Recent chat rows (newest-first) providing referent context;
-            may be empty, in which case the bare text is returned.
-
-    Returns:
-        The bare text when no context is available; otherwise the last few
-        chat messages (oldest-first, truncated) followed by the message to
-        classify, each section clearly labelled.
-    """
-    if not recent:
-        return text
-    lines = []
-    for row in reversed(recent[:OVERHEARD_CONTEXT_LIMIT]):
-        content = (row.get("content") or "").strip()
-        if len(content) > OVERHEARD_CONTEXT_CHAR_LIMIT:
-            content = content[:OVERHEARD_CONTEXT_CHAR_LIMIT] + "…"
-        lines.append(f"@{row.get('username')}: {content}")
-    context_block = "\n".join(lines)
-    return (
-        f"Recent chat context:\n{context_block}\n\n"
-        f"Message to classify (only this):\n«{text}»"
-    )
-
-
 def parse_label(content: str) -> Verdict:
     """Map the classifier's free-text answer onto one of the filter labels.
 
@@ -204,6 +162,31 @@ def parse_label(content: str) -> Verdict:
     if "BANTER" in result:
         return Verdict.BANTER
     return Verdict.MEANINGLESS if "MEANINGLESS" in result else Verdict.MEANINGFUL
+
+
+async def ask_label(llm: Runnable, text: str, system_prompt: str) -> Verdict:
+    """Ask a filter LLM for a label.
+
+    Args:
+        llm: The classification LLM (see :func:`make_filter_llm`).
+        text: Raw message text, or the reply-context input assembled by
+            :func:`build_filter_input` / the overheard input builder.
+        system_prompt: ``FILTER_SYSTEM`` for messages addressed to the bot,
+            ``OVERHEARD_SYSTEM`` for bot-word mentions.
+
+    Returns:
+        A label from :func:`parse_label`. Fails open to ``Verdict.MEANINGFUL``
+        on any LLM error.
+    """
+    try:
+        response = await llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=text),
+        ])
+        return parse_label(response.content)
+    except Exception as err:  # noqa: BLE001 — fail open: a classifier outage must not mean silence
+        logger.warning("Meaningless filter failed, failing open (MEANINGFUL): %s", err)
+        return Verdict.MEANINGFUL
 
 
 def make_filter_llm(model: str) -> Runnable:
@@ -330,21 +313,36 @@ async def enrich_replied_media(replied_to: dict | None, state: BotState) -> dict
     return await enrich_media_row(replied_to, state["incoming"]["chat_id"], bot)
 
 
-class ClassifyNode:
-    """LLM classifier for text messages: addressed replies and overheard bot-word mentions."""
+def extract_passive_facts(msg: dict) -> None:
+    """Fire-and-forget passive fact extraction before a message is dropped silently.
 
-    def __init__(self, llm: Runnable | None = None, confirm_llm: Runnable | None = None) -> None:
-        """Build the classification and confirmation LLMs unless they are injected.
+    Shared by the overheard-drop and NOT_ADDRESSED-drop paths, both of
+    which end the run without a reply but must not lose substantive
+    self-description the sender typed along the way.
+
+    Args:
+        msg: IncomingMessage dict of the message being dropped.
+    """
+    text = msg["raw_text"] or ""
+    if len(text.strip()) >= MIN_PASSIVE_LENGTH:
+        asyncio.create_task(extract_and_save(
+            chat_id=msg["chat_id"],
+            user_id=msg["user_id"],
+            username=msg["username"],
+            user_message=text,
+        ))
+
+
+class ClassifyNode:
+    """LLM classifier for text messages addressed to the bot."""
+
+    def __init__(self, llm: Runnable | None = None) -> None:
+        """Build the classification LLM unless one is injected.
 
         Args:
             llm: Classifier LLM; built from ``config.FILTER_MODEL`` when None.
-            confirm_llm: Overheard-insult confirmation LLM; built from
-                ``config.INSULT_CONFIRM_MODEL`` when None.
         """
         self.__llm = llm if llm is not None else make_filter_llm(config.FILTER_MODEL)
-        self.__confirm_llm = (
-            confirm_llm if confirm_llm is not None else make_filter_llm(config.INSULT_CONFIRM_MODEL)
-        )
 
     async def __call__(self, state: BotState) -> dict:
         """Classify the incoming text message.
@@ -360,12 +358,6 @@ class ClassifyNode:
         text = state["incoming"]["raw_text"] or ""
         if not text.strip():
             return {"should_respond": False}
-
-        if state.get("response_trigger") == "insult_check":
-            recent = await self.__fetch_recent_context(state["incoming"])
-            overheard_input = build_overheard_input(text, recent)
-            decision = await self.classify_text(overheard_input, OVERHEARD_SYSTEM)
-            return await self.__resolve_overheard(state, decision, overheard_input)
 
         decision = await self.classify_addressed(state, text)
         if decision == Verdict.NOT_ADDRESSED:
@@ -443,7 +435,7 @@ class ClassifyNode:
         was never addressed, so both would be the bot inserting itself into a
         conversation between members — the same reasoning the overheard-drop
         path already follows. Passive fact extraction still runs before the
-        drop (see ``__extract_passive_facts``), so substantive
+        drop (see ``extract_passive_facts``), so substantive
         self-description in the message is not silently lost.
 
         Args:
@@ -456,120 +448,14 @@ class ClassifyNode:
             "Filter[classify]: message %s replies to a broadcast without addressing the bot — silence",
             state["incoming"]["message_id"],
         )
-        self.__extract_passive_facts(state["incoming"])
+        extract_passive_facts(state["incoming"])
         return {
             "should_respond": False,
             "filter_verdict": Verdict.NOT_ADDRESSED,
             "drop_reason": "broadcast_not_addressed",
         }
 
-    def __extract_passive_facts(self, msg: dict) -> None:
-        """Fire-and-forget passive fact extraction before a message is dropped silently.
-
-        Shared by the overheard-drop and NOT_ADDRESSED-drop paths, both of
-        which end the run without a reply but must not lose substantive
-        self-description the sender typed along the way.
-
-        Args:
-            msg: IncomingMessage dict of the message being dropped.
-        """
-        text = msg["raw_text"] or ""
-        if len(text.strip()) >= MIN_PASSIVE_LENGTH:
-            asyncio.create_task(extract_and_save(
-                chat_id=msg["chat_id"],
-                user_id=msg["user_id"],
-                username=msg["username"],
-                user_message=text,
-            ))
-
-    async def __fetch_recent_context(self, msg: dict) -> list[dict]:
-        """Load recent chat rows for the overheard classifier, failing soft.
-
-        Args:
-            msg: IncomingMessage dict of the message being classified.
-
-        Returns:
-            Recent rows (newest-first, current message excluded), or an empty
-            list when the lookup fails — degrading to context-free
-            classification.
-        """
-        try:
-            recent = await unified_messages.get_recent(
-                chat_id=msg["chat_id"], limit=OVERHEARD_CONTEXT_LIMIT + 1
-            )
-            return [row for row in recent if row["message_id"] != msg["message_id"]]
-        except Exception as err:  # noqa: BLE001 — fail soft to context-free classification
-            logger.warning("Filter[classify]: failed to load overheard context: %s", err)
-            return []
-
-    async def __confirm_insult(self, overheard_input: str) -> bool:
-        """Second opinion from the stronger model before an overheard comeback.
-
-        Fail-soft is inverted here: for an unaddressed aggressive action the
-        safe failure is silence, so any confirmation error drops the insult.
-
-        Args:
-            overheard_input: The exact input the cheap classifier saw.
-
-        Returns:
-            True only when the confirmation model also says BOT_INSULT.
-        """
-        try:
-            response = await self.__confirm_llm.ainvoke([
-                SystemMessage(content=OVERHEARD_SYSTEM),
-                HumanMessage(content=overheard_input),
-            ])
-            verdict = response.content.strip().upper()
-            logger.debug("Filter[classify]: overheard insult confirmation verdict: %s", verdict)
-            return "INSULT" in verdict
-        except Exception as err:  # noqa: BLE001 — any confirmation error resolves to silence
-            logger.warning("Insult confirmation failed — dropping overheard insult: %s", err)
-            return False
-
-    async def __resolve_overheard(
-        self, state: BotState, decision: str, overheard_input: str
-    ) -> dict:
-        """Apply the verdict for an overheard message that mentions the bot by word.
-
-        A BOT_INSULT verdict from the cheap classifier acts only after the
-        stronger model confirms it on the same input; disagreement (or a
-        confirmation error) resolves as OTHER. Anything else is dropped
-        silently — no emoji reaction — and long texts get the passive fact
-        extraction the router skips for insult-check candidates.
-
-        Args:
-            state: Current pipeline state.
-            decision: Cheap classifier verdict.
-            overheard_input: The classifier input, re-used for confirmation.
-
-        Returns:
-            ``{"filter_verdict": "BOT_INSULT"}`` for a confirmed insult;
-            otherwise a drop update.
-        """
-        if decision == Verdict.BOT_INSULT and await self.__confirm_insult(overheard_input):
-            return {"filter_verdict": Verdict.BOT_INSULT}
-        self.__extract_passive_facts(state["incoming"])
-        return {"should_respond": False, "drop_reason": "overheard_dropped"}
 
     async def classify_text(self, text: str, system_prompt: str) -> Verdict:
-        """Classify the message text with the filter LLM.
-
-        Args:
-            text: Raw message text, or the reply-context input assembled by
-                ``build_filter_input`` for addressed replies.
-            system_prompt: Classification prompt — ``FILTER_SYSTEM`` for messages
-                addressed to the bot, ``OVERHEARD_SYSTEM`` for bot-word mentions.
-
-        Returns:
-            A label from :func:`parse_label`. Fails open to ``"MEANINGFUL"``
-            on any LLM error.
-        """
-        try:
-            response = await self.__llm.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=text),
-            ])
-            return parse_label(response.content)
-        except Exception as err:  # noqa: BLE001 — fail open: a classifier outage must not mean silence
-            logger.warning("Meaningless filter failed, failing open (MEANINGFUL): %s", err)
-            return Verdict.MEANINGFUL
+        """Classify the message text with the filter LLM; see :func:`ask_label`."""
+        return await ask_label(self.__llm, text, system_prompt)

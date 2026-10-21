@@ -22,16 +22,27 @@ from langgraph.graph import END, START, StateGraph
 from src import config
 from src.pipeline import engagement_gate
 from src.pipeline.filter.classify import ClassifyNode
+from src.pipeline.filter.overheard import OverheardNode
 from src.pipeline.graph import add_filter_stage
 from src.pipeline.router import MessageRouter
 from src.pipeline.state import BotState, ContentKind
-from tests.builders import make_classify_node, make_incoming, make_state, make_telegram_message
+from tests.builders import (
+    make_classify_node,
+    make_incoming,
+    make_overheard_node,
+    make_state,
+    make_telegram_message,
+)
 
 
-async def run_filter_stage(state: dict, classify_node: ClassifyNode) -> dict:
+async def run_filter_stage(
+    state: dict, classify_node: ClassifyNode, overheard_node: OverheardNode | None = None
+) -> dict:
     """Run the filter stage on ``state`` and return the merged node updates."""
     graph = StateGraph(BotState)
-    add_filter_stage(graph, source=START, on_pass=END, classify_node=classify_node)
+    add_filter_stage(
+        graph, source=START, on_pass=END, classify_node=classify_node, overheard_node=overheard_node,
+    )
     merged: dict = {}
     async for chunk in graph.compile().astream(state, stream_mode="updates"):
         for update in chunk.values():
@@ -266,3 +277,20 @@ class TestRouterToFilterStageWiring:
 
         assert result["should_respond"] is False
         assert result["drop_reason"] == "broadcast_not_addressed"
+
+
+class TestOverheardInsult:
+    async def test_confirmed_overheard_insult_is_charged_as_bot_insult(self):
+        classify_node, mock_llm = make_classify_node()
+        overheard_node = make_overheard_node(cheap_response="BOT_INSULT", confirm_response="BOT_INSULT")
+        state = make_state(
+            make_incoming(raw_text="этот бот вообще тупой"),
+            should_respond=True, response_trigger="insult_check",
+        )
+        with patch_register_signal() as mock_register:
+            result = await run_filter_stage(state, classify_node, overheard_node)
+        assert result["filter_verdict"] == "BOT_INSULT"
+        assert result["is_bot_insult"] is True
+        assert result["should_respond"] is True
+        mock_register.assert_called_once()
+        mock_llm.ainvoke.assert_not_called()

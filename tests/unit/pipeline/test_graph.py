@@ -43,7 +43,7 @@ class TestRouteAfterIngester:
             (True, "social_link", "text", "link_check"),
             (True, "explicit", "voice", "media_check"),
             (True, "explicit", "text", "classify"),
-            (True, "insult_check", "text", "classify"),
+            (True, "insult_check", "text", "overheard"),
         ],
     )
     def test_routes_by_trigger_and_media_type(self, should_respond, trigger, media_type, expected):

@@ -37,6 +37,7 @@ from src.pipeline.filter.budget import charge_budget
 from src.pipeline.filter.classify import ClassifyNode
 from src.pipeline.filter.link_check import check_link
 from src.pipeline.filter.media_check import check_media
+from src.pipeline.filter.overheard import OverheardNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
 from src.pipeline.language_correction_node import LanguageCorrectionNode
@@ -66,8 +67,11 @@ def route_after_ingester(state: BotState) -> str:
     """Pick the filter node that handles the message, or end when no reply is wanted."""
     if not state["should_respond"]:
         return END
-    if state.get("response_trigger") in ("youtube_short", "social_link"):
+    trigger = state.get("response_trigger")
+    if trigger in ("youtube_short", "social_link"):
         return "link_check"
+    if trigger == "insult_check":
+        return "overheard"
     if state["incoming"]["media_type"] != "text":
         return "media_check"
     return "classify"
@@ -100,6 +104,7 @@ def add_filter_stage(
     source: str,
     on_pass: str,
     classify_node: ClassifyNode | None = None,
+    overheard_node: OverheardNode | None = None,
 ) -> None:
     """Add the four filter nodes and their edges to ``graph``.
 
@@ -109,21 +114,30 @@ def add_filter_stage(
         on_pass: Node that follows when the message passes the filter.
         classify_node: Classifier to use; built from configuration when None
             (tests inject one with mock LLMs).
+        overheard_node: Overheard-mention classifier; built from configuration
+            when None.
     """
     graph.add_node("link_check", check_link)
     graph.add_node("media_check", check_media)
     graph.add_node("classify", classify_node if classify_node is not None else ClassifyNode())
+    graph.add_node("overheard", overheard_node if overheard_node is not None else OverheardNode())
     graph.add_node("budget", charge_budget)
 
     graph.add_conditional_edges(
         source,
         route_after_ingester,
-        {"link_check": "link_check", "media_check": "media_check", "classify": "classify", END: END},
+        {
+            "link_check": "link_check",
+            "overheard": "overheard",
+            "media_check": "media_check",
+            "classify": "classify",
+            END: END,
+        },
     )
     graph.add_conditional_edges(
         "link_check", route_if_responding(on_pass), {on_pass: on_pass, END: END}
     )
-    for checked_node in ("media_check", "classify"):
+    for checked_node in ("media_check", "classify", "overheard"):
         graph.add_conditional_edges(
             checked_node, route_if_responding("budget"), {"budget": "budget", END: END}
         )

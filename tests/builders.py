@@ -6,6 +6,7 @@ import groq
 import openai
 
 from src.pipeline.filter.classify import ClassifyNode
+from src.pipeline.filter.overheard import OverheardNode
 
 
 def make_telegram_message(
@@ -125,10 +126,25 @@ def make_classify_node(
     llm_response: str | None = None,
     llm_error: Exception | None = None,
 ) -> tuple[ClassifyNode, MagicMock]:
-    """Build a ClassifyNode whose classifier and confirmation LLMs are one mock."""
+    """Build a ClassifyNode whose classifier LLM is a mock."""
     mock_llm = MagicMock()
     if llm_error is not None:
         mock_llm.ainvoke = AsyncMock(side_effect=llm_error)
     else:
         mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content=llm_response or "MEANINGFUL"))
-    return ClassifyNode(llm=mock_llm, confirm_llm=mock_llm), mock_llm
+    return ClassifyNode(llm=mock_llm), mock_llm
+
+
+def make_overheard_node(cheap_response: str, confirm_response: str | Exception) -> OverheardNode:
+    """Build an OverheardNode whose cheap and confirmation LLMs are separate mocks."""
+    cheap_llm = MagicMock()
+    cheap_llm.ainvoke = AsyncMock(return_value=MagicMock(content=cheap_response))
+    confirm_llm = MagicMock()
+    if isinstance(confirm_response, Exception):
+        confirm_llm.ainvoke = AsyncMock(side_effect=confirm_response)
+    else:
+        confirm_llm.ainvoke = AsyncMock(return_value=MagicMock(content=confirm_response))
+    node = OverheardNode(llm=cheap_llm, confirm_llm=confirm_llm)
+    node.cheap_llm = cheap_llm
+    node.confirm_llm_mock = confirm_llm
+    return node

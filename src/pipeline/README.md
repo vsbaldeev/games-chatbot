@@ -19,6 +19,7 @@ flowchart TD
     link["<b>link_check</b><br/>Shorts / social link"]
     media["<b>media_check</b><br/>transcript present?"]
     classify["<b>classify</b><br/>LLM verdict"]
+    overheard["<b>overheard</b><br/>bot-word mention"]
     budget["<b>budget</b><br/>engagement gate"]
     guard["<b>guard</b><br/>prompt-injection check"]
     ctx["<b>context_builder</b><br/>history · facts · roles"]
@@ -36,15 +37,18 @@ flowchart TD
     ingester -->|"link trigger"| link
     ingester -->|"media"| media
     ingester -->|"text"| classify
+    ingester -->|"insult_check"| overheard
     ingester -->|"not should_respond"| stop
 
     link -->|"should_respond"| guard
     media -->|"should_respond"| budget
     classify -->|"should_respond"| budget
+    overheard -->|"should_respond"| budget
     budget -->|"should_respond"| guard
     link -->|"otherwise"| stop
     media -->|"otherwise"| stop
     classify -->|"otherwise"| stop
+    overheard -->|"otherwise"| stop
     budget -->|"otherwise"| stop
 
     guard -->|"not blocked"| ctx
@@ -208,7 +212,8 @@ The filter stage is four graph nodes in `src/pipeline/filter/`, added to the gra
 |---|---|---|
 | `link_check` | `filter/link_check.py` | Shorts / social link: pass the summary on, or a canned failure reply if addressed, silence if not. Skips `budget`. |
 | `media_check` | `filter/media_check.py` | Non-text media: transcript present → verdict `MEANINGFUL`; none → canned «не расслышал / не разглядел». |
-| `classify` | `filter/classify.py` | The only LLM call: classifies addressed text, or an overheard bot-word mention. Sets `filter_verdict` or ends the run. |
+| `classify` | `filter/classify.py` | LLM classifier for text addressed to the bot (with the replied-to message as context). Sets `filter_verdict` or ends the run. |
+| `overheard` | `filter/overheard.py` | `insult_check` trigger: a cheap classifier over the last 5 messages, then a confirmation model. Only a confirmed `BOT_INSULT` continues; everything else is dropped silently after passive fact extraction. |
 | `budget` | `filter/budget.py` | Charges the engagement gate, maps verdict + tier onto reply flags, an emoji reaction or silence. |
 
 The diagram below flattens the four nodes into one decision tree.
