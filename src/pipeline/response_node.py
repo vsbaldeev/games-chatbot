@@ -32,11 +32,6 @@ RECENT_FILL_LIMIT = 10
 # window was GroqContextGuard catching the failure after the call.
 ROW_CHAR_LIMIT = 400
 
-# Random (unprompted) triggers get a thin recent-history slice: enough to
-# catch an obvious topic mismatch, not enough to drown a spontaneous
-# reaction in chat noise.
-RANDOM_TRIGGER_CONTEXT_LIMIT = 3
-
 # Triggers whose reply is a retell of fetched link material. They get no
 # recent history at all — see :func:`build_recent_history_lines`.
 LINK_RETELL_TRIGGERS = ("youtube_short", "social_link")
@@ -452,9 +447,8 @@ def build_recent_history_lines(
 
     Args:
         context: AssembledContext dict or None.
-        response_trigger: Routing trigger; ``"random"`` trims the
-            recent-history slice (see :func:`build_response_input`), and the
-            link retell triggers drop it entirely.
+        response_trigger: Routing trigger; the link retell triggers drop
+            recent history entirely.
         has_thread_history: ``True`` when per-thread turn history is available;
             suppresses recent chat history to avoid double-context.
 
@@ -464,8 +458,6 @@ def build_recent_history_lines(
         without recomputing it.
     """
     recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
-    if response_trigger == "random":
-        recent = recent[:RANDOM_TRIGGER_CONTEXT_LIMIT]
     suppressed = has_thread_history or response_trigger in LINK_RETELL_TRIGGERS
     rendered = [] if suppressed else recent
 
@@ -573,7 +565,8 @@ def build_response_input(
         worker_output: Facts gathered by the worker agent, or empty string.
         context: AssembledContext dict or None.
         response_trigger: ``"explicit"`` when the bot was @mentioned or replied
-            to; ``"random"`` for unprompted triggers.
+            to; ``"insult_check"``, ``"youtube_short"`` or ``"social_link"``
+            otherwise (see ``BotState.response_trigger``).
         has_thread_history: ``True`` when per-thread turn history is available;
             suppresses recent chat history to avoid double-context.
         media_type: Media kind of the triggering message; non-text values mark

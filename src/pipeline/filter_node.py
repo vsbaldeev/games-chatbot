@@ -178,33 +178,6 @@ group_profile_cooldown_gate = TtlGate(GROUP_PROFILE_COOLDOWN_SECONDS)
 OVERHEARD_CONTEXT_LIMIT = 5
 OVERHEARD_CONTEXT_CHAR_LIMIT = 120
 
-# Media types the unprompted random reaction skips when the vision classifier
-# says the content is not a genuine photo/video of a real person (a meme,
-# screenshot, art…). Explicit @mentions/replies are never gated — a member
-# directly asking the bot to react to a meme still gets the roast.
-RANDOM_MEDIA_MEME_GATE_TYPES = ("photo", "video_note")
-
-
-def is_meme_random_trigger(state: BotState, media_type: str) -> bool:
-    """True when a random-trigger photo/video note was classified as not a real person.
-
-    Fails open: an unknown classification (``None`` — e.g. a vision-tag
-    parsing hiccup) never suppresses a response.
-
-    Args:
-        state: Current pipeline state.
-        media_type: The incoming message's media type.
-
-    Returns:
-        True only for a ``"random"`` trigger on a gated media type whose
-        vision classification is explicitly False.
-    """
-    if state.get("response_trigger") != "random":
-        return False
-    if media_type not in RANDOM_MEDIA_MEME_GATE_TYPES:
-        return False
-    return state.get("media_is_real_person") is False
-
 
 def replies_to_bot(msg: dict) -> bool:
     """Check whether the incoming message replies to one of the bot's own messages.
@@ -602,15 +575,15 @@ class MeaninglessFilterNode:
         return {"should_respond": False, "drop_reason": "social_link_failed"}
 
     async def __handle_media(self, state: BotState) -> dict:
-        """Pass media through when transcribed; degrade honestly when not.
+        """Charge the budget for transcribed media; degrade honestly when not.
 
-        An explicitly addressed media message whose processing produced no
-        text gets a canned «не расслышал / не разглядел» reply instead of a
-        pass-through — generating a reaction from nothing is guaranteed
-        hallucination. Unaddressed (random-trigger) media keeps the silent
-        emoji-reaction path. A random-trigger photo/video note the vision
-        classifier flagged as not a real person (a meme) is dropped the same
-        way — silently, as if the random roll had simply missed.
+        Only explicitly addressed media reaches this point: the router never
+        sets ``should_respond`` for unaddressed media. A media message whose
+        processing produced no text gets a canned «не расслышал / не
+        разглядел» reply — generating a reaction from nothing is guaranteed
+        hallucination. Transcribed media charges the sender's attention
+        budget like a meaningful text turn, so switching to voice notes does
+        not evade the wind-down.
 
         Args:
             state: Current pipeline state.
@@ -621,53 +594,18 @@ class MeaninglessFilterNode:
         media_type = state["incoming"]["media_type"]
         text = state["incoming"]["processed_text"] or ""
         if text.strip():
-            return await self.__handle_transcribed_media(state, media_type)
-        if state.get("response_trigger") == "explicit":
-            logger.info(
-                "Filter: no transcription for %s message %s, explicit trigger — canned failure reply",
-                media_type,
-                state["incoming"]["message_id"],
-            )
-            pool = VISION_FAILED_REPLIES if media_type == "photo" else TRANSCRIPTION_FAILED_REPLIES
-            return {
-                "should_respond": False,
-                "response": random.choice(pool),
-                "content_kind": ContentKind.MEDIA_FAILURE_NOTICE,
-            }
+            return await self.__resolve_with_budget(state, "MEANINGFUL")
         logger.info(
-            "Filter: no transcription for %s message %s, skipping",
+            "Filter: no transcription for %s message %s — canned failure reply",
             media_type,
             state["incoming"]["message_id"],
         )
-        asyncio.create_task(self.__send_reaction(state))
-        return {"should_respond": False, "drop_reason": "no_transcription"}
-
-    async def __handle_transcribed_media(self, state: BotState, media_type: str) -> dict:
-        """Pass a successfully transcribed/described media message through.
-
-        A random-trigger photo/video note the vision classifier flagged as
-        not a real person (a meme) is dropped instead — silently, as if the
-        random roll had simply missed. Explicitly addressed media charges the
-        sender's attention budget like a meaningful text turn, so switching
-        to voice notes does not evade the wind-down; random-trigger media is
-        bot-initiated and stays uncharged.
-
-        Args:
-            state: Current pipeline state.
-            media_type: The incoming message's media type.
-
-        Returns:
-            State update dict.
-        """
-        if is_meme_random_trigger(state, media_type):
-            logger.debug(
-                "Filter: random-trigger %s message %s looks like a meme — skipping",
-                media_type, state["incoming"]["message_id"],
-            )
-            return {"should_respond": False, "drop_reason": "meme_skip"}
-        if state.get("response_trigger") == "explicit":
-            return await self.__resolve_with_budget(state, "MEANINGFUL")
-        return {}
+        pool = VISION_FAILED_REPLIES if media_type == "photo" else TRANSCRIPTION_FAILED_REPLIES
+        return {
+            "should_respond": False,
+            "response": random.choice(pool),
+            "content_kind": ContentKind.MEDIA_FAILURE_NOTICE,
+        }
 
     async def __resolve_with_budget(self, state: BotState, classification: str) -> dict:
         """Charge the sender's attention budget and apply the wind-down tier.

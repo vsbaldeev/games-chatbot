@@ -172,15 +172,8 @@ class TestThinkingBlockStripping:
         assert result["response"] == "Через 191 день."
 
 
-class TestRandomTriggerContext:
-    """Random triggers get a thin recent-history slice (RANDOM_TRIGGER_CONTEXT_LIMIT).
-
-    Root cause (46013): random photo trigger injected the full recent chat
-    history into the response prompt, so the LLM addressed multiple open threads
-    and broke the 'never suggest commands unprompted' rule. The revised contract
-    keeps the newest few messages so the model can catch obvious topic mismatch
-    without turning a spontaneous reaction into a reply to the discussion.
-    """
+class TestResponseInputContext:
+    """Recent history, user facts and worker output all reach the response prompt."""
 
     RECENT_MSG = {
         "message_id": 1,
@@ -198,38 +191,6 @@ class TestRandomTriggerContext:
             "reply_chain": [],
         }
 
-    def test_random_trigger_gets_reduced_history_slice(self):
-        """Random triggers see only the newest RANDOM_TRIGGER_CONTEXT_LIMIT
-        messages — older chat noise must stay out of the prompt."""
-        recent_newest_first = [
-            {
-                "message_id": index,
-                "username": "bob",
-                "content": f"сообщение номер {index}",
-                "media_type": "text",
-                "user_id": 2,
-            }
-            for index in range(1, 5)
-        ]
-        context = {
-            "user_facts": {},
-            "recent_history": recent_newest_first,
-            "replied_to": None,
-            "reply_chain": [],
-        }
-
-        result = build_response_input(
-            "tmaxims",
-            "Изображение: руководство по стрижкам",
-            "",
-            context,
-            response_trigger="random",
-        )
-
-        assert "сообщение номер 1" in result
-        assert "сообщение номер 3" in result
-        assert "сообщение номер 4" not in result
-
     def test_explicit_trigger_includes_recent_history(self):
         """When the user explicitly @mentioned the bot or replied to it, recent
         history must still be included for conversational context."""
@@ -243,7 +204,7 @@ class TestRandomTriggerContext:
 
         assert "я в мобильном" in result
 
-    def test_random_trigger_still_includes_user_facts(self):
+    def test_includes_user_facts(self):
         """Per-user memories must always be injected — they personalise the
         response regardless of how the trigger fired."""
         context = {
@@ -258,19 +219,17 @@ class TestRandomTriggerContext:
             "Изображение: что-то",
             "",
             context,
-            response_trigger="random",
         )
 
         assert "любит PS5" in result
 
-    def test_random_trigger_includes_worker_output(self):
-        """Worker facts must always reach the response LLM even for random triggers."""
+    def test_includes_worker_output(self):
+        """Worker facts must always reach the response LLM."""
         result = build_response_input(
             "alice",
             "Изображение: стрижки",
             "Руководство содержит 12 стилей.",
             self.make_context(),
-            response_trigger="random",
         )
 
         assert "Руководство содержит 12 стилей." in result

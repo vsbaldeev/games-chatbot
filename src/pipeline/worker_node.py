@@ -2,7 +2,6 @@
 
 import datetime
 import logging
-from typing import Literal
 
 from langchain_core.callbacks import AsyncCallbackHandler
 
@@ -141,7 +140,7 @@ class WorkerNode:
             # roster's own dossiers, not IGDB-style tool facts.
             return empty_worker_update(WorkerStatus.SKIPPED)
         msg = state["incoming"]
-        worker_input = self.__build_worker_input(msg, state.get("context"), state.get("response_trigger") or "explicit")
+        worker_input = self.__build_worker_input(msg, state.get("context"))
         tg_message = msg["update"].message
         callback = SearchNotificationCallback(tg_message) if tg_message is not None else None
         callbacks = [callback] if callback is not None else None
@@ -171,20 +170,16 @@ class WorkerNode:
             logger.error("Worker failed: %s", err, exc_info=True)
             return empty_worker_update(WorkerStatus.FAILED)
 
-    def __build_worker_input(self, msg: dict, context, response_trigger: Literal["explicit", "insult_check", "random"] = "explicit") -> str:
+    def __build_worker_input(self, msg: dict, context) -> str:
         """Assemble the prompt string sent to the worker agent.
 
         Includes the current UTC datetime, reply chain or recent history as
-        context (mutually exclusive), and the user's question. Recent history
-        is omitted for random triggers to avoid injecting unrelated chat noise.
+        context (mutually exclusive), and the user's question.
 
         Args:
             msg: IncomingMessage dict for the current update.
             context: Context dict with ``reply_chain`` and ``recent_history`` lists,
                 or None if context is unavailable.
-            response_trigger: ``"explicit"`` when the bot was @mentioned or replied
-                to; ``"insult_check"`` for confirmed bot-word insults (treated
-                like explicit); ``"random"`` for unprompted media responses.
 
         Returns:
             Assembled prompt string ready to send to the worker executor.
@@ -199,7 +194,7 @@ class WorkerNode:
             for row in reply_chain:
                 parts.append(self.__render_row(row))
             parts.append("")
-        elif response_trigger != "random":
+        else:
             recent = ((context or {}).get("recent_history") or [])[:RECENT_FILL_LIMIT]
             if recent:
                 parts.append("Recent chat context:")

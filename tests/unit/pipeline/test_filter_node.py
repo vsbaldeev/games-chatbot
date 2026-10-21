@@ -204,47 +204,30 @@ class TestMediaMessages:
             await node(state)
         mock_create_task.assert_not_called()
 
-    async def test_no_transcription_random_sets_should_respond_false(self):
-        node, _ = make_node_with_mock_llm()
-        with patch("asyncio.create_task", side_effect=close_coroutine):
-            state = make_state(
-                make_incoming(media_type="voice", processed_text=None),
-                should_respond=True,
-                response_trigger="random",
-            )
-            result = await node(state)
-        assert result == {"should_respond": False, "drop_reason": "no_transcription"}
-
-    async def test_no_transcription_random_fires_reaction(self):
-        node, _ = make_node_with_mock_llm()
-        with patch("asyncio.create_task", side_effect=close_coroutine) as mock_create_task:
-            state = make_state(
-                make_incoming(media_type="voice", processed_text=None),
-                should_respond=True,
-                response_trigger="random",
-            )
-            await node(state)
-        mock_create_task.assert_called_once()
-
-    async def test_media_with_transcription_passes_through(self):
-        node, _ = make_node_with_mock_llm()
+    async def test_media_with_transcription_charges_budget_as_meaningful(self):
+        node, mock_llm = make_node_with_mock_llm()
         state = make_state(
             make_incoming(media_type="voice", processed_text="расскажи про игру"),
             should_respond=True,
+            response_trigger="explicit",
         )
         result = await node(state)
-        assert result == {}
+        assert result == {
+            "should_respond": True,
+            "filter_verdict": "MEANINGFUL",
+            "engagement_tier": 1,
+        }
+        mock_llm.ainvoke.assert_not_called()
 
     async def test_whitespace_only_transcription_treated_as_missing(self):
         node, _ = make_node_with_mock_llm()
-        with patch("asyncio.create_task", side_effect=close_coroutine):
-            state = make_state(
-                make_incoming(media_type="voice", processed_text="   "),
-                should_respond=True,
-                response_trigger="random",
-            )
-            result = await node(state)
-        assert result == {"should_respond": False, "drop_reason": "no_transcription"}
+        state = make_state(
+            make_incoming(media_type="voice", processed_text="   "),
+            should_respond=True,
+            response_trigger="explicit",
+        )
+        result = await node(state)
+        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
 
 
 class TestRequestOverrideIgnoresMentions:
