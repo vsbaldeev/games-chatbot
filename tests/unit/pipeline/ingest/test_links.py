@@ -2,7 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from src.pipeline import shorts
 from src.pipeline.ingest.links import summarize_social_link, summarize_youtube_short
