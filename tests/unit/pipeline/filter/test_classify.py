@@ -1,34 +1,17 @@
 """ClassifyNode tests: LLM classification, reply-context overrides, label parsing."""
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
 from src.config.prompts import FILTER_SYSTEM
 from src.pipeline.filter.classify import (
     GROUP_PROFILE_MARKER_RE,
-    ClassifyNode,
     downgrade_group_profile_request,
     downgrade_not_addressed,
     parse_label,
 )
 from src.pipeline.router import looks_like_request
 from src.pipeline.state import Verdict
-from tests.builders import make_incoming, make_state
-
-
-def make_classify_node(
-    llm_response: str | None = None,
-    llm_error: Exception | None = None,
-) -> tuple[ClassifyNode, MagicMock]:
-    mock_llm = MagicMock()
-    if llm_error is not None:
-        mock_llm.ainvoke = AsyncMock(side_effect=llm_error)
-    else:
-        mock_llm.ainvoke = AsyncMock(
-            return_value=MagicMock(content=llm_response or "MEANINGFUL")
-        )
-    return ClassifyNode(llm=mock_llm, confirm_llm=mock_llm), mock_llm
+from tests.builders import make_classify_node, make_incoming, make_state
 
 
 class TestFilterSystemPrompt:
@@ -271,3 +254,12 @@ class TestDowngradeGroupProfileRequest:
             state, "оцени всем счастье от 1 до 10", Verdict.GROUP_PROFILE_REQUEST
         )
         assert decision is Verdict.GROUP_PROFILE_REQUEST
+
+
+class TestEmptyText:
+    @pytest.mark.parametrize("raw_text", ["   ", None], ids=["whitespace", "none"])
+    async def test_empty_text_rejects_without_llm_call(self, raw_text):
+        node, mock_llm = make_classify_node()
+        state = make_state(make_incoming(raw_text=raw_text), should_respond=True)
+        assert await node(state) == {"should_respond": False}
+        mock_llm.ainvoke.assert_not_called()

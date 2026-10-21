@@ -2,93 +2,59 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.pipeline.filter.link_check import (
     SHORTS_FAILED_REPLIES,
     SOCIAL_LINK_FAILED_REPLIES,
     check_link,
 )
-from src.pipeline.state import ContentKind
+from src.pipeline.state import ContentKind, Verdict
 from tests.builders import make_incoming, make_state
 
-
-class TestYoutubeShortDispatchCharacterization:
-    """Shorts-trigger dispatch."""
-
-    async def test_content_present_sets_shorts_verdict(self):
-        incoming = make_incoming(raw_text="https://www.youtube.com/shorts/abc")
-        state = make_state(
-            incoming, should_respond=True, response_trigger="youtube_short",
-            youtube_short_content="[YouTube Shorts]\nsome content",
-        )
-        result = await check_link(state)
-        assert result == {"filter_verdict": "SHORTS"}
-
-    async def test_no_content_and_unaddressed_drops_silently(self):
-        telegram_message = MagicMock(text="https://www.youtube.com/shorts/abc", caption=None)
-        telegram_message.reply_to_message = None
-        incoming = make_incoming(
-            raw_text="https://www.youtube.com/shorts/abc", telegram_message=telegram_message,
-        )
-        state = make_state(
-            incoming, should_respond=True, response_trigger="youtube_short",
-            youtube_short_content=None,
-        )
-        result = await check_link(state)
-        assert result == {"should_respond": False, "drop_reason": "shorts_failed"}
-
-    async def test_no_content_and_addressed_gets_canned_media_failure_notice(self):
-        telegram_message = MagicMock(text="@testbot https://www.youtube.com/shorts/abc", caption=None)
-        telegram_message.reply_to_message = None
-        incoming = make_incoming(
-            raw_text="@testbot https://www.youtube.com/shorts/abc", telegram_message=telegram_message,
-        )
-        state = make_state(
-            incoming, should_respond=True, response_trigger="youtube_short",
-            youtube_short_content=None,
-        )
-        result = await check_link(state)
-        assert result["should_respond"] is False
-        assert result["response"] in SHORTS_FAILED_REPLIES
-        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
+LINK_TRIGGERS = pytest.mark.parametrize(
+    "trigger, content_key, verdict, replies, drop_reason",
+    [
+        ("youtube_short", "youtube_short_content", Verdict.SHORTS,
+         SHORTS_FAILED_REPLIES, "shorts_failed"),
+        ("social_link", "social_link_content", Verdict.SOCIAL_LINK,
+         SOCIAL_LINK_FAILED_REPLIES, "social_link_failed"),
+    ],
+    ids=["shorts", "social-link"],
+)
 
 
-class TestSocialLinkDispatch:
-    async def test_content_present_sets_social_link_verdict(self):
-        incoming = make_incoming(raw_text="https://www.reddit.com/r/x/comments/abc/y/")
-        state = make_state(
-            incoming, should_respond=True, response_trigger="social_link",
-            social_link_content="[Reddit r/x] «title»",
-        )
-        result = await check_link(state)
-        assert result == {"filter_verdict": "SOCIAL_LINK"}
+def make_link_state(trigger: str, content_key: str, content: str | None, text: str) -> dict:
+    telegram_message = MagicMock(text=text, caption=None)
+    telegram_message.reply_to_message = None
+    incoming = make_incoming(raw_text=text, telegram_message=telegram_message)
+    return make_state(
+        incoming, should_respond=True, response_trigger=trigger, **{content_key: content},
+    )
 
-    async def test_no_content_and_unaddressed_drops_silently(self):
-        telegram_message = MagicMock(text="https://www.reddit.com/r/x/comments/abc/y/", caption=None)
-        telegram_message.reply_to_message = None
-        incoming = make_incoming(
-            raw_text="https://www.reddit.com/r/x/comments/abc/y/", telegram_message=telegram_message,
-        )
-        state = make_state(
-            incoming, should_respond=True, response_trigger="social_link",
-            social_link_content=None,
-        )
-        result = await check_link(state)
-        assert result == {"should_respond": False, "drop_reason": "social_link_failed"}
 
-    async def test_no_content_and_addressed_gets_canned_reply(self):
-        telegram_message = MagicMock(
-            text="@testbot https://www.reddit.com/r/x/comments/abc/y/", caption=None,
-        )
-        telegram_message.reply_to_message = None
-        incoming = make_incoming(
-            raw_text="@testbot https://www.reddit.com/r/x/comments/abc/y/",
-            telegram_message=telegram_message,
-        )
-        state = make_state(
-            incoming, should_respond=True, response_trigger="social_link",
-            social_link_content=None,
-        )
-        result = await check_link(state)
-        assert result["should_respond"] is False
-        assert result["response"] in SOCIAL_LINK_FAILED_REPLIES
-        assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
+@LINK_TRIGGERS
+async def test_check_link_content_present_sets_the_trigger_verdict(
+    trigger, content_key, verdict, replies, drop_reason
+):
+    state = make_link_state(trigger, content_key, "[summary]\nsome content", "https://example.com/x")
+    assert await check_link(state) == {"filter_verdict": verdict}
+
+
+@LINK_TRIGGERS
+async def test_check_link_no_content_and_unaddressed_drops_silently(
+    trigger, content_key, verdict, replies, drop_reason
+):
+    state = make_link_state(trigger, content_key, None, "https://example.com/x")
+    assert await check_link(state) == {"should_respond": False, "drop_reason": drop_reason}
+
+
+@LINK_TRIGGERS
+async def test_check_link_no_content_and_addressed_gets_canned_media_failure_notice(
+    trigger, content_key, verdict, replies, drop_reason
+):
+    state = make_link_state(trigger, content_key, None, "@testbot https://example.com/x")
+    result = await check_link(state)
+    assert result["should_respond"] is False
+    assert result["response"] in replies
+    assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE

@@ -1,9 +1,11 @@
 """Helpers for constructing IncomingMessage, BotState, and Groq error dicts in tests."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import groq
 import openai
+
+from src.pipeline.filter.classify import ClassifyNode
 
 
 def make_telegram_message(
@@ -117,3 +119,16 @@ def make_message_row(
         "media_type": media_type,
         "file_id": file_id,
     }
+
+
+def make_classify_node(
+    llm_response: str | None = None,
+    llm_error: Exception | None = None,
+) -> tuple[ClassifyNode, MagicMock]:
+    """Build a ClassifyNode whose classifier and confirmation LLMs are one mock."""
+    mock_llm = MagicMock()
+    if llm_error is not None:
+        mock_llm.ainvoke = AsyncMock(side_effect=llm_error)
+    else:
+        mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content=llm_response or "MEANINGFUL"))
+    return ClassifyNode(llm=mock_llm, confirm_llm=mock_llm), mock_llm

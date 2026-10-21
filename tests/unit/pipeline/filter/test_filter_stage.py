@@ -3,17 +3,14 @@
 Runs the stage as a small compiled graph (``START → … → END``), so these tests
 cover the real routing between link_check, media_check, classify and budget.
 
-Covers:
-  - Passthrough when should_respond is already False
-  - Text classification: MEANINGLESS, MEANINGFUL, empty/None text
-  - Non-text media: transcribed media is charged, empty media gets a canned reply
-  - Shorts / social links bypass classification
-  - NOT_ADDRESSED handling and passive fact extraction on silent drops
-  - Router → filter wiring of ``broadcast_reply``
+Only the wiring between nodes is asserted here: which path a message takes and
+which side effects it triggers. Each node's own behaviour is tested beside it
+(``test_classify.py``, ``test_budget.py``, ``test_media_check.py``,
+``test_link_check.py``).
 
 Patching ``asyncio.create_task`` globally breaks LangGraph's own scheduling, so
-the fire-and-forget side effects (``send_reaction``, ``extract_and_save``) are
-patched at their source instead.
+emoji reactions are observed on a mocked bot and passive fact extraction is
+patched at the memory writer's boundary.
 """
 
 import asyncio
@@ -28,13 +25,7 @@ from src.pipeline.filter.classify import ClassifyNode
 from src.pipeline.graph import add_filter_stage
 from src.pipeline.router import MessageRouter
 from src.pipeline.state import BotState, ContentKind
-from tests.builders import make_incoming, make_state, make_telegram_message
-
-
-def make_classify_node(llm_response: str | None = None) -> tuple[ClassifyNode, MagicMock]:
-    mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content=llm_response or "MEANINGFUL"))
-    return ClassifyNode(llm=mock_llm, confirm_llm=mock_llm), mock_llm
+from tests.builders import make_classify_node, make_incoming, make_state, make_telegram_message
 
 
 async def run_filter_stage(state: dict, classify_node: ClassifyNode) -> dict:
@@ -50,12 +41,17 @@ async def run_filter_stage(state: dict, classify_node: ClassifyNode) -> dict:
 
 
 @contextmanager
-def patched_side_effects():
-    """Patch the filter's fire-and-forget calls; yields ``(send_reaction, extract_and_save)``."""
-    with patch("src.pipeline.filter.budget.send_reaction", new=AsyncMock()) as reaction, patch(
-        "src.pipeline.filter.classify.extract_and_save", new=AsyncMock()
-    ) as extract:
-        yield reaction, extract
+def patched_extraction():
+    """Patch passive fact extraction (the memory writer's boundary); yields the mock."""
+    with patch("src.pipeline.filter.classify.extract_and_save", new=AsyncMock()) as extract:
+        yield extract
+
+
+def attach_bot(state: dict) -> AsyncMock:
+    """Give the state an async bot so emoji reactions are observable; returns it."""
+    bot = AsyncMock()
+    state["context_types"].bot = bot
+    return bot
 
 
 def patch_register_signal(tier: int = engagement_gate.FULL_TIER):
@@ -79,80 +75,57 @@ class TestPassthroughWhenShouldRespondFalse:
 
 
 class TestTextClassification:
-    async def test_meaningless_text_sets_should_respond_false(self):
+    async def test_meaningless_text_ends_the_run_with_a_reaction(self):
         node, _ = make_classify_node("MEANINGLESS")
-        with patched_side_effects():
-            state = make_state(make_incoming(raw_text="ахаха"), should_respond=True)
-            result = await run_filter_stage(state, node)
+        state = make_state(make_incoming(raw_text="ахаха"), should_respond=True)
+        bot = attach_bot(state)
+        result = await run_filter_stage(state, node)
         assert result == {
             "should_respond": False,
             "drop_reason": "meaningless",
             "filter_verdict": "MEANINGLESS",
             "engagement_tier": 1,
         }
+        bot.set_message_reaction.assert_called_once()
 
-    async def test_meaningless_text_fires_reaction(self):
-        node, _ = make_classify_node("MEANINGLESS")
-        with patched_side_effects() as (reaction, _):
-            state = make_state(make_incoming(raw_text="ахаха"), should_respond=True)
-            await run_filter_stage(state, node)
-        reaction.assert_called_once()
-
-    async def test_meaningful_text_sets_should_respond_true(self):
+    async def test_meaningful_text_continues_without_a_reaction(self):
         node, _ = make_classify_node("MEANINGFUL")
         state = make_state(make_incoming(raw_text="расскажи про GTA 6"), should_respond=True)
+        bot = attach_bot(state)
         result = await run_filter_stage(state, node)
         assert result == {
             "should_respond": True,
             "filter_verdict": "MEANINGFUL",
             "engagement_tier": 1,
         }
-
-    async def test_meaningful_text_does_not_fire_reaction(self):
-        node, _ = make_classify_node("MEANINGFUL")
-        with patched_side_effects() as (reaction, _):
-            state = make_state(make_incoming(raw_text="расскажи про GTA 6"), should_respond=True)
-            await run_filter_stage(state, node)
-        reaction.assert_not_called()
+        bot.set_message_reaction.assert_not_called()
 
     async def test_mentioned_question_survives_a_meaningless_verdict(self):
         """A mentioned question no longer drops to an emoji."""
         node, _ = make_classify_node("MEANINGLESS")
-        with patched_side_effects() as (reaction, _):
-            state = make_state(
-                make_incoming(raw_text="@zhora_bot о чем я говорю"), should_respond=True
-            )
-            result = await run_filter_stage(state, node)
+        state = make_state(
+            make_incoming(raw_text="@zhora_bot о чем я говорю"), should_respond=True
+        )
+        bot = attach_bot(state)
+        result = await run_filter_stage(state, node)
         assert result["should_respond"] is True
         assert result["filter_verdict"] == "MEANINGFUL"
-        reaction.assert_not_called()
-
-    async def test_empty_text_rejects_without_llm_call(self):
-        node, mock_llm = make_classify_node()
-        state = make_state(make_incoming(raw_text="   "), should_respond=True)
-        assert await run_filter_stage(state, node) == {"should_respond": False}
-        mock_llm.ainvoke.assert_not_called()
-
-    async def test_none_text_rejects_without_llm_call(self):
-        node, mock_llm = make_classify_node()
-        state = make_state(make_incoming(raw_text=None), should_respond=True)
-        assert await run_filter_stage(state, node) == {"should_respond": False}
-        mock_llm.ainvoke.assert_not_called()
+        bot.set_message_reaction.assert_not_called()
 
 
 class TestMediaMessages:
     async def test_no_transcription_gets_canned_reply_and_no_reaction(self):
         node, _ = make_classify_node()
-        with patched_side_effects() as (reaction, _):
-            state = make_state(
-                make_incoming(media_type="voice", processed_text=None),
-                should_respond=True,
-                response_trigger="explicit",
-            )
-            result = await run_filter_stage(state, node)
+        state = make_state(
+            make_incoming(media_type="voice", processed_text=None),
+            should_respond=True,
+            response_trigger="explicit",
+        )
+        bot = attach_bot(state)
+        result = await run_filter_stage(state, node)
         assert result["should_respond"] is False
         assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
-        reaction.assert_not_called()
+        bot.set_message_reaction.assert_not_called()
 
     async def test_media_with_transcription_charges_budget_as_meaningful(self):
         node, mock_llm = make_classify_node()
@@ -184,19 +157,6 @@ class TestLinkTriggers:
         mock_llm.ainvoke.assert_not_called()
         mock_register.assert_not_called()
 
-    async def test_social_link_without_content_ends_the_run(self):
-        node, _ = make_classify_node()
-        telegram_message = MagicMock(text="https://www.reddit.com/r/x/comments/abc/y/", caption=None)
-        telegram_message.reply_to_message = None
-        incoming = make_incoming(
-            raw_text="https://www.reddit.com/r/x/comments/abc/y/", telegram_message=telegram_message,
-        )
-        state = make_state(
-            incoming, should_respond=True, response_trigger="social_link", social_link_content=None,
-        )
-        result = await run_filter_stage(state, node)
-        assert result == {"should_respond": False, "drop_reason": "social_link_failed"}
-
 
 class TestNotAddressedVerdict:
     """A NOT_ADDRESSED verdict silences the bot, but only for un-mentioned
@@ -214,14 +174,15 @@ class TestNotAddressedVerdict:
             make_incoming(raw_text=text),
             should_respond=True, response_trigger="explicit", broadcast_reply=True,
         )
-        with patched_side_effects() as (reaction, extract):
+        bot = attach_bot(state)
+        with patched_extraction() as extract:
             result = await run_filter_stage(state, node)
         assert result["should_respond"] is False
         assert result["drop_reason"] == "broadcast_not_addressed"
         # Only the passive extraction fires (the text is long enough) — no
         # emoji reaction, no reply.
         extract.assert_called_once()
-        reaction.assert_not_called()
+        bot.set_message_reaction.assert_not_called()
 
     async def test_not_addressed_charges_no_attention_budget(self):
         """The bot was never addressed — charging the user would wind them
@@ -231,58 +192,9 @@ class TestNotAddressedVerdict:
             make_incoming(raw_text="Гениально)"),
             should_respond=True, response_trigger="explicit", broadcast_reply=True,
         )
-        with patched_side_effects(), patch_register_signal() as mock_register:
+        with patched_extraction(), patch_register_signal() as mock_register:
             await run_filter_stage(state, node)
         mock_register.assert_not_called()
-
-    async def test_not_addressed_outside_a_broadcast_reply_is_downgraded(self):
-        """Ordinary conversation can never be silenced by this verdict."""
-        node, _ = make_classify_node("NOT_ADDRESSED")
-        state = make_state(
-            make_incoming(raw_text="ну он такое себе"),
-            should_respond=True, response_trigger="explicit",
-        )
-        with patch_register_signal():
-            result = await run_filter_stage(state, node)
-        assert result["should_respond"] is True
-        assert result["filter_verdict"] == "MEANINGFUL"
-
-    async def test_question_on_a_broadcast_reply_still_answers(self):
-        """The classifier's own MEANINGFUL verdict is untouched by the gate."""
-        node, _ = make_classify_node("MEANINGFUL")
-        state = make_state(
-            make_incoming(raw_text="а почему мне 2 из 10?"),
-            should_respond=True, response_trigger="explicit", broadcast_reply=True,
-        )
-        with patch_register_signal():
-            result = await run_filter_stage(state, node)
-        assert result["should_respond"] is True
-
-    async def test_not_addressed_question_on_broadcast_reply_is_downgraded(self):
-        """A NOT_ADDRESSED misfire on a real question is never silenced —
-        looks_like_request is the same deterministic floor MEANINGLESS/BANTER
-        already get, applied to the one verdict that produces total silence."""
-        node, _ = make_classify_node("NOT_ADDRESSED")
-        state = make_state(
-            make_incoming(raw_text="а почему мне 2 из 10?"),
-            should_respond=True, response_trigger="explicit", broadcast_reply=True,
-        )
-        with patch_register_signal():
-            result = await run_filter_stage(state, node)
-        assert result["should_respond"] is True
-        assert result["filter_verdict"] == "MEANINGFUL"
-
-    async def test_not_addressed_imperative_request_on_broadcast_reply_is_downgraded(self):
-        """The floor covers imperative requests too, not just question marks."""
-        node, _ = make_classify_node("NOT_ADDRESSED")
-        state = make_state(
-            make_incoming(raw_text="объясни за что мне такая оценка"),
-            should_respond=True, response_trigger="explicit", broadcast_reply=True,
-        )
-        with patch_register_signal():
-            result = await run_filter_stage(state, node)
-        assert result["should_respond"] is True
-        assert result["filter_verdict"] == "MEANINGFUL"
 
 
 class TestNotAddressedPassiveExtraction:
@@ -302,7 +214,7 @@ class TestNotAddressedPassiveExtraction:
             make_incoming(raw_text=text, chat_id=4242, user_id=77, username="vasya"),
             should_respond=True, response_trigger="explicit", broadcast_reply=True,
         )
-        with patched_side_effects() as (_, extract):
+        with patched_extraction() as extract:
             await run_filter_stage(state, node)
         extract.assert_called_once_with(
             chat_id=4242, user_id=77, username="vasya", user_message=text,
@@ -314,7 +226,7 @@ class TestNotAddressedPassiveExtraction:
             make_incoming(raw_text="Гениально)"),
             should_respond=True, response_trigger="explicit", broadcast_reply=True,
         )
-        with patched_side_effects() as (_, extract):
+        with patched_extraction() as extract:
             await run_filter_stage(state, node)
         extract.assert_not_called()
 
@@ -349,7 +261,7 @@ class TestRouterToFilterStageWiring:
 
         state = make_state(incoming, **router_update)
         node, _ = make_classify_node("NOT_ADDRESSED")
-        with patched_side_effects():
+        with patched_extraction():
             result = await run_filter_stage(state, node)
 
         assert result["should_respond"] is False
