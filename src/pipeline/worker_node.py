@@ -18,7 +18,17 @@ RECENT_FILL_LIMIT = 10
 
 
 def worker_is_skipped(state: BotState) -> bool:
-    """True when the reply needs no tool facts: personality-only replies and link summaries."""
+    """True when the reply needs no tool facts: personality-only replies and link summaries.
+
+    A comeback needs personality, not IGDB lookups: skipping the worker avoids
+    a «🔍 Ищу…» notification before the burn and junk search output steering
+    it. Same for Shorts and social-link summaries — the source material is
+    already in processed_text — and for wind-down brush-offs, which are one
+    short phrase closing the conversation. A meme request answers with the
+    image alone and no text at all, so gathered facts would have nowhere to
+    go. Same for a group-profile request — it runs its own dedicated LLM call
+    over the roster's own dossiers, not IGDB-style tool facts.
+    """
     return bool(
         state.get("is_bot_insult")
         or state.get("wind_down")
@@ -36,6 +46,11 @@ def empty_worker_update(status: WorkerStatus) -> dict:
         "worker_tools_used": False,
         "worker_status": status,
     }
+
+
+async def skip_worker(state: BotState) -> dict:
+    """Graph node for replies that bypass the worker; records why no facts were gathered."""
+    return empty_worker_update(WorkerStatus.SKIPPED)
 
 
 def log_worker_call(worker_input: str, output: str, tools_used: bool) -> None:
@@ -117,28 +132,16 @@ class WorkerNode:
         Returns:
             Dict with keys ``worker_output`` (str), ``search_notification_msg``
             (the sent Telegram Message or None) and ``worker_tools_used``
-            (True when at least one tool actually ran; False on all error
-            and skip paths) and ``worker_status`` (a WorkerStatus: OK when the
-            worker ran, SKIPPED when it was deliberately not used,
-            CONTEXT_OVERFLOW / FAILED when an error was absorbed and the
-            response has no worker facts behind it).
+            (True when at least one tool actually ran; False on every error
+            path) and ``worker_status`` (a WorkerStatus: OK when the worker
+            ran, CONTEXT_OVERFLOW / FAILED when an error was absorbed and the
+            response has no worker facts behind it). Replies that need no
+            facts never reach this node; see ``skip_worker``.
 
         Raises:
             DailyLimitError: Propagated from ``agent.invoke_worker`` on daily quota exhaustion.
             RateLimitError: Propagated from ``agent.invoke_worker`` on transient rate limits.
         """
-        if worker_is_skipped(state):
-            # A comeback needs personality, not IGDB lookups: skipping the
-            # worker avoids a «🔍 Ищу…» notification before the burn and junk
-            # search output steering it. Same for Shorts and social-link
-            # summaries — the source material is already in processed_text —
-            # for wind-down brush-offs, which are one short phrase closing
-            # the conversation.
-            # A meme request answers with the image alone and no text at all,
-            # so gathered facts would have nowhere to go. Same for a group-
-            # profile request — it runs its own dedicated LLM call over the
-            # roster's own dossiers, not IGDB-style tool facts.
-            return empty_worker_update(WorkerStatus.SKIPPED)
         msg = state["incoming"]
         worker_input = self.__build_worker_input(msg, state.get("context"))
         tg_message = msg["update"].message

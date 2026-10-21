@@ -20,7 +20,7 @@ import pytest
 from src.llm import ContextLengthError, DailyLimitError, RateLimitError
 from src.config.prompts import WORKER_PROMPT
 from src.pipeline.state import WorkerStatus
-from src.pipeline.worker_node import WorkerNode
+from src.pipeline.worker_node import WorkerNode, skip_worker
 from tests.builders import make_incoming, make_message_row, make_state, make_telegram_message
 
 
@@ -228,50 +228,9 @@ class TestErrorPropagation:
         assert excinfo.value.search_notification_msg is sent_notification
 
 
-class TestSkipConditions:
-    """WorkerNode skips tool-calling entirely for triggers whose source
-    material is already in processed_text — Shorts today, social links now."""
-
-    async def test_youtube_short_trigger_skips_worker(self):
-        node = WorkerNode(agent=MagicMock())
-        incoming = make_incoming(raw_text="https://www.youtube.com/shorts/abc")
-        state = make_state(incoming, should_respond=True, response_trigger="youtube_short")
-        result = await node(state)
-        assert result == {
-            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
-            "worker_status": WorkerStatus.SKIPPED,
-        }
-
-    async def test_social_link_trigger_skips_worker(self):
-        node = WorkerNode(agent=MagicMock())
-        incoming = make_incoming(raw_text="https://www.reddit.com/r/x/comments/abc/y/")
-        state = make_state(incoming, should_respond=True, response_trigger="social_link")
-        result = await node(state)
-        assert result == {
-            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
-            "worker_status": WorkerStatus.SKIPPED,
-        }
-
-    async def test_group_profile_request_skips_worker(self):
-        node = WorkerNode(agent=MagicMock())
-        incoming = make_incoming(raw_text="раздай всем роли из Людей Икс")
-        state = make_state(incoming, should_respond=True, group_profile_request=True)
-        result = await node(state)
-        assert result == {
-            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
-            "worker_status": WorkerStatus.SKIPPED,
-        }
-
-    @pytest.mark.parametrize("flag", ["is_bot_insult", "wind_down", "meme_request", "group_profile_request"])
-    async def test_directive_flags_report_skipped(self, flag):
-        node = WorkerNode(agent=MagicMock())
-        state = make_state(make_incoming(raw_text="что-то"), should_respond=True, **{flag: True})
-        result = await node(state)
-        assert result["worker_status"] == WorkerStatus.SKIPPED
-
-    @pytest.mark.parametrize("trigger", ["youtube_short", "social_link"])
-    async def test_link_triggers_report_skipped(self, trigger):
-        node = WorkerNode(agent=MagicMock())
-        state = make_state(make_incoming(raw_text="https://example.com"), should_respond=True, response_trigger=trigger)
-        result = await node(state)
-        assert result["worker_status"] == WorkerStatus.SKIPPED
+async def test_skip_worker_records_skipped_status():
+    result = await skip_worker(make_state(make_incoming(), should_respond=True))
+    assert result == {
+        "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+        "worker_status": WorkerStatus.SKIPPED,
+    }

@@ -45,7 +45,7 @@ from src.pipeline.memory_writer import MemoryWriter, MIN_PASSIVE_LENGTH
 from src.pipeline.response_node import ResponseNode
 from src.pipeline.router import MessageRouter
 from src.pipeline.state import BotState
-from src.pipeline.worker_node import WorkerNode
+from src.pipeline.worker_node import WorkerNode, skip_worker, worker_is_skipped
 
 logger = log.get_logger(__name__)
 
@@ -88,6 +88,11 @@ def route_if_responding(next_node: str) -> Callable[[BotState], str]:
 
 def route_by_guard(state: BotState) -> str:
     return END if state.get("blocked") else "context_builder"
+
+
+def route_after_context(state: BotState) -> str:
+    """Send replies that need no tool facts past the worker."""
+    return "skip_worker" if worker_is_skipped(state) else "worker"
 
 
 def route_after_response(state: BotState) -> str:
@@ -165,6 +170,7 @@ def build_pipeline(worker_agent, response_agent) -> CompiledStateGraph:
     graph.add_node("guard", GuardNode())
     graph.add_node("context_builder", ContextBuilder())
     graph.add_node("worker", WorkerNode(worker_agent))
+    graph.add_node("skip_worker", skip_worker)
     graph.add_node("response", ResponseNode(response_agent))
     graph.add_node("language_correction", LanguageCorrectionNode(response_agent))
     graph.add_node("memory_writer", MemoryWriter())
@@ -177,8 +183,11 @@ def build_pipeline(worker_agent, response_agent) -> CompiledStateGraph:
     )
     add_filter_stage(graph, source="ingester", on_pass="guard")
     graph.add_conditional_edges("guard", route_by_guard, {"context_builder": "context_builder", END: END})
-    graph.add_edge("context_builder", "worker")
+    graph.add_conditional_edges(
+        "context_builder", route_after_context, {"worker": "worker", "skip_worker": "skip_worker"}
+    )
     graph.add_edge("worker", "response")
+    graph.add_edge("skip_worker", "response")
     graph.add_conditional_edges(
         "response",
         route_after_response,

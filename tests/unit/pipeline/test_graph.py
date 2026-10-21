@@ -9,7 +9,12 @@ LLM calls happen here.
 from langgraph.graph import END
 import pytest
 
-from src.pipeline.graph import route_after_ingester, route_after_router, route_if_responding
+from src.pipeline.graph import (
+    route_after_context,
+    route_after_ingester,
+    route_after_router,
+    route_if_responding,
+)
 from tests.builders import make_incoming, make_state
 
 
@@ -63,3 +68,28 @@ class TestRouteIfResponding:
     def test_ends_when_not_responding(self):
         state = make_state(make_incoming(), should_respond=False)
         assert route_if_responding("guard")(state) == END
+
+
+class TestRouteAfterContext:
+    """Replies that need only personality, or whose source material is already in the
+    message, bypass the worker (and its «🔍 Ищу…» notification)."""
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"is_bot_insult": True},
+            {"wind_down": True},
+            {"meme_request": True},
+            {"group_profile_request": True},
+            {"response_trigger": "youtube_short"},
+            {"response_trigger": "social_link"},
+        ],
+        ids=["bot-insult", "wind-down", "meme", "group-profile", "shorts", "social-link"],
+    )
+    def test_routes_directive_and_link_replies_past_the_worker(self, overrides):
+        state = make_state(make_incoming(), should_respond=True, **overrides)
+        assert route_after_context(state) == "skip_worker"
+
+    def test_routes_an_ordinary_question_to_the_worker(self):
+        state = make_state(make_incoming(), should_respond=True, response_trigger="explicit")
+        assert route_after_context(state) == "worker"

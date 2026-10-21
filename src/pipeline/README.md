@@ -24,6 +24,7 @@ flowchart TD
     guard["<b>guard</b><br/>prompt-injection check"]
     ctx["<b>context_builder</b><br/>history · facts · roles"]
     worker["<b>worker</b> (agent)<br/>tool calls → facts"]
+    skipw["<b>skip_worker</b><br/>no facts needed"]
     response["<b>response</b><br/>persona LLM → reply"]
     lang["<b>language_correction</b><br/>fix foreign script"]
     memory["<b>memory_writer</b><br/>extract facts (background)"]
@@ -54,7 +55,8 @@ flowchart TD
     guard -->|"not blocked"| ctx
     guard -->|"blocked"| stop
 
-    ctx --> worker --> response
+    ctx -->|"needs facts"| worker --> response
+    ctx -->|"directive or link reply"| skipw --> response
     response -->|"foreign script left"| lang
     response -->|"clean"| memory
     lang --> memory
@@ -372,9 +374,9 @@ floor, because at that size the worker fabricates from memory instead of calling
 
 ```mermaid
 flowchart TD
-    w["worker"] --> skip{"skip condition?"}
-    skip -->|"is_bot_insult · wind_down · meme_request<br/>group_profile_request · youtube_short · social_link"| sk["worker_status = skipped<br/>empty output"]
-    skip -->|"no"| run["invoke_worker<br/>CONTEXT FIRST: no tools if the reply chain already answers"]
+    ctx["context_builder"] --> skip{"route_after_context"}
+    skip -->|"is_bot_insult · wind_down · meme_request<br/>group_profile_request · youtube_short · social_link"| sk["skip_worker node<br/>worker_status = skipped, empty output"]
+    skip -->|"otherwise"| run["worker node: invoke_worker<br/>CONTEXT FIRST: no tools if the reply chain already answers"]
     run -->|"ok"| ok["worker_status = ok<br/>worker_tools_used from a ToolMessage scan"]
     run -->|"ContextLengthError"| co["context_overflow, empty output"]
     run -->|"other error"| fl["failed, empty output"]
