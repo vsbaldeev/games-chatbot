@@ -13,7 +13,7 @@ wind-down.
 import random
 
 from src import log
-from src.pipeline.state import BotState, ContentKind
+from src.pipeline.state import BotState, ContentKind, Verdict
 
 logger = log.get_logger(__name__)
 
@@ -49,7 +49,7 @@ class MediaCheckNode:
         media_type = state["incoming"]["media_type"]
         text = state["incoming"]["processed_text"] or ""
         if text.strip():
-            return {"filter_verdict": "MEANINGFUL"}
+            return {"filter_verdict": Verdict.MEANINGFUL}
         logger.info(
             "Filter[media_check]: no transcription for %s message %s — canned failure reply",
             media_type,

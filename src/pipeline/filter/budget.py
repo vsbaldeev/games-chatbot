@@ -20,7 +20,7 @@ from telegram import ReactionTypeEmoji
 from src import config, log
 from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES, GROUP_PROFILE_COOLDOWN_SECONDS
 from src.pipeline import engagement_gate
-from src.pipeline.state import BotState, ContentKind
+from src.pipeline.state import BotState, ContentKind, Verdict
 from src.utils.ttl_gate import TtlGate
 
 logger = log.get_logger(__name__)
@@ -97,13 +97,13 @@ def build_reply_flags(state: BotState, classification: str, tier: int) -> dict:
         State update dict, normally with ``should_respond: True``.
     """
     update: dict = {"should_respond": True}
-    if classification == "BOT_INSULT":
+    if classification == Verdict.BOT_INSULT:
         update["is_bot_insult"] = True
         if tier != engagement_gate.FULL_TIER or replies_to_bot(state["incoming"]):
             update["wind_down"] = True
-    elif classification == "MEME_REQUEST" and tier == engagement_gate.FULL_TIER:
+    elif classification == Verdict.MEME_REQUEST and tier == engagement_gate.FULL_TIER:
         update["meme_request"] = True
-    elif classification == "GROUP_PROFILE_REQUEST" and tier == engagement_gate.FULL_TIER:
+    elif classification == Verdict.GROUP_PROFILE_REQUEST and tier == engagement_gate.FULL_TIER:
         chat_id = state["incoming"]["chat_id"]
         if group_profile_cooldown_gate.seen(chat_id):
             return {
@@ -112,7 +112,7 @@ def build_reply_flags(state: BotState, classification: str, tier: int) -> dict:
                 "content_kind": ContentKind.CAP_NOTICE,
             }
         update["group_profile_request"] = True
-    elif classification == "BANTER" or tier != engagement_gate.FULL_TIER:
+    elif classification == Verdict.BANTER or tier != engagement_gate.FULL_TIER:
         update["wind_down"] = True
     logger.debug(
         "Filter[budget]: %s at tier %s, message %s — replying%s",
@@ -165,13 +165,13 @@ class BudgetNode:
                 classification, message_id,
             )
             return {"should_respond": False, "drop_reason": "wound_down"}
-        if classification == "MEANINGLESS":
+        if classification == Verdict.MEANINGLESS:
             pool = DISMISSIVE_REACTIONS if tier == engagement_gate.EMOJI_TIER else REACTION_POOL
             logger.debug("Filter[budget]: Dropping meaningless message %s", message_id)
             asyncio.create_task(send_reaction(state, pool))
             return {"should_respond": False, "drop_reason": "meaningless"}
         replies_with_text = tier == engagement_gate.FULL_TIER or (
-            tier == engagement_gate.BRUSH_OFF_TIER and classification != "BANTER"
+            tier == engagement_gate.BRUSH_OFF_TIER and classification != Verdict.BANTER
         )
         if not replies_with_text:
             logger.debug(

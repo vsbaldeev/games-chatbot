@@ -7,6 +7,7 @@ import pytest
 from src.config.prompts import FILTER_SYSTEM
 from src.pipeline.filter.classify import ClassifyNode, GROUP_PROFILE_MARKER_RE, parse_label
 from src.pipeline.router import looks_like_request
+from src.pipeline.state import Verdict
 from tests.builders import make_incoming, make_state
 
 
@@ -212,14 +213,14 @@ class TestParseLabel:
     @pytest.mark.parametrize(
         "content, expected",
         [
-            ("MEME", "MEME_REQUEST"),
-            ("profile", "GROUP_PROFILE_REQUEST"),
-            ("NOT_ADDRESSED", "NOT_ADDRESSED"),
-            ("insult", "BOT_INSULT"),
-            ("banter", "BANTER"),
-            ("meaningless", "MEANINGLESS"),
-            ("???", "MEANINGFUL"),
+            ("MEME", Verdict.MEME_REQUEST),
+            ("profile", Verdict.GROUP_PROFILE_REQUEST),
+            ("NOT_ADDRESSED", Verdict.NOT_ADDRESSED),
+            ("insult", Verdict.BOT_INSULT),
+            ("banter", Verdict.BANTER),
+            ("meaningless", Verdict.MEANINGLESS),
+            ("???", Verdict.MEANINGFUL),
         ],
     )
     def test_maps_free_text_to_label(self, content, expected):
-        assert parse_label(content) == expected
+        assert parse_label(content) is expected

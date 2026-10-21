@@ -16,6 +16,7 @@ prompt directive, which emoji pool) stays with the caller.
 import time
 
 from src import log
+from src.pipeline.state import Verdict
 from src.store import engagement
 
 logger = log.get_logger(__name__)
@@ -32,12 +33,12 @@ logger = log.get_logger(__name__)
 # cooldown in filter/budget.py is the primary spam guard, this is the secondary
 # one.
 SIGNAL_WEIGHTS = {
-    "GROUP_PROFILE_REQUEST": 3.0,
-    "BOT_INSULT": 3.0,
-    "BANTER": 2.0,
-    "MEANINGLESS": 2.0,
-    "MEANINGFUL": 1.0,
-    "MEME_REQUEST": 1.0,
+    Verdict.GROUP_PROFILE_REQUEST: 3.0,
+    Verdict.BOT_INSULT: 3.0,
+    Verdict.BANTER: 2.0,
+    Verdict.MEANINGLESS: 2.0,
+    Verdict.MEANINGFUL: 1.0,
+    Verdict.MEME_REQUEST: 1.0,
 }
 
 HALF_LIFE_SECONDS = 60 * 60
@@ -94,7 +95,7 @@ async def register_signal(*, chat_id: int, user_id: int, classification: str) ->
     Returns:
         The tier the bot's reaction should be picked from.
     """
-    weight = SIGNAL_WEIGHTS.get(classification, SIGNAL_WEIGHTS["MEANINGFUL"])
+    weight = SIGNAL_WEIGHTS.get(classification, SIGNAL_WEIGHTS[Verdict.MEANINGFUL])
     try:
         score = await engagement.add_signal(
             chat_id=chat_id, user_id=user_id, weight=weight,

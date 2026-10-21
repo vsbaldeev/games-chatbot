@@ -18,7 +18,7 @@ from src.config.prompts import (
     WORKER_DATA_UNVERIFIED_HEADER,
     WORKER_DATA_VERIFIED_HEADER,
 )
-from src.pipeline.state import BotState
+from src.pipeline.state import BotState, Verdict
 from src.store import thread_history, unified_messages
 
 logger = log.get_logger(__name__)
@@ -637,7 +637,7 @@ def resolve_meme_directive(state: BotState) -> str | None:
         An accepted meme request never reaches here — the node short-circuits
         to an empty response and the events layer sends the image alone.
     """
-    if state.get("wind_down") and state.get("filter_verdict") == "MEME_REQUEST":
+    if state.get("wind_down") and state.get("filter_verdict") == Verdict.MEME_REQUEST:
         return "refused"
     return None
 
@@ -654,7 +654,7 @@ def resolve_group_profile_directive(state: BotState) -> str | None:
         to an empty response and the events layer generates and sends the
         profile message itself.
     """
-    if state.get("wind_down") and state.get("filter_verdict") == "GROUP_PROFILE_REQUEST":
+    if state.get("wind_down") and state.get("filter_verdict") == Verdict.GROUP_PROFILE_REQUEST:
         return "refused"
     return None
 

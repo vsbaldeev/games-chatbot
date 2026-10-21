@@ -13,7 +13,7 @@ from src.pipeline.filter.budget import (
     build_reply_flags,
     send_reaction,
 )
-from src.pipeline.state import ContentKind
+from src.pipeline.state import ContentKind, Verdict
 from src.utils.ttl_gate import TtlGate
 from tests.builders import make_incoming, make_state
 
@@ -149,3 +149,10 @@ class TestBudgetNode:
             result = await BudgetNode()(state)
         assert result["filter_verdict"] == "BANTER"
         assert result["wind_down"] is True
+
+
+def test_signal_weights_cover_exactly_the_chargeable_verdicts():
+    assert set(engagement_gate.SIGNAL_WEIGHTS) == {
+        Verdict.GROUP_PROFILE_REQUEST, Verdict.BOT_INSULT, Verdict.BANTER,
+        Verdict.MEANINGLESS, Verdict.MEANINGFUL, Verdict.MEME_REQUEST,
+    }

@@ -26,6 +26,20 @@ class ContentKind(StrEnum):
     ERROR = "error"                                # generic failure line
 
 
+class Verdict(StrEnum):
+    """What the filter stage decided about a message; the value is stored and logged as-is."""
+
+    MEANINGFUL = "MEANINGFUL"                      # a real message: normal reply
+    MEANINGLESS = "MEANINGLESS"                    # content-free reaction: emoji, no reply
+    BANTER = "BANTER"                              # content-free jab: reply under the wind-down directive
+    BOT_INSULT = "BOT_INSULT"                      # insult aimed at the bot
+    MEME_REQUEST = "MEME_REQUEST"                  # «скинь мем»
+    GROUP_PROFILE_REQUEST = "GROUP_PROFILE_REQUEST"  # judge every member against a theme
+    NOT_ADDRESSED = "NOT_ADDRESSED"                # author is talking about the bot, not to it
+    SHORTS = "SHORTS"                              # YouTube Shorts link with fetched content
+    SOCIAL_LINK = "SOCIAL_LINK"                    # Instagram / YouTube link with fetched content
+
+
 class WorkerStatus(StrEnum):
     """How the worker stage ended; absent when it never finished."""
 
@@ -92,7 +106,7 @@ class BotState(TypedDict):
     social_link_cap_remaining: NotRequired[int | None]  # daily_cap - used for this chat, set by Router; None when the matched handler has no cap
     link_message_is_bare: NotRequired[bool]  # True when the triggering message was the link and nothing else; only then may the events layer delete it
     broadcast_reply: NotRequired[bool]  # True when the message replies to one of the bot's group-wide announcements (is_broadcast row) without @mentioning it; only then may the filter return NOT_ADDRESSED
-    filter_verdict: NotRequired[str]   # "MEANINGFUL" | "MEANINGLESS" | "BANTER" | "BOT_INSULT" | "MEME_REQUEST" | "GROUP_PROFILE_REQUEST" | "NOT_ADDRESSED" | "SHORTS" | "SOCIAL_LINK", set by the filter node
+    filter_verdict: NotRequired[Verdict]  # set by the filter stage; see Verdict
     meme_request: NotRequired[bool]    # True when the filter accepted a meme request at the full tier; the response is empty and the events layer sends the meme itself
     group_profile_request: NotRequired[bool]  # True when the filter accepted a group-profile request at the full tier; the response is empty and the events layer generates+sends the profile itself
     engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node

@@ -13,7 +13,7 @@ import random
 
 from src import config, log
 from src.pipeline.router import is_explicitly_addressed
-from src.pipeline.state import BotState, ContentKind
+from src.pipeline.state import BotState, ContentKind, Verdict
 
 logger = log.get_logger(__name__)
 
@@ -63,7 +63,7 @@ class LinkCheckNode:
             State update dict.
         """
         if state.get("youtube_short_content"):
-            return {"filter_verdict": "SHORTS"}
+            return {"filter_verdict": Verdict.SHORTS}
         message_id = state["incoming"]["message_id"]
         if self.__is_addressed(state):
             logger.info(
@@ -91,7 +91,7 @@ class LinkCheckNode:
             State update dict.
         """
         if state.get("social_link_content"):
-            return {"filter_verdict": "SOCIAL_LINK"}
+            return {"filter_verdict": Verdict.SOCIAL_LINK}
         message_id = state["incoming"]["message_id"]
         if self.__is_addressed(state):
             logger.info(

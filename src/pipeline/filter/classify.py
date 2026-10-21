@@ -65,7 +65,7 @@ from src.config.prompts import FILTER_SYSTEM, OVERHEARD_SYSTEM
 from src.pipeline.ingester import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import looks_like_request
-from src.pipeline.state import BotState
+from src.pipeline.state import BotState, Verdict
 from src.store import unified_messages
 
 logger = log.get_logger(__name__)
@@ -181,7 +181,7 @@ def build_overheard_input(text: str, recent: list[dict]) -> str:
     )
 
 
-def parse_label(content: str) -> str:
+def parse_label(content: str) -> Verdict:
     """Map the classifier's free-text answer onto one of the filter labels.
 
     Args:
@@ -194,16 +194,16 @@ def parse_label(content: str) -> str:
     """
     result = content.strip().upper()
     if "MEME" in result:
-        return "MEME_REQUEST"
+        return Verdict.MEME_REQUEST
     if "PROFILE" in result:
-        return "GROUP_PROFILE_REQUEST"
+        return Verdict.GROUP_PROFILE_REQUEST
     if "NOT_ADDRESSED" in result:
-        return "NOT_ADDRESSED"
+        return Verdict.NOT_ADDRESSED
     if "INSULT" in result:
-        return "BOT_INSULT"
+        return Verdict.BOT_INSULT
     if "BANTER" in result:
-        return "BANTER"
-    return "MEANINGLESS" if "MEANINGLESS" in result else "MEANINGFUL"
+        return Verdict.BANTER
+    return Verdict.MEANINGLESS if "MEANINGLESS" in result else Verdict.MEANINGFUL
 
 
 def make_filter_llm(model: str) -> Runnable:
@@ -291,7 +291,7 @@ class ClassifyNode:
             return await self.__resolve_overheard(state, decision, overheard_input)
 
         decision = await self.__classify_addressed(state, text)
-        if decision == "NOT_ADDRESSED":
+        if decision == Verdict.NOT_ADDRESSED:
             return self.__resolve_not_addressed(state)
         return {"filter_verdict": decision}
 
@@ -326,12 +326,12 @@ class ClassifyNode:
         decision = await self.__classify(build_filter_input(text, replied_to), FILTER_SYSTEM)
         decision = self.__downgrade_group_profile_request(state, text, decision)
         decision = self.__downgrade_not_addressed(state, text, decision)
-        if decision in ("MEANINGLESS", "BANTER") and looks_like_request(text):
+        if decision in (Verdict.MEANINGLESS, Verdict.BANTER) and looks_like_request(text):
             logger.debug(
                 "Filter[classify]: message %s is a question/request — overriding %s to MEANINGFUL",
                 state["incoming"]["message_id"], decision,
             )
-            return "MEANINGFUL"
+            return Verdict.MEANINGFUL
         return decision
 
     def __downgrade_group_profile_request(self, state: BotState, text: str, decision: str) -> str:
@@ -346,14 +346,14 @@ class ClassifyNode:
             ``"MEANINGFUL"`` when ``decision`` is GROUP_PROFILE_REQUEST but the
             text names no whole-chat marker; ``decision`` unchanged otherwise.
         """
-        if decision != "GROUP_PROFILE_REQUEST" or GROUP_PROFILE_MARKER_RE.search(text):
+        if decision != Verdict.GROUP_PROFILE_REQUEST or GROUP_PROFILE_MARKER_RE.search(text):
             return decision
         logger.debug(
             "Filter[classify]: message %s classified GROUP_PROFILE_REQUEST without a "
             "whole-chat marker — downgrading to MEANINGFUL",
             state["incoming"]["message_id"],
         )
-        return "MEANINGFUL"
+        return Verdict.MEANINGFUL
 
     def __downgrade_not_addressed(self, state: BotState, text: str, decision: str) -> str:
         """Downgrade a NOT_ADDRESSED verdict outside a broadcast reply, or on a real request.
@@ -377,7 +377,7 @@ class ClassifyNode:
             message is not a broadcast reply, or looks like a question or
             request; ``decision`` unchanged otherwise.
         """
-        if decision != "NOT_ADDRESSED":
+        if decision != Verdict.NOT_ADDRESSED:
             return decision
         if state.get("broadcast_reply") and not looks_like_request(text):
             return decision
@@ -386,7 +386,7 @@ class ClassifyNode:
             "MEANINGFUL (not a broadcast reply, or looks like a request)",
             state["incoming"]["message_id"],
         )
-        return "MEANINGFUL"
+        return Verdict.MEANINGFUL
 
     async def __enrich_replied_media(self, replied_to: dict | None, state: BotState) -> dict | None:
         """Vision-enrich an unenriched replied-to photo or sticker for the classifier.
@@ -456,7 +456,7 @@ class ClassifyNode:
         self.__extract_passive_facts(state["incoming"])
         return {
             "should_respond": False,
-            "filter_verdict": "NOT_ADDRESSED",
+            "filter_verdict": Verdict.NOT_ADDRESSED,
             "drop_reason": "broadcast_not_addressed",
         }
 
@@ -543,8 +543,8 @@ class ClassifyNode:
             ``{"filter_verdict": "BOT_INSULT"}`` for a confirmed insult;
             otherwise a drop update.
         """
-        if decision == "BOT_INSULT" and await self.__confirm_insult(overheard_input):
-            return {"filter_verdict": "BOT_INSULT"}
+        if decision == Verdict.BOT_INSULT and await self.__confirm_insult(overheard_input):
+            return {"filter_verdict": Verdict.BOT_INSULT}
         self.__extract_passive_facts(state["incoming"])
         return {"should_respond": False, "drop_reason": "overheard_dropped"}
 
@@ -569,4 +569,4 @@ class ClassifyNode:
             return parse_label(response.content)
         except Exception as err:  # noqa: BLE001 — fail open: a classifier outage must not mean silence
             logger.warning("Meaningless filter failed, failing open (MEANINGFUL): %s", err)
-            return "MEANINGFUL"
+            return Verdict.MEANINGFUL
