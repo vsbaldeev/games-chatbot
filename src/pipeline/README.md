@@ -408,6 +408,11 @@ flowchart TD
 retry/fallback middleware. Chain: `openai/gpt-oss-120b`, then the OpenRouter fallbacks (skipped
 without `OPENROUTER_API_KEY`).
 
+Code layout: `response_node.py` is the node (history, the LLM call, the trace);
+`response_prompt.py` holds the pure prompt-assembly functions (also used by `worker_node` and
+`context_builder`); `reply_text.py` cleans the model's reply (markdown, leaked speaker labels,
+writing tics).
+
 ```mermaid
 flowchart TD
     r["response"] --> special{"meme_request or<br/>group_profile_request?"}

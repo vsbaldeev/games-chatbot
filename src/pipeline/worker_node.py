@@ -7,7 +7,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 
 from src import log
 from src.llm import ContextLengthError, DailyLimitError, RateLimitError
-from src.pipeline.response_node import neutralize_speaker_lines, row_speaker, truncate_row_content
+from src.pipeline.response_prompt import neutralize_speaker_lines, row_speaker, truncate_row_content
 from src.pipeline.state import BotState, WorkerStatus
 from src.store import unified_messages
 
@@ -216,7 +216,7 @@ class WorkerNode:
         Content is neutralized against forged speaker lines and capped, the
         same as the response prompt's rows — this prompt is flattened the same
         way and carries the same risk (see
-        :func:`src.pipeline.response_node.neutralize_speaker_lines`).
+        :func:`src.pipeline.response_prompt.neutralize_speaker_lines`).
 
         Args:
             row: Message row dict with ``user_id``, ``username``, ``content``,

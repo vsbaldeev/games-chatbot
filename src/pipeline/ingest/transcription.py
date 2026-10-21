@@ -11,8 +11,7 @@ import re
 
 from groq import AsyncGroq
 
-from src import config
-from src import log
+from src import config, log
 
 logger = log.get_logger(__name__)
 

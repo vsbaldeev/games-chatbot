@@ -12,9 +12,7 @@ import re
 from langchain_core.messages import HumanMessage
 
 from src import log
-from src.config.prompts import VISION_MEME_TAG
-from src.config.prompts import VISION_PROMPT
-from src.config.prompts import VISION_REAL_PERSON_TAG
+from src.config.prompts import VISION_MEME_TAG, VISION_PROMPT, VISION_REAL_PERSON_TAG
 from src.llm.vision import make_vision_llm
 
 logger = log.get_logger(__name__)

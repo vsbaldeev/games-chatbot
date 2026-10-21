@@ -70,7 +70,7 @@ def is_reply_to_game_message(update: Update) -> bool:
     return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
-from src.pipeline.response_node import strip_markdown, strip_speaker_prefix, strip_writing_tics
+from src.pipeline.reply_text import strip_markdown, strip_speaker_prefix, strip_writing_tics
 from src.pipeline.state import BotState, ContentKind, IncomingMessage, WorkerStatus
 from src.store import thread_history
 

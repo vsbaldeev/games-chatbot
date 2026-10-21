@@ -6,8 +6,7 @@ the top comments as audience reaction."""
 import asyncio
 
 from src import log
-from src.pipeline import shorts
-from src.pipeline import social_links
+from src.pipeline import shorts, social_links
 from src.pipeline.comment_summary import summarize_comments
 from src.pipeline.ingest.transcription import transcribe_bytes
 from src.pipeline.ingest.video import compose_video_content, extract_and_describe_frames

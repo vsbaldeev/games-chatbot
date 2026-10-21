@@ -23,7 +23,7 @@ import re
 
 from src import achievements, log
 from src.pipeline.ingest.enrichment import enrich_media_row
-from src.pipeline.response_node import LINK_RETELL_TRIGGERS
+from src.pipeline.response_prompt import LINK_RETELL_TRIGGERS
 from src.pipeline.state import AssembledContext, BotState
 from src.store import embedder, unified_messages, user_memories, user_tags
 
@@ -178,7 +178,7 @@ class ContextBuilder:
         anything a member said, and ranking their stored facts against it is
         both a wasted embedding call and a source of unrelated recall. The
         response prompt drops recent history for these triggers for the same
-        reason (see :data:`~src.pipeline.response_node.LINK_RETELL_TRIGGERS`).
+        reason (see :data:`~src.pipeline.response_prompt.LINK_RETELL_TRIGGERS`).
 
         Args:
             msg: IncomingMessage dict of the message being processed.
