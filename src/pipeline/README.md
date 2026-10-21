@@ -25,6 +25,7 @@ flowchart TD
     ctx["<b>context_builder</b><br/>history · facts · roles"]
     worker["<b>worker</b> (agent)<br/>tool calls → facts"]
     skipw["<b>skip_worker</b><br/>no facts needed"]
+    notext["<b>no_text_reply</b><br/>meme / group profile"]
     response["<b>response</b><br/>persona LLM → reply"]
     lang["<b>language_correction</b><br/>fix foreign script"]
     memory["<b>memory_writer</b><br/>extract facts (background)"]
@@ -53,6 +54,7 @@ flowchart TD
     budget -->|"otherwise"| stop
 
     guard -->|"not blocked"| ctx
+    guard -->|"meme or group-profile request"| notext --> memory
     guard -->|"blocked"| stop
 
     ctx -->|"needs facts"| worker --> response
@@ -73,8 +75,10 @@ Things the arrows do not show:
   `ingester`, even when `should_respond` is False, so voice, video and photos are transcribed
   or described and the stored row is enriched. The run then ends before the filter stage.
   Stickers are the exception: they are described only when the bot is about to answer.
-- **Meme and group-profile requests produce no text.** They pass through the graph and reach
-  `response` with an empty reply; the events layer then sends the meme or profile itself.
+- **Meme and group-profile requests produce no text.** The guard routes them straight to
+  `no_text_reply` (no context builder, worker or response LLM), which leaves an empty reply and
+  `worker_status = skipped`; the events layer then sends the meme or profile itself. The memory
+  writer therefore runs without `recent_history` for these requests.
 - **Not every update gets here.** See [What bypasses the graph](#2-where-the-graph-sits).
 
 ---
@@ -270,7 +274,7 @@ flowchart TD
 | `MEANINGLESS` | Content-free reaction. | Friendly emoji reaction, no reply. |
 | `BANTER` | Content-free jab. | Reply; sets `wind_down` so a mirrored insult never earns a fresh comeback. |
 | `BOT_INSULT` | Insult aimed at the bot. | `is_bot_insult=True` (comeback hint, worker skipped). A reply to the bot's own message also sets `wind_down`. |
-| `MEME_REQUEST` | «скинь мем». | `meme_request=True`: worker skipped, empty reply, events layer sends a meme. |
+| `MEME_REQUEST` | «скинь мем». | `meme_request=True`: the guard routes it to `no_text_reply` (empty reply), the events layer sends a meme. |
 | `GROUP_PROFILE_REQUEST` | Judge/rank every member against a user-supplied theme. | `group_profile_request=True` (unless the 10-minute per-chat cooldown applies → canned refusal). See `src/group_profile/README.md`. |
 | `NOT_ADDRESSED` | Author is talking *about* the bot to the chat. | Honoured **only** when `broadcast_reply` is True; otherwise downgraded to `MEANINGFUL`. |
 
@@ -388,7 +392,7 @@ floor, because at that size the worker fabricates from memory instead of calling
 ```mermaid
 flowchart TD
     ctx["context_builder"] --> skip{"route_after_context"}
-    skip -->|"is_bot_insult · wind_down · meme_request<br/>group_profile_request · youtube_short · social_link"| sk["skip_worker node<br/>worker_status = skipped, empty output"]
+    skip -->|"is_bot_insult · wind_down<br/>youtube_short · social_link"| sk["skip_worker node<br/>worker_status = skipped, empty output"]
     skip -->|"otherwise"| run["worker node: invoke_worker<br/>CONTEXT FIRST: no tools if the reply chain already answers"]
     run -->|"ok"| ok["worker_status = ok<br/>worker_tools_used from a ToolMessage scan"]
     run -->|"ContextLengthError"| co["context_overflow, empty output"]
@@ -415,9 +419,7 @@ writing tics).
 
 ```mermaid
 flowchart TD
-    r["response"] --> special{"meme_request or<br/>group_profile_request?"}
-    special -->|"yes"| empty(["empty reply, no LLM call"])
-    special -->|"no"| prompt["assemble prompt"]
+    r["response"] --> prompt["assemble prompt"]
     prompt --> llm["response LLM"]
     llm --> clean["normalize homoglyphs<br/>strip markdown · speaker prefix · writing tics"]
     clean --> need{"hard-foreign script<br/>or unrepaired Greek?"}

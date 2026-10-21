@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.llm import ContextLengthError, DailyLimitError, RateLimitError
-from src.pipeline.response_node import ResponseNode, log_response_usage
+from src.pipeline.response_node import ResponseNode, log_response_usage, no_text_reply
+from src.pipeline.state import WorkerStatus
 from tests.builders import make_incoming, make_state
 
 THREAD_GET_HISTORY = "src.pipeline.response_node.thread_history.get_history"
@@ -205,31 +206,27 @@ class TestErrorPropagation:
                 await ResponseNode(agent)(self.make_state_for_error())
 
 
-class TestMemeRequestSkipsGeneration:
-    async def test_accepted_meme_request_returns_an_empty_response(self):
-        """The meme is the whole reply — no LLM call, no text to stack on it."""
-        agent = make_mock_agent("этого не должно быть")
-        state = make_state(make_incoming(), meme_request=True)
-        result = await ResponseNode(agent)(state)
-        assert result == {"response": "", "response_messages": [], "response_trace": None}
-        agent.invoke_response.assert_not_called()
+class TestNoTextReply:
+    """The meme (or the generated group profile) is the whole reply — no LLM call, no
+    worker facts, and nothing to stack a comment on."""
 
+    @pytest.mark.parametrize("flag", ["meme_request", "group_profile_request"])
+    async def test_no_text_reply_matches_the_old_skipped_path(self, flag):
+        result = await no_text_reply(make_state(make_incoming(), **{flag: True}))
+        assert result == {
+            "worker_output": "", "search_notification_msg": None, "worker_tools_used": False,
+            "worker_status": WorkerStatus.SKIPPED,
+            "response": "", "response_messages": [], "response_trace": None,
+        }
+
+
+class TestOrdinaryMessageGeneration:
     async def test_ordinary_message_still_generates(self):
         agent = make_mock_agent("обычный ответ")
         state = make_state(make_incoming(), is_flat_thread=True)
         with patch(THREAD_APPEND_TURN, AsyncMock()):
             result = await ResponseNode(agent)(state)
         assert result["response"] == "обычный ответ"
-
-
-class TestGroupProfileRequestSkipsGeneration:
-    async def test_accepted_group_profile_request_returns_an_empty_response(self):
-        """The generated profile is the whole reply — no LLM call, no text to stack on it."""
-        agent = make_mock_agent("этого не должно быть")
-        state = make_state(make_incoming(), group_profile_request=True)
-        result = await ResponseNode(agent)(state)
-        assert result == {"response": "", "response_messages": [], "response_trace": None}
-        agent.invoke_response.assert_not_called()
 
 
 class TestLogResponseUsage:
@@ -284,10 +281,3 @@ class TestResponseTrace:
         assert isinstance(trace["latency_ms"], int)
         assert trace["user_prompt"]  # the enriched final turn, non-empty
         assert trace["history_messages"] == []
-
-    async def test_no_trace_for_meme_request(self):
-        agent = make_mock_agent()
-        node = ResponseNode(agent)
-        state = make_state(make_incoming(), meme_request=True)
-        result = await node(state)
-        assert result.get("response_trace") is None

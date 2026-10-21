@@ -13,6 +13,7 @@ from src.pipeline.graph import (
     route_after_context,
     route_after_ingester,
     route_after_router,
+    route_by_guard,
     route_if_responding,
 )
 from tests.builders import make_incoming, make_state
@@ -79,12 +80,10 @@ class TestRouteAfterContext:
         [
             {"is_bot_insult": True},
             {"wind_down": True},
-            {"meme_request": True},
-            {"group_profile_request": True},
             {"response_trigger": "youtube_short"},
             {"response_trigger": "social_link"},
         ],
-        ids=["bot-insult", "wind-down", "meme", "group-profile", "shorts", "social-link"],
+        ids=["bot-insult", "wind-down", "shorts", "social-link"],
     )
     def test_routes_directive_and_link_replies_past_the_worker(self, overrides):
         state = make_state(make_incoming(), should_respond=True, **overrides)
@@ -93,3 +92,22 @@ class TestRouteAfterContext:
     def test_routes_an_ordinary_question_to_the_worker(self):
         state = make_state(make_incoming(), should_respond=True, response_trigger="explicit")
         assert route_after_context(state) == "worker"
+
+
+class TestRouteByGuard:
+    """A blocked message ends the run; a meme or group-profile request has no text reply
+    to build, so it skips the context, worker and response nodes."""
+
+    @pytest.mark.parametrize(
+        "overrides, expected",
+        [
+            ({"blocked": True}, END),
+            ({"meme_request": True}, "no_text_reply"),
+            ({"group_profile_request": True}, "no_text_reply"),
+            ({}, "context_builder"),
+        ],
+        ids=["blocked", "meme", "group-profile", "ordinary"],
+    )
+    def test_routes_by_block_and_request_flags(self, overrides, expected):
+        state = make_state(make_incoming(), should_respond=True, **overrides)
+        assert route_by_guard(state) == expected

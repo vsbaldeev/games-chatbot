@@ -15,7 +15,8 @@ from src.pipeline.response_prompt import (
     resolve_group_profile_directive,
     resolve_meme_directive,
 )
-from src.pipeline.state import BotState
+from src.pipeline.state import BotState, WorkerStatus
+from src.pipeline.worker_node import empty_worker_update
 from src.store import thread_history
 
 logger = log.get_logger(__name__)
@@ -167,6 +168,23 @@ def build_response_trace(
     }
 
 
+async def no_text_reply(state: BotState) -> dict:
+    """Graph node for requests whose whole reply is something other than text.
+
+    The meme (or the generated group-profile message) is sent by the events
+    layer, so a filler line here would be redundant, and a generated comment on
+    content this model never sees is the stacking failure the 2026-08-07
+    absurdity work removed. No worker facts are gathered and no response LLM
+    runs, so ``response_trace`` is None.
+    """
+    return {
+        **empty_worker_update(WorkerStatus.SKIPPED),
+        "response": "",
+        "response_messages": [],
+        "response_trace": None,
+    }
+
+
 class ResponseNode:
     """Generates the final personality-driven reply from gathered worker facts."""
 
@@ -190,17 +208,8 @@ class ResponseNode:
             carries the assembled LangChain message list for the correction
             node — plus ``response_trace``, the exact prompt/response of this
             call for persistence by ``deliver_and_record``
-            (``src/events/messages.py``), or None when no response LLM call
-            ran (meme/group-profile requests).
+            (``src/events/messages.py``).
         """
-        if state.get("meme_request") or state.get("group_profile_request"):
-            # The meme (or the group-profile message) is the whole reply: a
-            # filler line here would be redundant, and a generated comment on
-            # content this model never sees is the stacking failure the
-            # 2026-08-07 absurdity work removed. Returning empty also skips
-            # the response LLM entirely.
-            return {"response": "", "response_messages": [], "response_trace": None}
-
         past_messages = await self.__load_history(state)
         enriched = self.__build_prompt(state, past_messages)
         messages = past_messages + [HumanMessage(content=enriched)]

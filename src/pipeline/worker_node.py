@@ -24,16 +24,12 @@ def worker_is_skipped(state: BotState) -> bool:
     a «🔍 Ищу…» notification before the burn and junk search output steering
     it. Same for Shorts and social-link summaries — the source material is
     already in processed_text — and for wind-down brush-offs, which are one
-    short phrase closing the conversation. A meme request answers with the
-    image alone and no text at all, so gathered facts would have nowhere to
-    go. Same for a group-profile request — it runs its own dedicated LLM call
-    over the roster's own dossiers, not IGDB-style tool facts.
+    short phrase closing the conversation.
+    Meme and group-profile requests never get here; see ``no_text_reply``.
     """
     return bool(
         state.get("is_bot_insult")
         or state.get("wind_down")
-        or state.get("meme_request")
-        or state.get("group_profile_request")
         or state.get("response_trigger") in ("youtube_short", "social_link")
     )
 
