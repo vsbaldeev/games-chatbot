@@ -16,7 +16,10 @@ flowchart TD
 
     router["<b>router</b><br/>store message · pick trigger"]
     ingester["<b>ingester</b><br/>media / link → text"]
-    filter["<b>filter</b><br/>classify · engagement gate"]
+    link["<b>link_check</b><br/>Shorts / social link"]
+    media["<b>media_check</b><br/>transcript present?"]
+    classify["<b>classify</b><br/>LLM verdict"]
+    budget["<b>budget</b><br/>engagement gate"]
     guard["<b>guard</b><br/>prompt-injection check"]
     ctx["<b>context_builder</b><br/>history · facts · roles"]
     worker["<b>worker</b> (agent)<br/>tool calls → facts"]
@@ -30,11 +33,19 @@ flowchart TD
     router -->|"text, unaddressed, not forwarded, ≥ 20 chars"| memory
     router -->|"any other text"| stop
 
-    ingester -->|"should_respond"| filter
-    ingester -->|"otherwise"| stop
+    ingester -->|"link trigger"| link
+    ingester -->|"media"| media
+    ingester -->|"text"| classify
+    ingester -->|"not should_respond"| stop
 
-    filter -->|"should_respond"| guard
-    filter -->|"otherwise"| stop
+    link -->|"should_respond"| guard
+    media -->|"should_respond"| budget
+    classify -->|"should_respond"| budget
+    budget -->|"should_respond"| guard
+    link -->|"otherwise"| stop
+    media -->|"otherwise"| stop
+    classify -->|"otherwise"| stop
+    budget -->|"otherwise"| stop
 
     guard -->|"not blocked"| ctx
     guard -->|"blocked"| stop
@@ -49,12 +60,12 @@ flowchart TD
 Things the arrows do not show:
 
 - **`END` is not always silence.** A node can end the run *and* leave a canned `response`
-  (guard deflection, filter's «не расслышал…», router's Instagram-cap reply) or fire an emoji
+  (guard deflection, media_check's «не расслышал…», router's Instagram-cap reply) or fire an emoji
   reaction. `run_pipeline` (`src/events/messages.py`) delivers whatever `response` the final
   state holds.
 - **Unaddressed media still costs work.** `route_after_router` sends *all* non-text media to
   `ingester`, even when `should_respond` is False, so voice, video and photos are transcribed
-  or described and the stored row is enriched. The run then ends before `filter`.
+  or described and the stored row is enriched. The run then ends before the filter stage.
   Stickers are the exception: they are described only when the bot is about to answer.
 - **Meme and group-profile requests produce no text.** They pass through the graph and reach
   `response` with an empty reply; the events layer then sends the meme or profile itself.
@@ -125,7 +136,7 @@ flowchart TD
 | `social_link` | True | Instagram Reel / YouTube video link. First matching handler wins; other links in the message are ignored. Only Instagram has a daily cap (30/chat/24 h). |
 | `explicit` | True | `@bot_username` (word-boundary regex, URLs and longer words don't count) or a reply to a bot message. |
 | `insult_check` | True | Text contains «бот»/"bot" without addressing the bot; the filter decides whether it is really an insult. |
-| `random` | False | Everything else, and every forwarded message. The run never reaches the filter with this trigger. |
+| `random` | False | Everything else, and every forwarded message. The run never reaches the filter stage with this trigger. |
 
 Details worth knowing:
 
@@ -187,13 +198,24 @@ stay `[sticker]`.
 
 ---
 
-## 5. Filter and engagement gate
+## 5. Filter stage and engagement gate
 
-The filter runs only when `should_respond` is True. Its first branch is the trigger.
+The filter stage is four graph nodes in `src/pipeline/filter/`, added to the graph by
+`add_filter_stage` in `graph.py`. It runs only when `should_respond` is True. The first branch is
+`route_after_ingester`, an edge, not code inside a node:
+
+| Node | File | Job |
+|---|---|---|
+| `link_check` | `filter/link_check.py` | Shorts / social link: pass the summary on, or a canned failure reply if addressed, silence if not. Skips `budget`. |
+| `media_check` | `filter/media_check.py` | Non-text media: transcript present → verdict `MEANINGFUL`; none → canned «не расслышал / не разглядел». |
+| `classify` | `filter/classify.py` | The only LLM call: classifies addressed text, or an overheard bot-word mention. Sets `filter_verdict` or ends the run. |
+| `budget` | `filter/budget.py` | Charges the engagement gate, maps verdict + tier onto reply flags, an emoji reaction or silence. |
+
+The diagram below flattens the four nodes into one decision tree.
 
 ```mermaid
 flowchart TD
-    entry["filter"] --> trig{"trigger"}
+    entry["filter stage"] --> trig{"trigger"}
 
     trig -->|"youtube_short / social_link"| link{"content fetched?"}
     link -->|"yes"| pass(["→ guard"])
@@ -241,7 +263,7 @@ Deterministic floors under the classifier:
 - Replied-to photos/stickers still in placeholder form are vision-enriched before classification.
 - An LLM error fails **open** (`should_respond=True`).
 
-Models: `FILTER_MODEL` = `qwen/qwen3.8-27b` (with `FILTER_FALLBACK_MODEL` via `make_filter_llm`),
+Models: `FILTER_MODEL` = `qwen/qwen3.8-27b` (with `FILTER_FALLBACK_MODEL` via `filter.classify.make_filter_llm`),
 `INSULT_CONFIRM_MODEL` = `qwen/qwen3.8-27b`. The overheard-insult confirmation is therefore a
 same-model re-ask, not an independent second opinion; disagreement or error resolves to silence.
 
@@ -453,7 +475,7 @@ Fields grouped by the node that sets them (`state.py`).
 | entry (`build_pipeline_state`, `run_pipeline`) | `incoming` (`IncomingMessage`), `context_types`, `thread_id`, `is_flat_thread` |
 | router | `should_respond`, `response_trigger`, `broadcast_reply`, `youtube_short_url`, `social_link_handler`, `social_link_url`, `social_link_cap_remaining`, `link_message_is_bare`; `response` + `content_kind` for the Instagram cap reply |
 | ingester | `incoming.processed_text`, `media_is_real_person`, `voice_low_confidence`, `youtube_short_content`, `youtube_short_video`, `social_link_content`, `social_link_video` |
-| filter | `should_respond`, `filter_verdict`, `is_bot_insult`, `wind_down`, `meme_request`, `group_profile_request`, `engagement_tier`, `drop_reason`; `response` + `content_kind` for canned replies |
+| filter stage (`link_check`, `media_check`, `classify`, `budget`) | `should_respond`, `filter_verdict`, `is_bot_insult`, `wind_down`, `meme_request`, `group_profile_request`, `engagement_tier`, `drop_reason`; `response` + `content_kind` for canned replies |
 | guard | `blocked`, `drop_reason`; `response` + `content_kind = prompt_injection_reply` |
 | context_builder | `context` (`AssembledContext`) |
 | worker | `worker_output`, `worker_tools_used`, `worker_status`, `search_notification_msg` |
@@ -487,7 +509,7 @@ Fields grouped by the node that sets them (`state.py`).
 | Stage | Config | Current value |
 |---|---|---|
 | guard | `GUARD_MODEL` | `meta-llama/llama-prompt-guard-2-86m` |
-| filter / overheard confirm | `FILTER_MODEL`, `INSULT_CONFIRM_MODEL` | `qwen/qwen3.8-27b` |
+| classify / overheard confirm | `FILTER_MODEL`, `INSULT_CONFIRM_MODEL` | `qwen/qwen3.8-27b` |
 | vision | `VISION_MODEL` | `qwen/qwen3.8-27b` (OpenRouter fallback via `make_vision_llm`) |
 | comment summary | `TAG_MODEL` | `qwen/qwen3.8-27b` |
 | transcription | `WHISPER_MODEL` | `whisper-large-v3` |
@@ -502,7 +524,7 @@ Fields grouped by the node that sets them (`state.py`).
 The router only ever sets `should_respond=True` with `explicit`, `insult_check`, `youtube_short`
 or `social_link`; both of its `random` returns are `should_respond=False` (`router.py`
 `__decide`). `random` survives only as the label for "no trigger" in logs. The random-trigger
-branches in the filter, response and worker nodes (left over from the autonomous-reaction era,
+branches in the filter stage, response and worker nodes (left over from the autonomous-reaction era,
 removed on 2026-08-07) have been deleted. One remnant is left:
 
 - `media_is_real_person`: still computed by the ingester's vision calls (and the `[ЧЕЛОВЕК]`/`[МЕМ]`

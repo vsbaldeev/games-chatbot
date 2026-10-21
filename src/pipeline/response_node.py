@@ -493,7 +493,7 @@ def build_directive_lines(
             back — unless ``wind_down`` is also set (see below).
         wind_down: ``True`` when the engagement gate wants the conversation
             closed; adds a hint to answer in one short phrase and disengage.
-            When combined with ``is_bot_insult``, ``filter_node`` set both
+            When combined with ``is_bot_insult``, the filter's ``budget`` node set both
             either because the insult replies to the bot's own message
             (``replies_to_bot``), or because the sender's engagement tier had
             already dropped below full — in both cases a mirrored

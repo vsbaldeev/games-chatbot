@@ -29,7 +29,7 @@ logger = log.get_logger(__name__)
 # daily budget — raise this constant if bursts start starving memory
 # extraction. GROUP_PROFILE_REQUEST costs one LLM call plus a store query per
 # chat member, so it is weighted above an ordinary message; the per-chat
-# cooldown in filter_node.py is the primary spam guard, this is the secondary
+# cooldown in filter/budget.py is the primary spam guard, this is the secondary
 # one.
 SIGNAL_WEIGHTS = {
     "GROUP_PROFILE_REQUEST": 3.0,

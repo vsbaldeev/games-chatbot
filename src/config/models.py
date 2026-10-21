@@ -54,7 +54,7 @@ VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
 FILTER_MODEL = "qwen/qwen3.8-27b"
 
 # Cross-provider fallback for the filter, used when Groq is out of quota or
-# unreachable (see filter_node.make_filter_llm). Same weights, different
+# unreachable (see filter.classify.make_filter_llm). Same weights, different
 # vendor, so a Groq outage degrades to a paid call instead of to silence.
 # Requires OPENROUTER_API_KEY; without it the filter is Groq-only. Unaffected
 # by the Groq decommission — this is an OpenRouter-hosted model, not Groq's.

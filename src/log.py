@@ -106,10 +106,10 @@ def shorten_logger_name(name: str) -> str:
     """Reduce a dotted logger name to its last two components, left-padded.
 
     Args:
-        name: Full logger name, e.g. ``src.pipeline.filter_node``.
+        name: Full logger name, e.g. ``src.pipeline.filter.classify``.
 
     Returns:
-        A compact name like ``pipeline.filter_node`` padded to at least
+        A compact name like ``filter.classify`` padded to at least
         ``NAME_WIDTH`` characters for column alignment.
     """
     trimmed = name.removeprefix("src.")

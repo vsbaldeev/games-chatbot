@@ -83,7 +83,7 @@ class ResponseAgent:
         call instead of taking chat replies down entirely, and a single
         OpenRouter free model saturating doesn't either. Skipped when
         OPENROUTER_API_KEY is unset, same fail-open contract as
-        filter_node.make_filter_llm.
+        filter.classify.make_filter_llm.
 
         Returns:
             Configured LangChain agent executor.

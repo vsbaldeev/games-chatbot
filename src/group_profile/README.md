@@ -13,14 +13,14 @@ See `docs/superpowers/specs/2026-08-17-group-profiling-design.md` for the design
 a member asks in words, addressing the bot and naming the whole chat
     («@bot оцени всем счастье от 1 до 10»); the filter node classifies
     GROUP_PROFILE_REQUEST (trusted only when the text also matches
-    GROUP_PROFILE_MARKER_RE — src/pipeline/filter_node.py — a deterministic
+    GROUP_PROFILE_MARKER_RE — src/pipeline/filter/classify.py — a deterministic
     floor under a one-word classifier already carrying six other labels),
     the response stays empty, and src/events/messages.py::deliver_group_profile
     generates and sends the result anchored to the request
 ```
 
 There is no slash command — natural language is the only way to ask, same as
-`MEME_REQUEST`. A per-chat 10-minute cooldown (`filter_node.group_profile_cooldown_gate`)
+`MEME_REQUEST`. A per-chat 10-minute cooldown (`filter.budget.group_profile_cooldown_gate`)
 sits in front of the LLM call; a request inside the window gets a canned
 in-character refusal with no generation at all.
 

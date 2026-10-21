@@ -58,7 +58,7 @@ logger = log.get_logger(__name__)
 
 # Only Instagram's handler still has a daily_cap (see social_links/__init__.py) —
 # these acknowledge the limit instead of leaving a posted link answered with
-# silence, same tone as the honest-failure pools in filter_node.py.
+# silence, same tone as the honest-failure pools in filter/link_check.py and filter/media_check.py.
 INSTAGRAM_REEL_DAILY_CAP_REPLIES = [
     "На сегодня лимит рилсов исчерпан — эту ссылку не разбираю.",
     "Дневной лимит рилсов выбран. Дальше сами, я на паузе до завтра.",
@@ -164,10 +164,10 @@ BOT_WORD_RE = re.compile(
 )
 
 # Leading interrogatives that mark a message as a real question even without
-# a question mark — Russian and English. Relocated from filter_node.py:
+# a question mark — Russian and English. Relocated from the filter node:
 # looks_like_request is now also used by MessageRouter's addressing gate for
 # replies to link-repost messages (see __decide), so it needs to live
-# somewhere both router.py and filter_node.py (which imports FROM router.py)
+# somewhere both router.py and filter/classify.py (which imports FROM router.py)
 # can reach without a circular import.
 QUESTION_WORDS = frozenset({
     "что", "чё", "че", "чо", "как", "почему", "зачем", "кто", "кого", "кому",

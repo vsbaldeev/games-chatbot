@@ -163,7 +163,7 @@ message is a broadcast), so replies to them can be treated as chat among
 members rather than necessarily as messages to the bot. Unlike the
 link-repost gate, this one is not decided in the router: a bare reply
 (no @mention) still routes as "explicit" but carries `broadcast_reply`, and
-`MeaninglessFilterNode` (`src/pipeline/filter_node.py`) is the one that may
+`ClassifyNode` (`src/pipeline/filter/classify.py`) is the one that may
 silence it — an LLM `NOT_ADDRESSED` verdict, itself overridden back to a
 reply whenever the text looks like a genuine question or request (the same
 deterministic floor MEANINGLESS/BANTER get). An @mention skips this whole

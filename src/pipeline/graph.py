@@ -8,14 +8,23 @@ Graph edges:
     ├─ text + other                → END
     └─ any media                  → ingester  (always, to enrich content in DB)
                 ingester
-                    ├─ should_respond=True  → filter
-                    └─ should_respond=False → END  (media described+stored, no reply)
-                              filter
+                    ├─ should_respond=False → END  (media described+stored, no reply)
+                    ├─ youtube_short / social_link → link_check ──┐
+                    ├─ media                       → media_check ─┤→ budget
+                    └─ text                        → classify ────┘
+                link_check ─(should_respond)→ guard
+                media_check, classify ─(should_respond)→ budget ─(should_respond)→ guard
+                              guard
                                 ├─ blocked → END
                                 └─ ok → context_builder → worker → response
                                             ├─ foreign script → language_correction → memory_writer → END
                                             └─ ok             → memory_writer → END
+
+The four filter nodes (link_check, media_check, classify, budget) are added by
+``add_filter_stage``; a node that sets should_respond=False ends the run.
 """
+
+from collections.abc import Callable
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -24,7 +33,7 @@ from telegram.ext import ContextTypes
 from src import config, log
 from src.llm import needs_russian_correction
 from src.pipeline.context_builder import ContextBuilder
-from src.pipeline.filter_node import MeaninglessFilterNode
+from src.pipeline.filter import BudgetNode, ClassifyNode, LinkCheckNode, MediaCheckNode
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
 from src.pipeline.language_correction_node import LanguageCorrectionNode
@@ -51,11 +60,23 @@ def route_after_router(state: BotState) -> str:
 
 
 def route_after_ingester(state: BotState) -> str:
-    return "filter" if state["should_respond"] else END
+    """Pick the filter node that handles the message, or end when no reply is wanted."""
+    if not state["should_respond"]:
+        return END
+    if state.get("response_trigger") in ("youtube_short", "social_link"):
+        return "link_check"
+    if state["incoming"]["media_type"] != "text":
+        return "media_check"
+    return "classify"
 
 
-def route_after_filter(state: BotState) -> str:
-    return "guard" if state["should_respond"] else END
+def route_if_responding(next_node: str) -> Callable[[BotState], str]:
+    """Build a router that continues to ``next_node`` unless a node set should_respond=False."""
+
+    def route(state: BotState) -> str:
+        return next_node if state["should_respond"] else END
+
+    return route
 
 
 def route_by_guard(state: BotState) -> str:
@@ -68,6 +89,42 @@ def route_after_response(state: BotState) -> str:
     if needs_russian_correction(response):
         return "language_correction"
     return "memory_writer"
+
+
+def add_filter_stage(
+    graph: StateGraph,
+    *,
+    source: str,
+    on_pass: str,
+    classify_node: ClassifyNode | None = None,
+) -> None:
+    """Add the four filter nodes and their edges to ``graph``.
+
+    Args:
+        graph: The graph under construction.
+        source: Node (or ``START``) whose output feeds the filter stage.
+        on_pass: Node that follows when the message passes the filter.
+        classify_node: Classifier to use; built from configuration when None
+            (tests inject one with mock LLMs).
+    """
+    graph.add_node("link_check", LinkCheckNode())
+    graph.add_node("media_check", MediaCheckNode())
+    graph.add_node("classify", classify_node if classify_node is not None else ClassifyNode())
+    graph.add_node("budget", BudgetNode())
+
+    graph.add_conditional_edges(
+        source,
+        route_after_ingester,
+        {"link_check": "link_check", "media_check": "media_check", "classify": "classify", END: END},
+    )
+    graph.add_conditional_edges(
+        "link_check", route_if_responding(on_pass), {on_pass: on_pass, END: END}
+    )
+    for checked_node in ("media_check", "classify"):
+        graph.add_conditional_edges(
+            checked_node, route_if_responding("budget"), {"budget": "budget", END: END}
+        )
+    graph.add_conditional_edges("budget", route_if_responding(on_pass), {on_pass: on_pass, END: END})
 
 
 def get_pipeline(context: ContextTypes.DEFAULT_TYPE) -> CompiledStateGraph:
@@ -88,7 +145,6 @@ def build_pipeline(worker_agent, response_agent) -> CompiledStateGraph:
 
     graph.add_node("router", MessageRouter(bot_username=config.BOT_USERNAME, bot_id=config.BOT_ID))
     graph.add_node("ingester", MessageIngester())
-    graph.add_node("filter", MeaninglessFilterNode())
     graph.add_node("guard", GuardNode())
     graph.add_node("context_builder", ContextBuilder())
     graph.add_node("worker", WorkerNode(worker_agent))
@@ -102,8 +158,7 @@ def build_pipeline(worker_agent, response_agent) -> CompiledStateGraph:
         route_after_router,
         {"ingester": "ingester", "memory_writer": "memory_writer", END: END},
     )
-    graph.add_conditional_edges("ingester", route_after_ingester, {"filter": "filter", END: END})
-    graph.add_conditional_edges("filter", route_after_filter, {"guard": "guard", END: END})
+    add_filter_stage(graph, source="ingester", on_pass="guard")
     graph.add_conditional_edges("guard", route_by_guard, {"context_builder": "context_builder", END: END})
     graph.add_edge("context_builder", "worker")
     graph.add_edge("worker", "response")

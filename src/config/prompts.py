@@ -22,7 +22,7 @@ are literal strings being matched, not instructions).
 from src.config.credentials import BOT_USERNAME
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Message classification (src/pipeline/filter_node.py)
+# Message classification (src/pipeline/filter/classify.py)
 #
 # NOT_ADDRESSED is the addressee-detection verdict: the author replied to
 # the bot but is talking about it to the chat. The filter node honours it

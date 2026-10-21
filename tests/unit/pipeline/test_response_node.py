@@ -473,9 +473,9 @@ class TestBuildDirectiveLinesInsultReplyingToBot:
         assert "надоел" not in joined
 
     def test_insult_replying_to_bot_gets_wind_down_not_comeback(self):
-        """filter_node sets wind_down=True alongside is_bot_insult=True when the
+        """the filter's budget node sets wind_down=True alongside is_bot_insult=True when the
         insult replies to the bot's own message, or when the sender's
-        engagement tier has already dropped — both cases filter_node treats
+        engagement tier has already dropped — both cases it treats
         the same way: a mirrored counter-insult would just fuel the loop, so
         only the softer wind-down line should reach the model, never both."""
         lines = build_directive_lines(is_bot_insult=True, wind_down=True)
