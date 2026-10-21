@@ -180,7 +180,7 @@ OVERHEARD_SYSTEM = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Media ingestion — vision descriptions (src/pipeline/ingester.py)
+# Media ingestion — vision descriptions (src/pipeline/ingest/vision.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Leading classification tag the vision LLM must emit before its description

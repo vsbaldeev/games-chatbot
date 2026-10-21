@@ -13,7 +13,7 @@ Assembles everything the Agent node needs for an enriched prompt:
                        history plus the initiating user, similarity-gated against
                        the incoming message (see USER_FACTS_SIMILAR_LIMIT).
   4. Reply chain     — full reply chain with photo and sticker rows lazily
-                       enriched via the shared ingester.enrich_media_row helper
+                       enriched via the shared ingest.enrichment.enrich_media_row helper
                        (also used by the filter node before classification) so
                        WorkerNode and ResponseNode see real descriptions, not
                        placeholders.
@@ -22,7 +22,7 @@ Assembles everything the Agent node needs for an enriched prompt:
 import re
 
 from src import achievements, log
-from src.pipeline.ingester import enrich_media_row
+from src.pipeline.ingest.enrichment import enrich_media_row
 from src.pipeline.response_node import LINK_RETELL_TRIGGERS
 from src.pipeline.state import AssembledContext, BotState
 from src.store import embedder, unified_messages, user_memories, user_tags

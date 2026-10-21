@@ -30,7 +30,7 @@ STORE_GET_TAG = "src.pipeline.context_builder.user_tags.get_tag"
 STORE_GET_TAGS_FOR_USERS = "src.pipeline.context_builder.user_tags.get_tags_for_users"
 ACHIEVEMENTS_GET_MEMBERS = "src.pipeline.context_builder.achievements.get_chat_members"
 EMBED = "src.pipeline.context_builder.embedder.embed"
-DESCRIBE_PHOTO = "src.pipeline.ingester.describe_photo"
+DESCRIBE_PHOTO = "src.pipeline.ingest.enrichment.describe_photo"
 
 
 def patch_store(stack: contextlib.ExitStack, *, recent=None, chain=None, by_id=None, tag=None):

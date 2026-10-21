@@ -163,6 +163,19 @@ Details worth knowing:
 Turns the current message into text (`processed_text`). Runs for all non-text media and for
 every addressed message.
 
+The node lives in `src/pipeline/ingest/node.py`: one strategy function per media type
+(`INGEST_STRATEGIES`), each returning an `IngestResult`. The work they call is split by what it
+does:
+
+| Module | Holds |
+|---|---|
+| `transcription.py` | Groq Whisper calls and the garbage / low-confidence transcript checks. |
+| `vision.py` | Photo descriptions and the `[ЧЕЛОВЕК]`/`[МЕМ]` tag parsing. |
+| `video.py` | Keyframe extraction (PyAV), frame descriptions, `transcribe_video`. |
+| `stickers.py` | Sticker descriptions, cached per `file_unique_id`. |
+| `links.py` | Shorts and social-link summaries. |
+| `enrichment.py` | `enrich_media_row`, the lazy enrichment of stored placeholder rows. |
+
 | Media / trigger | What happens |
 |---|---|
 | text | `processed_text = raw_text`. |
@@ -196,7 +209,7 @@ audio track so lyrics are not read as the sender's words.
 **Vision LLM.** All vision calls go through `src.llm.vision.make_vision_llm` (Groq primary with
 an OpenRouter fallback; Groq-only without `OPENROUTER_API_KEY`).
 
-**Lazy enrichment** (`ingester.enrich_media_row`). The filter (replied-to row) and
+**Lazy enrichment** (`ingest.enrichment.enrich_media_row`). The filter (replied-to row) and
 `context_builder` (every photo/sticker in the reply chain) enrich placeholder rows on demand
 and cache the result in `unified_messages`; stickers are also cached by `file_unique_id` in
 `sticker_descriptions`, so a re-sent sticker costs zero vision calls. Animated `.tgs` stickers
@@ -534,5 +547,5 @@ or `social_link`; both of its `random` returns are `should_respond=False` (`rout
 branches in the filter stage, response and worker nodes (left over from the autonomous-reaction era,
 removed on 2026-08-07) have been deleted. One remnant is left:
 
-- `media_is_real_person`: still computed by the ingester's vision calls (and the `[ЧЕЛОВЕК]`/`[МЕМ]`
+- `media_is_real_person`: still computed by the ingest stage's vision calls (and the `[ЧЕЛОВЕК]`/`[МЕМ]`
   tag still costs prompt tokens), but nothing reads it since the meme gate was removed.

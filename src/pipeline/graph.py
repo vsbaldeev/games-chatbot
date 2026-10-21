@@ -39,7 +39,7 @@ from src.pipeline.filter.link_check import check_link
 from src.pipeline.filter.media_check import check_media
 from src.pipeline.filter.overheard import OverheardNode
 from src.pipeline.guard_node import GuardNode
-from src.pipeline.ingester import MessageIngester
+from src.pipeline.ingest.node import MessageIngester
 from src.pipeline.language_correction_node import LanguageCorrectionNode
 from src.pipeline.memory_writer import MemoryWriter, MIN_PASSIVE_LENGTH
 from src.pipeline.response_node import ResponseNode

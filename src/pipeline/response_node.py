@@ -348,7 +348,7 @@ def build_trigger_line(
         response_trigger: Routing trigger; ``"youtube_short"`` and
             ``"social_link"`` select retell framing.
         voice_low_confidence: True when the voice transcript's mean Whisper
-            confidence was low (see :func:`src.pipeline.ingester.transcribe_bytes`)
+            confidence was low (see :func:`src.pipeline.ingest.transcription.transcribe_bytes`)
             — adds a note telling the model the transcription may be
             unreliable instead of trusting it as literal content.
 

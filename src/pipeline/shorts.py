@@ -6,7 +6,7 @@ decide whether a text message triggers an automatic Shorts summary; the
 ingester then calls :func:`download_short` and runs the existing Whisper +
 vision pipeline on the downloaded bytes.
 
-This module deliberately does not import from ``src.pipeline.ingester``
+This module deliberately does not import from ``src.pipeline.ingest``
 (the ingester imports this module — keeps imports acyclic).
 
 Cost gates (both enforced by the router BEFORE any download, so a gated

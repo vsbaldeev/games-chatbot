@@ -9,7 +9,7 @@ ClassifyNode — filter-stage node that classifies a text message addressed to t
     a short reaction like «ахаха что?» is meaningless in a vacuum but a real
     question when it quotes the bot's joke. A replied-to photo or sticker
     row still in placeholder form (e.g. the bot's own posted meme) is
-    vision-enriched first via the shared ingester.enrich_media_row helper
+    vision-enriched first via the shared ingest.enrichment.enrich_media_row helper
     (cached to the store; sticker descriptions also cached per sticker
     identity), so «переведи» under a meme is classified against the image's
     actual content; when enrichment is impossible (no file_id, vision
@@ -53,7 +53,7 @@ from langchain_openai import ChatOpenAI
 
 from src import config, log
 from src.config.prompts import FILTER_SYSTEM
-from src.pipeline.ingester import enrich_media_row
+from src.pipeline.ingest.enrichment import enrich_media_row
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.pipeline.router import looks_like_request
 from src.pipeline.state import BotState, Verdict
@@ -295,7 +295,7 @@ def downgrade_not_addressed(state: BotState, text: str, decision: Verdict) -> Ve
 async def enrich_replied_media(replied_to: dict | None, state: BotState) -> dict | None:
     """Vision-enrich an unenriched replied-to photo or sticker for the classifier.
 
-    Delegates to ``ingester.enrich_media_row``, which no-ops for other
+    Delegates to ``ingest.enrichment.enrich_media_row``, which no-ops for other
     media types, already-enriched rows, fallback rows without a file_id,
     and vision failures — and caches the result to the store, so the
     context builder reuses it instead of calling vision again.
