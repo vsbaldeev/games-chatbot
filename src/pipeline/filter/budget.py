@@ -1,5 +1,5 @@
 """
-BudgetNode — filter-stage node that charges the sender's attention budget.
+charge_budget — filter-stage node that charges the sender's attention budget.
 
 Every verdict charges the sender's persistent attention budget (see
 ``engagement_gate``), and the post-charge wind-down tier decides the shape of
@@ -122,62 +122,60 @@ def build_reply_flags(state: BotState, classification: str, tier: int) -> dict:
     return update
 
 
-class BudgetNode:
-    """Charge the attention budget and map (verdict, tier) onto reply, reaction or silence."""
+async def charge_budget(state: BotState) -> dict:
+    """Charge the sender's attention budget and apply the wind-down tier.
 
-    async def __call__(self, state: BotState) -> dict:
-        """Charge the sender's attention budget and apply the wind-down tier.
+    Every verdict spends budget (hostility and banter weigh more than a
+    meaningful turn), and the post-charge tier decides the shape of the
+    reaction.
 
-        Every verdict spends budget (hostility and banter weigh more than a
-        meaningful turn), and the post-charge tier decides the shape of the
-        reaction.
+    Args:
+        state: Current pipeline state; ``filter_verdict`` is a key of
+            ``engagement_gate.SIGNAL_WEIGHTS``.
 
-        Args:
-            state: Current pipeline state; ``filter_verdict`` is a key of
-                ``engagement_gate.SIGNAL_WEIGHTS``.
+    Returns:
+        State update dict.
+    """
+    msg = state["incoming"]
+    classification = state["filter_verdict"]
+    tier = await engagement_gate.register_signal(
+        chat_id=msg["chat_id"], user_id=msg["user_id"], classification=classification,
+    )
+    update = apply_tier(state, classification, tier)
+    return {"filter_verdict": classification, "engagement_tier": tier, **update}
 
-        Returns:
-            State update dict.
-        """
-        msg = state["incoming"]
-        classification = state["filter_verdict"]
-        tier = await engagement_gate.register_signal(
-            chat_id=msg["chat_id"], user_id=msg["user_id"], classification=classification,
+
+def apply_tier(state: BotState, classification: Verdict, tier: int) -> dict:
+    """Map (classification, tier) onto a reply, an emoji reaction or silence.
+
+    Args:
+        state: Current pipeline state.
+        classification: Filter verdict.
+        tier: Wind-down tier returned by the engagement gate.
+
+    Returns:
+        State update dict.
+    """
+    message_id = state["incoming"]["message_id"]
+    if tier == engagement_gate.SILENCE_TIER:
+        logger.debug(
+            "Filter[budget]: %s from wound-down user, message %s — silence",
+            classification, message_id,
         )
-        update = self.__apply_tier(state, classification, tier)
-        return {"filter_verdict": classification, "engagement_tier": tier, **update}
-
-    def __apply_tier(self, state: BotState, classification: str, tier: int) -> dict:
-        """Map (classification, tier) onto a reply, an emoji reaction or silence.
-
-        Args:
-            state: Current pipeline state.
-            classification: Filter verdict.
-            tier: Wind-down tier returned by the engagement gate.
-
-        Returns:
-            State update dict.
-        """
-        message_id = state["incoming"]["message_id"]
-        if tier == engagement_gate.SILENCE_TIER:
-            logger.debug(
-                "Filter[budget]: %s from wound-down user, message %s — silence",
-                classification, message_id,
-            )
-            return {"should_respond": False, "drop_reason": "wound_down"}
-        if classification == Verdict.MEANINGLESS:
-            pool = DISMISSIVE_REACTIONS if tier == engagement_gate.EMOJI_TIER else REACTION_POOL
-            logger.debug("Filter[budget]: Dropping meaningless message %s", message_id)
-            asyncio.create_task(send_reaction(state, pool))
-            return {"should_respond": False, "drop_reason": "meaningless"}
-        replies_with_text = tier == engagement_gate.FULL_TIER or (
-            tier == engagement_gate.BRUSH_OFF_TIER and classification != Verdict.BANTER
+        return {"should_respond": False, "drop_reason": "wound_down"}
+    if classification == Verdict.MEANINGLESS:
+        pool = DISMISSIVE_REACTIONS if tier == engagement_gate.EMOJI_TIER else REACTION_POOL
+        logger.debug("Filter[budget]: Dropping meaningless message %s", message_id)
+        asyncio.create_task(send_reaction(state, pool))
+        return {"should_respond": False, "drop_reason": "meaningless"}
+    replies_with_text = tier == engagement_gate.FULL_TIER or (
+        tier == engagement_gate.BRUSH_OFF_TIER and classification != Verdict.BANTER
+    )
+    if not replies_with_text:
+        logger.debug(
+            "Filter[budget]: %s at tier %s, message %s — emoji reaction only",
+            classification, tier, message_id,
         )
-        if not replies_with_text:
-            logger.debug(
-                "Filter[budget]: %s at tier %s, message %s — emoji reaction only",
-                classification, tier, message_id,
-            )
-            asyncio.create_task(send_reaction(state, DISMISSIVE_REACTIONS))
-            return {"should_respond": False, "drop_reason": "wind_down_reaction"}
-        return build_reply_flags(state, classification, tier)
+        asyncio.create_task(send_reaction(state, DISMISSIVE_REACTIONS))
+        return {"should_respond": False, "drop_reason": "wind_down_reaction"}
+    return build_reply_flags(state, classification, tier)

@@ -1,9 +1,9 @@
-"""MediaCheckNode tests: transcribed media passes, empty media gets a canned reply."""
+"""check_media tests: transcribed media passes, empty media gets a canned reply."""
 
 from src.pipeline.filter.media_check import (
     TRANSCRIPTION_FAILED_REPLIES,
     VISION_FAILED_REPLIES,
-    MediaCheckNode,
+    check_media,
 )
 from src.pipeline.state import ContentKind
 from tests.builders import make_incoming, make_state
@@ -18,7 +18,7 @@ class TestMediaCheck:
             should_respond=True,
             response_trigger="explicit",
         )
-        result = await MediaCheckNode()(state)
+        result = await check_media(state)
         assert result["should_respond"] is False
         assert result["response"] in TRANSCRIPTION_FAILED_REPLIES
         assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
@@ -29,7 +29,7 @@ class TestMediaCheck:
             should_respond=True,
             response_trigger="explicit",
         )
-        result = await MediaCheckNode()(state)
+        result = await check_media(state)
         assert result["response"] in VISION_FAILED_REPLIES
         assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
 
@@ -39,7 +39,7 @@ class TestMediaCheck:
             should_respond=True,
             response_trigger="explicit",
         )
-        result = await MediaCheckNode()(state)
+        result = await check_media(state)
         assert result["content_kind"] == ContentKind.MEDIA_FAILURE_NOTICE
 
     async def test_transcribed_media_is_classified_meaningful(self):
@@ -48,5 +48,5 @@ class TestMediaCheck:
             should_respond=True,
             response_trigger="explicit",
         )
-        result = await MediaCheckNode()(state)
+        result = await check_media(state)
         assert result == {"filter_verdict": "MEANINGFUL"}

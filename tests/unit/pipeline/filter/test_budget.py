@@ -1,4 +1,4 @@
-"""BudgetNode tests: attention-budget tiers, reply flags, emoji reactions."""
+"""charge_budget tests: attention-budget tiers, reply flags, emoji reactions."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -9,7 +9,7 @@ from src.config.prompts import GROUP_PROFILE_COOLDOWN_REPLIES
 from src.pipeline import engagement_gate
 from src.pipeline.filter.budget import (
     REACTION_POOL,
-    BudgetNode,
+    charge_budget,
     build_reply_flags,
     send_reaction,
 )
@@ -137,8 +137,8 @@ class TestSendReaction:
         await send_reaction(state, REACTION_POOL)
 
 
-class TestBudgetNode:
-    async def test_budget_reads_verdict_from_state(self):
+class TestChargeBudget:
+    async def test_reads_verdict_from_state(self):
         state = make_state(
             make_incoming(), should_respond=True, filter_verdict="BANTER"
         )
@@ -146,7 +146,7 @@ class TestBudgetNode:
             "src.pipeline.filter.budget.engagement_gate.register_signal",
             new=AsyncMock(return_value=engagement_gate.FULL_TIER),
         ):
-            result = await BudgetNode()(state)
+            result = await charge_budget(state)
         assert result["filter_verdict"] == "BANTER"
         assert result["wind_down"] is True
 

@@ -33,7 +33,10 @@ from telegram.ext import ContextTypes
 from src import config, log
 from src.llm import needs_russian_correction
 from src.pipeline.context_builder import ContextBuilder
-from src.pipeline.filter import BudgetNode, ClassifyNode, LinkCheckNode, MediaCheckNode
+from src.pipeline.filter.budget import charge_budget
+from src.pipeline.filter.classify import ClassifyNode
+from src.pipeline.filter.link_check import check_link
+from src.pipeline.filter.media_check import check_media
 from src.pipeline.guard_node import GuardNode
 from src.pipeline.ingester import MessageIngester
 from src.pipeline.language_correction_node import LanguageCorrectionNode
@@ -107,10 +110,10 @@ def add_filter_stage(
         classify_node: Classifier to use; built from configuration when None
             (tests inject one with mock LLMs).
     """
-    graph.add_node("link_check", LinkCheckNode())
-    graph.add_node("media_check", MediaCheckNode())
+    graph.add_node("link_check", check_link)
+    graph.add_node("media_check", check_media)
     graph.add_node("classify", classify_node if classify_node is not None else ClassifyNode())
-    graph.add_node("budget", BudgetNode())
+    graph.add_node("budget", charge_budget)
 
     graph.add_conditional_edges(
         source,

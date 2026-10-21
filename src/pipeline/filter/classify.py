@@ -48,7 +48,7 @@ Classification depends on how the message entered the pipeline:
     addressed and reacting would be noise.
 
 The node only decides the verdict (``filter_verdict``) or ends the run; the
-attention-budget charge and the reaction happen in ``budget.BudgetNode``.
+attention-budget charge and the reaction happen in ``budget.charge_budget``.
 """
 
 import asyncio
