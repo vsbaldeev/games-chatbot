@@ -230,7 +230,8 @@ Additional rules:
   turn before a later node failed, the failure notice edits that message in
   place (`edit_and_store`, bypassing the cooldown's reaction fallback) instead
   of sending a second, separate message — `run_pipeline` streams the graph
-  (`get_pipeline(context).astream(..., stream_mode="values")`) rather than using a plain
+  (`get_pipeline(context).astream(..., stream_mode="values", subgraphs=True)`, each state merged
+  over the last because the stages run as subgraphs) rather than using a plain
   `.ainvoke()` specifically so `final_state` still holds
   `search_notification_msg` when a later node raises. A worker-side failure
   that happens after the notification already fired but before the node

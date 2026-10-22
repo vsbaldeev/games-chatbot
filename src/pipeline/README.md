@@ -1,8 +1,26 @@
 # Pipeline
 
-A LangGraph `StateGraph` that every group-chat message passes through. Each node reads
-`BotState` and returns a partial update dict; the edges are plain Python routing functions
-in `graph.py`. The graph decides **whether** the bot answers and, if so, builds the answer.
+A LangGraph `StateGraph` that every group-chat message passes through. Each node reads its
+state and returns a partial update dict; the edges are plain Python routing functions. The graph
+decides **whether** the bot answers and, if so, builds the answer.
+
+It is a small parent graph (`graph.py`: `router → ingest → respond → memory_writer`) running two
+stage subgraphs, each with its own state schema:
+
+| Stage | Package | Nodes | State schema |
+|---|---|---|---|
+| `ingest` | `ingest/` (`graph.py`) | ingester, link_check, media_check, classify, overheard, budget | `IngestState` |
+| `respond` | `respond/` (`graph.py`) | guard, context_builder, worker, skip_worker, response, no_text_reply, language_correction | `RespondState` |
+
+```
+src/pipeline/
+  graph.py  state.py  router.py  memory_writer.py  canonical.py
+  ingest/   graph.py  engagement_gate.py
+            media/ (ingester modules)  filter/ (filter nodes)  links/ (shorts, social_links, comment_summary)
+  respond/  graph.py  guard_node.py  context_builder.py  worker_node.py
+            agents/ (worker + response LLM agents)
+            reply/ (response_node, response_prompt, reply_text, language_correction_node)
+```
 
 The diagrams are [Mermaid](https://mermaid.js.org/) and render on GitHub and in most IDEs.
 
@@ -15,19 +33,23 @@ flowchart TD
     start(["Telegram message"]) --> router
 
     router["<b>router</b><br/>store message · pick trigger"]
-    ingester["<b>ingester</b><br/>media / link → text"]
-    link["<b>link_check</b><br/>Shorts / social link"]
-    media["<b>media_check</b><br/>transcript present?"]
-    classify["<b>classify</b><br/>LLM verdict"]
-    overheard["<b>overheard</b><br/>bot-word mention"]
-    budget["<b>budget</b><br/>engagement gate"]
-    guard["<b>guard</b><br/>prompt-injection check"]
-    ctx["<b>context_builder</b><br/>history · facts · roles"]
-    worker["<b>worker</b> (agent)<br/>tool calls → facts"]
-    skipw["<b>skip_worker</b><br/>no facts needed"]
-    notext["<b>no_text_reply</b><br/>meme / group profile"]
-    response["<b>response</b><br/>persona LLM → reply"]
-    lang["<b>language_correction</b><br/>fix foreign script"]
+    subgraph ingest_stage["ingest subgraph · IngestState"]
+        ingester["<b>ingester</b><br/>media / link → text"]
+        link["<b>link_check</b><br/>Shorts / social link"]
+        media["<b>media_check</b><br/>transcript present?"]
+        classify["<b>classify</b><br/>LLM verdict"]
+        overheard["<b>overheard</b><br/>bot-word mention"]
+        budget["<b>budget</b><br/>engagement gate"]
+    end
+    subgraph respond_stage["respond subgraph · RespondState"]
+        guard["<b>guard</b><br/>prompt-injection check"]
+        ctx["<b>context_builder</b><br/>history · facts · roles"]
+        worker["<b>worker</b> (agent)<br/>tool calls → facts"]
+        skipw["<b>skip_worker</b><br/>no facts needed"]
+        notext["<b>no_text_reply</b><br/>meme / group profile"]
+        response["<b>response</b><br/>persona LLM → reply"]
+        lang["<b>language_correction</b><br/>fix foreign script"]
+    end
     memory["<b>memory_writer</b><br/>extract facts (background)"]
     stop(["END"])
 
@@ -65,6 +87,13 @@ flowchart TD
     memory --> stop
 ```
 
+The `ingest` subgraph runs from `ingester` to `budget`; the `respond` subgraph runs from `guard`
+to `language_correction`. In the parent graph `ingest` is followed by `respond` when
+`should_respond` is True (otherwise the run ends), and `respond` by `memory_writer` unless the
+guard blocked the message. The router and `memory_writer` stay in the parent: the router's
+"unaddressed long text → memory_writer" branch would be indistinguishable from a filter drop
+inside a subgraph.
+
 Things the arrows do not show:
 
 - **`END` is not always silence.** A node can end the run *and* leave a canned `response`
@@ -101,7 +130,7 @@ flowchart LR
 
 `PipelineManager` (`src/app/pipeline.py`) builds the two LLM agents and the compiled graph once
 at startup and stores it in `app.bot_data`; handlers reach it through
-`get_pipeline(context)` (`graph.py`). The agents live in `agents/` (`WorkerAgent`,
+`get_pipeline(context)` (`graph.py`). The agents live in `respond/agents/` (`WorkerAgent`,
 `ResponseAgent`), build their LangChain executor on construction, and sit on top of the
 shared LLM-call code in `src/llm`, never the reverse. The response agent is shared by the
 `response` and `language_correction` nodes.
@@ -223,9 +252,9 @@ stay `[sticker]`.
 
 ## 5. Filter stage and engagement gate
 
-The filter stage is four graph nodes in `src/pipeline/ingest/filter/`, added to the graph by
-`add_filter_stage` in `graph.py`. It runs only when `should_respond` is True. The first branch is
-`route_after_ingester`, an edge, not code inside a node:
+The filter stage is four graph nodes in `src/pipeline/ingest/filter/`, added to the ingest subgraph by
+`add_filter_stage` in `ingest/graph.py`. It runs only when `should_respond` is True. The first branch is
+`route_after_ingester` (`ingest/graph.py`), an edge, not code inside a node:
 
 | Node | File | Job |
 |---|---|---|
@@ -496,6 +525,15 @@ flowchart TD
 ## 12. BotState
 
 Fields grouped by the node that sets them (`state.py`).
+
+`BotState` is composed from per-stage schemas: `MessageState` (keys every stage reads: `incoming`,
+`should_respond`, `response_trigger`, `context_types`, `response`, `content_kind`, `drop_reason`),
+`FilterOutcome` (the verdict flags the respond stage reads), `IngestState`, `RespondState`, plus the
+keys only the router and the events layer touch (`social_link_cap_remaining`,
+`link_message_is_bare`). LangGraph shows a subgraph only the keys of its schema and **silently drops
+any other key a node returns**, so a key a stage touches must be declared on its schema;
+`tests/unit/pipeline/test_state_scoping.py` fails when a stage's source names a state key its schema
+lacks.
 
 | Set by | Fields |
 |---|---|
