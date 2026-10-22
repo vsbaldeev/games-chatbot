@@ -6,23 +6,18 @@ where a message goes after the router node runs. No graph compilation or
 LLM calls happen here.
 """
 
-from langgraph.graph import END
+from langgraph.graph import END, START, StateGraph
 import pytest
 
-from src.pipeline.graph import (
-    route_after_context,
-    route_after_ingester,
-    route_after_router,
-    route_by_guard,
-    route_if_responding,
-)
+from src.pipeline.graph import route_after_respond, route_after_router
+from src.pipeline.state import BotState, RespondState
 from tests.builders import make_incoming, make_state
 
 
 class TestRouteAfterRouter:
     def test_routes_to_ingester_when_responding(self):
         state = make_state(make_incoming(raw_text="hello there friend"), should_respond=True)
-        assert route_after_router(state) == "ingester"
+        assert route_after_router(state) == "ingest"
 
     def test_routes_to_memory_writer_when_not_responding_and_long(self):
         state = make_state(
@@ -36,78 +31,45 @@ class TestRouteAfterRouter:
 
     def test_routes_to_ingester_for_media(self):
         state = make_state(make_incoming(media_type="photo", raw_text=None), should_respond=False)
-        assert route_after_router(state) == "ingester"
+        assert route_after_router(state) == "ingest"
 
 
-class TestRouteAfterIngester:
-    @pytest.mark.parametrize(
-        "should_respond, trigger, media_type, expected",
-        [
-            (False, "explicit", "voice", END),
-            (False, "youtube_short", "text", END),
-            (True, "youtube_short", "text", "link_check"),
-            (True, "social_link", "text", "link_check"),
-            (True, "explicit", "voice", "media_check"),
-            (True, "explicit", "text", "classify"),
-            (True, "insult_check", "text", "overheard"),
-        ],
-    )
-    def test_routes_by_trigger_and_media_type(self, should_respond, trigger, media_type, expected):
-        state = make_state(
-            make_incoming(media_type=media_type),
-            should_respond=should_respond,
-            response_trigger=trigger,
-        )
-        assert route_after_ingester(state) == expected
 
 
-class TestRouteIfResponding:
-    def test_continues_to_next_node_when_responding(self):
+class TestRouteAfterRespond:
+    def test_ends_a_blocked_run_without_storing_memories(self):
+        state = make_state(make_incoming(), should_respond=True, blocked=True)
+        assert route_after_respond(state) == END
+
+    def test_hands_a_delivered_reply_to_the_memory_writer(self):
         state = make_state(make_incoming(), should_respond=True)
-        assert route_if_responding("guard")(state) == "guard"
-
-    def test_ends_when_not_responding(self):
-        state = make_state(make_incoming(), should_respond=False)
-        assert route_if_responding("guard")(state) == END
+        assert route_after_respond(state) == "memory_writer"
 
 
-class TestRouteAfterContext:
-    """Replies that need only personality, or whose source material is already in the
-    message, bypass the worker (and its «🔍 Ищу…» notification)."""
+class TestStreamedSubgraphStates:
+    """run_pipeline streams with ``subgraphs=True`` so a failure inside the respond
+    stage still leaves the worker's search notification in the merged state."""
 
-    @pytest.mark.parametrize(
-        "overrides",
-        [
-            {"is_bot_insult": True},
-            {"wind_down": True},
-            {"response_trigger": "youtube_short"},
-            {"response_trigger": "social_link"},
-        ],
-        ids=["bot-insult", "wind-down", "shorts", "social-link"],
-    )
-    def test_routes_directive_and_link_replies_past_the_worker(self, overrides):
-        state = make_state(make_incoming(), should_respond=True, **overrides)
-        assert route_after_context(state) == "skip_worker"
+    async def test_inner_states_survive_a_failure_in_a_later_subgraph_node(self):
+        async def worker(state):
+            return {"search_notification_msg": "notice"}
 
-    def test_routes_an_ordinary_question_to_the_worker(self):
-        state = make_state(make_incoming(), should_respond=True, response_trigger="explicit")
-        assert route_after_context(state) == "worker"
+        async def response(state):
+            raise RuntimeError("response model exhausted")
 
+        respond = StateGraph(RespondState)
+        respond.add_node("worker", worker)
+        respond.add_node("response", response)
+        respond.add_edge(START, "worker")
+        respond.add_edge("worker", "response")
+        parent = StateGraph(BotState)
+        parent.add_node("respond", respond.compile())
+        parent.add_edge(START, "respond")
 
-class TestRouteByGuard:
-    """A blocked message ends the run; a meme or group-profile request has no text reply
-    to build, so it skips the context, worker and response nodes."""
-
-    @pytest.mark.parametrize(
-        "overrides, expected",
-        [
-            ({"blocked": True}, END),
-            ({"meme_request": True}, "no_text_reply"),
-            ({"group_profile_request": True}, "no_text_reply"),
-            ({}, "context_builder"),
-        ],
-        ids=["blocked", "meme", "group-profile", "ordinary"],
-    )
-    def test_routes_by_block_and_request_flags(self, overrides, expected):
-        state = make_state(make_incoming(), should_respond=True, **overrides)
-        assert route_by_guard(state) == expected
+        merged: dict = dict(make_state(make_incoming(), should_respond=True))
+        with pytest.raises(RuntimeError):
+            async for _namespace, values in parent.compile().astream(
+                merged, stream_mode="values", subgraphs=True
+            ):
+                merged = {**merged, **values}
+        assert merged["search_notification_msg"] == "notice"

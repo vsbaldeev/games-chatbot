@@ -18,10 +18,16 @@ from src.pipeline.state import BotState, IngestState, RespondState
 PIPELINE_ROOT = Path(state_module.__file__).parent
 
 STAGE_SCHEMAS = {
-    "ingest": (IngestState, ["ingest/media", "ingest/filter"]),
+    "ingest": (IngestState, ["ingest/graph.py", "ingest/media", "ingest/filter"]),
     "respond": (
         RespondState,
-        ["respond/guard_node.py", "respond/context_builder.py", "respond/worker_node.py", "respond/reply"],
+        [
+            "respond/graph.py",
+            "respond/guard_node.py",
+            "respond/context_builder.py",
+            "respond/worker_node.py",
+            "respond/reply",
+        ],
     ),
 }
 

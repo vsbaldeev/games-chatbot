@@ -632,9 +632,14 @@ async def run_pipeline(
         # holding whatever the worker completed — notably
         # search_notification_msg — for the except block below. A plain
         # ainvoke() raising mid-graph returns nothing at all, stranding the
-        # 🔍 Ищу… message with no way to resolve it.
-        async for state_update in get_pipeline(context).astream(initial_state, stream_mode="values"):
-            final_state = state_update
+        # 🔍 Ищу… message with no way to resolve it. The stages run as
+        # subgraphs, so a failure inside the respond stage never reaches the
+        # parent's state; subgraphs=True streams the inner states too, and each
+        # one is merged over the last (a stage state only holds its own keys).
+        async for _namespace, state_update in get_pipeline(context).astream(
+            initial_state, stream_mode="values", subgraphs=True
+        ):
+            final_state = {**final_state, **state_update}
         response = final_state.get("response") or ""
         if response.strip():
             await deliver_and_record(final_state, msg, context.bot.id, response)

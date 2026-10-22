@@ -23,9 +23,9 @@ from src import config
 from src.pipeline.ingest import engagement_gate
 from src.pipeline.ingest.filter.classify import ClassifyNode
 from src.pipeline.ingest.filter.overheard import OverheardNode
-from src.pipeline.graph import add_filter_stage
+from src.pipeline.ingest.graph import add_filter_stage
 from src.pipeline.router import MessageRouter
-from src.pipeline.state import BotState, ContentKind
+from src.pipeline.state import ContentKind, IngestState
 from tests.builders import (
     make_classify_node,
     make_incoming,
@@ -39,7 +39,7 @@ async def run_filter_stage(
     state: dict, classify_node: ClassifyNode, overheard_node: OverheardNode | None = None
 ) -> dict:
     """Run the filter stage on ``state`` and return the merged node updates."""
-    graph = StateGraph(BotState)
+    graph = StateGraph(IngestState)
     add_filter_stage(
         graph, source=START, on_pass=END, classify_node=classify_node, overheard_node=overheard_node,
     )

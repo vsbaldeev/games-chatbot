@@ -513,8 +513,9 @@ class TestRunPipelineFailureWiring:
     async def test_failure_notice_gets_the_worker_status_the_pipeline_reached(self):
         from src.events import messages
 
-        async def failing_stream(initial_state, stream_mode):
-            yield {**initial_state, "worker_status": WorkerStatus.CONTEXT_OVERFLOW}
+        async def failing_stream(initial_state, stream_mode, subgraphs):
+            # The worker finishes inside the respond subgraph; the parent never sees its state.
+            yield ("respond:1",), {**initial_state, "worker_status": WorkerStatus.CONTEXT_OVERFLOW}
             raise RateLimitError("response model exhausted")
 
         pipeline = MagicMock()
