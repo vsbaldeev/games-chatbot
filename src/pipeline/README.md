@@ -28,71 +28,68 @@ The diagrams are [Mermaid](https://mermaid.js.org/) and render on GitHub and in 
 
 ## 1. The whole graph at a glance
 
+Four blocks. `ingest` and `respond` are subgraphs; their insides are in sections 1a and 1b.
+
 ```mermaid
 flowchart TD
     start(["Telegram message"]) --> router
-
     router["<b>router</b><br/>store message · pick trigger"]
-    subgraph ingest_stage["ingest subgraph · IngestState"]
-        ingester["<b>ingester</b><br/>media / link → text"]
-        link["<b>link_check</b><br/>Shorts / social link"]
-        media["<b>media_check</b><br/>transcript present?"]
-        classify["<b>classify</b><br/>LLM verdict"]
-        overheard["<b>overheard</b><br/>bot-word mention"]
-        budget["<b>budget</b><br/>engagement gate"]
-    end
-    subgraph respond_stage["respond subgraph · RespondState"]
-        guard["<b>guard</b><br/>prompt-injection check"]
-        ctx["<b>context_builder</b><br/>history · facts · roles"]
-        worker["<b>worker</b> (agent)<br/>tool calls → facts"]
-        skipw["<b>skip_worker</b><br/>no facts needed"]
-        notext["<b>no_text_reply</b><br/>meme / group profile"]
-        response["<b>response</b><br/>persona LLM → reply"]
-        lang["<b>language_correction</b><br/>fix foreign script"]
-    end
+    ingest[["<b>ingest</b> subgraph<br/>media / link → text · filter · engagement gate"]]
+    respond[["<b>respond</b> subgraph<br/>guard · context · worker · response"]]
     memory["<b>memory_writer</b><br/>extract facts (background)"]
     stop(["END"])
 
-    router -->|"should_respond"| ingester
-    router -->|"non-text media, always"| ingester
+    router -->|"media (always) or should_respond"| ingest
     router -->|"text, unaddressed, not forwarded, ≥ 20 chars"| memory
     router -->|"any other text"| stop
-
-    ingester -->|"link trigger"| link
-    ingester -->|"media"| media
-    ingester -->|"text"| classify
-    ingester -->|"insult_check"| overheard
-    ingester -->|"not should_respond"| stop
-
-    link -->|"should_respond"| guard
-    media -->|"should_respond"| budget
-    classify -->|"should_respond"| budget
-    overheard -->|"should_respond"| budget
-    budget -->|"should_respond"| guard
-    link -->|"otherwise"| stop
-    media -->|"otherwise"| stop
-    classify -->|"otherwise"| stop
-    overheard -->|"otherwise"| stop
-    budget -->|"otherwise"| stop
-
-    guard -->|"not blocked"| ctx
-    guard -->|"meme or group-profile request"| notext --> memory
-    guard -->|"blocked"| stop
-
-    ctx -->|"needs facts"| worker --> response
-    ctx -->|"directive or link reply"| skipw --> response
-    response -->|"foreign script left"| lang
-    response -->|"clean"| memory
-    lang --> memory
+    ingest -->|"should_respond"| respond
+    ingest -->|"otherwise"| stop
+    respond -->|"blocked"| stop
+    respond -->|"otherwise"| memory
     memory --> stop
 ```
 
-The `ingest` subgraph runs from `ingester` to `budget`; the `respond` subgraph runs from `guard`
-to `language_correction`. In the parent graph `ingest` is followed by `respond` when
-`should_respond` is True (otherwise the run ends), and `respond` by `memory_writer` unless the
-guard blocked the message. The router and `memory_writer` stay in the parent: the router's
-"unaddressed long text → memory_writer" branch would be indistinguishable from a filter drop
-inside a subgraph.
+The two subgraphs keep separate state schemas (`IngestState`, `RespondState`). The router and
+`memory_writer` stay in the parent: the router's "unaddressed long text → memory_writer" branch
+would be indistinguishable from a filter drop inside a subgraph.
+
+### 1a. Inside `ingest` (`ingest/graph.py`)
+
+```mermaid
+flowchart TD
+    in(["from router"]) --> ingester["<b>ingester</b><br/>media / link → text"]
+    ingester -->|"link trigger"| link["<b>link_check</b><br/>Shorts / social link"]
+    ingester -->|"insult_check"| overheard["<b>overheard</b><br/>bot-word mention"]
+    ingester -->|"media"| media["<b>media_check</b><br/>transcript present?"]
+    ingester -->|"text"| classify["<b>classify</b><br/>LLM verdict"]
+    ingester -->|"not should_respond"| out
+    media --> budget["<b>budget</b><br/>engagement gate"]
+    classify --> budget
+    overheard --> budget
+    budget --> out(["to respond, or END"])
+    link --> out
+```
+
+Every filter node can also end the run (`should_respond = False`), which leaves the subgraph
+for END instead of `respond`.
+
+### 1b. Inside `respond` (`respond/graph.py`)
+
+```mermaid
+flowchart TD
+    in(["from ingest"]) --> guard["<b>guard</b><br/>prompt-injection check"]
+    guard -->|"blocked"| blocked(["END"])
+    guard -->|"meme or group-profile request"| notext["<b>no_text_reply</b><br/>meme / group profile"]
+    guard -->|"ok"| ctx["<b>context_builder</b><br/>history · facts · roles"]
+    notext --> out
+    ctx -->|"needs facts"| worker["<b>worker</b> (agent)<br/>tool calls → facts"]
+    ctx -->|"directive or link reply"| skipw["<b>skip_worker</b><br/>no facts needed"]
+    worker --> response["<b>response</b><br/>persona LLM → reply"]
+    skipw --> response
+    response -->|"foreign script left"| lang["<b>language_correction</b><br/>fix foreign script"]
+    response -->|"clean"| out(["to memory_writer"])
+    lang --> out
+```
 
 Things the arrows do not show:
 
