@@ -135,7 +135,7 @@ YouTube links and any download failure that falls back to a text-only send
 are not bound by the tighter caption limit.
 
 When the router (`src/pipeline/router.py`) computed a `social_link_cap_remaining`
-for the matched handler (Instagram only today — see `src.pipeline.social_links`),
+for the matched handler (Instagram only today — see `src.pipeline.ingest.links.social_links`),
 `build_cap_remaining_footer` renders it as a trailing "Осталось рилсов сегодня: N"
 line, reserved out of the compression budget the same way the credit line is —
 it is never compressed or truncated away. Unlike the credit line, it is shown
@@ -163,7 +163,7 @@ message is a broadcast), so replies to them can be treated as chat among
 members rather than necessarily as messages to the bot. Unlike the
 link-repost gate, this one is not decided in the router: a bare reply
 (no @mention) still routes as "explicit" but carries `broadcast_reply`, and
-`ClassifyNode` (`src/pipeline/filter/classify.py`) is the one that may
+`ClassifyNode` (`src/pipeline/ingest/filter/classify.py`) is the one that may
 silence it — an LLM `NOT_ADDRESSED` verdict, itself overridden back to a
 reply whenever the text looks like a genuine question or request (the same
 deterministic floor MEANINGLESS/BANTER get). An @mention skips this whole

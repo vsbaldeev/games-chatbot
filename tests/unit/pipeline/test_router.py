@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.pipeline.router import INSTAGRAM_REEL_DAILY_CAP_REPLIES, MessageRouter
-from src.pipeline.social_links.instagram_reel import INSTAGRAM_REEL_DAILY_CAP
+from src.pipeline.ingest.links.social_links.instagram_reel import INSTAGRAM_REEL_DAILY_CAP
 from src.pipeline.state import ContentKind
 from tests.builders import make_incoming, make_telegram_message
 

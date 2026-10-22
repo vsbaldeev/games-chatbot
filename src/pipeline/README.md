@@ -167,7 +167,7 @@ Details worth knowing:
 Turns the current message into text (`processed_text`). Runs for all non-text media and for
 every addressed message.
 
-The node lives in `src/pipeline/ingest/node.py`: one strategy function per media type
+The node lives in `src/pipeline/ingest/media/node.py`: one strategy function per media type
 (`INGEST_STRATEGIES`), each returning an `IngestResult`. The work they call is split by what it
 does:
 
@@ -223,7 +223,7 @@ stay `[sticker]`.
 
 ## 5. Filter stage and engagement gate
 
-The filter stage is four graph nodes in `src/pipeline/filter/`, added to the graph by
+The filter stage is four graph nodes in `src/pipeline/ingest/filter/`, added to the graph by
 `add_filter_stage` in `graph.py`. It runs only when `should_respond` is True. The first branch is
 `route_after_ingester`, an edge, not code inside a node:
 

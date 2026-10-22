@@ -22,7 +22,7 @@ are literal strings being matched, not instructions).
 from src.config.credentials import BOT_USERNAME
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Message classification (src/pipeline/filter/classify.py)
+# Message classification (src/pipeline/ingest/filter/classify.py)
 #
 # NOT_ADDRESSED is the addressee-detection verdict: the author replied to
 # the bot but is talking about it to the chat. The filter node honours it
@@ -180,7 +180,7 @@ OVERHEARD_SYSTEM = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Media ingestion — vision descriptions (src/pipeline/ingest/vision.py)
+# Media ingestion — vision descriptions (src/pipeline/ingest/media/vision.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Leading classification tag the vision LLM must emit before its description
@@ -215,7 +215,7 @@ VISION_PROMPT = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Fact gathering (src/pipeline/agents/worker.py)
+# Fact gathering (src/pipeline/respond/agents/worker.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 WORKER_PROMPT = """Ты ассистент для сбора данных. Вызывай инструменты для получения фактов по мере необходимости.
@@ -313,7 +313,7 @@ RESPONSE_LABEL_SYSTEM = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Response persona (src/pipeline/agents/response.py)
+# Response persona (src/pipeline/respond/agents/response.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 RESPONSE_PROMPT = f"""Ты — НейроЖора, для своих просто Жора: игровой ИИ-ассистент для группы друзей с PS5 и PC.
@@ -443,7 +443,7 @@ SOCIAL_LINK_RETELL_INSTRUCTION = (
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Language correction retry (src/llm/language.py,
-# src/pipeline/language_correction_node.py)
+# src/pipeline/respond/reply/language_correction_node.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 LANGUAGE_CORRECTION_PROMPT = (
@@ -613,7 +613,7 @@ CAPTION_COMPRESS_SYSTEM = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Comment summary (src/pipeline/comment_summary.py)
+# Comment summary (src/pipeline/ingest/links/comment_summary.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Formatted with the top comments under a Short/Reel/YouTube video (text +
@@ -632,7 +632,7 @@ COMMENT_SUMMARY_SYSTEM = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Grounded replies to link-repost messages (src/pipeline/response_node.py)
+# Grounded replies to link-repost messages (src/pipeline/respond/reply/response_node.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Formatted with the persisted ingestion material (transcript/frame
@@ -640,7 +640,7 @@ COMMENT_SUMMARY_SYSTEM = (
 # long-form YouTube link) when a member replies directly to the bot's
 # link-repost message. Injected only for that direct reply — see the
 # addressing gate in src.pipeline.router and the (unmodified) replied-to
-# resolution in src.pipeline.context_builder.
+# resolution in src.pipeline.respond.context_builder.
 LINK_REPLY_GROUNDING_INSTRUCTION = (
     "[Материал по видео, которое ты запостил]:\n{material}\n\n"
     "Это материал, на основе которого ты писал подпись к видео. Отвечай по "

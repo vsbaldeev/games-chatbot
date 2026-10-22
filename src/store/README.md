@@ -97,7 +97,7 @@ Retention: 60 days (cleanup_messages_job)
 -- 2026-08-10.
 
 -- One leaky-bucket attention score per (chat, user) for the conversation
--- wind-down engine (src/pipeline/engagement_gate.py). Decay (30-min
+-- wind-down engine (src/pipeline/ingest/engagement_gate.py). Decay (30-min
 -- half-life) is computed lazily in SQL on each access; writing is a single
 -- atomic INSERT … ON CONFLICT DO UPDATE … RETURNING, so concurrent messages
 -- from the same user serialize on the row lock. Persisted so a redeploy

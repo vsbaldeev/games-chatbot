@@ -15,7 +15,7 @@ links posted in the chat are watched for everyone: the bot downloads the clip
 (Shorts and Reels only — long-form YouTube never carries video), transcribes and
 looks at it (Shorts) or reads its title/caption and a short in-character
 summary of top comments (Reels and long-form YouTube — never quoted
-verbatim, src/pipeline/comment_summary.py), and replies with a single
+verbatim, src/pipeline/ingest/links/comment_summary.py), and replies with a single
 message — the video with a 1–2 sentence summary and comment-reaction recap
 as its caption, or, when there's no
 video, a plain text message with a link preview. If the sender's message was

@@ -1,5 +1,5 @@
 """Metadata-only yt-dlp fetch for long-form YouTube videos (relocated from
-src/pipeline/social_links/youtube_video.py).
+src/pipeline/ingest/links/social_links/youtube_video.py).
 
 Deliberately lighter than shorts.py: no video/audio download, no transcript
 — just yt-dlp's info-extraction (download=False) for the video's

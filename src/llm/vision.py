@@ -5,7 +5,7 @@ tier, and independent call sites (ingester frame/photo description, meme
 vetting) each built their own Groq-only
 client for it — so a Groq daily-quota exhaustion or outage degraded every
 one of them silently, with no cross-provider recovery. This mirrors
-src.pipeline.filter.classify.make_filter_llm's fallback for the text filter.
+src.pipeline.ingest.filter.classify.make_filter_llm's fallback for the text filter.
 """
 
 from groq import APIError

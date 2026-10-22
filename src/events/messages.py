@@ -23,7 +23,7 @@ from src.pipeline import canonical
 from src.pipeline.graph import get_pipeline
 from src.events.link_repost import AmbiguousDeliveryError, deliver_link_message, resolve_link_delivery
 from src.events.members import get_username
-from src.pipeline.ingest.transcription import transcribe_voice
+from src.pipeline.ingest.media.transcription import transcribe_voice
 from src.pipeline.memory_writer import MIN_PASSIVE_LENGTH, extract_and_save
 from src.config.prompts import GROUP_PROFILE_FAILED_REPLIES, MEME_FAILED_REPLIES, RESPONSE_PROMPT
 from src.events.sending import edit_and_store, send_and_store
@@ -70,7 +70,7 @@ def is_reply_to_game_message(update: Update) -> bool:
     return text.startswith(("⚔️", "🎩", "🔫", "💀"))
 
 
-from src.pipeline.reply_text import strip_markdown, strip_speaker_prefix, strip_writing_tics
+from src.pipeline.respond.reply.reply_text import strip_markdown, strip_speaker_prefix, strip_writing_tics
 from src.pipeline.state import BotState, ContentKind, IncomingMessage, WorkerStatus
 from src.store import thread_history
 

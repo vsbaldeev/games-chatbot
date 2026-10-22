@@ -1,5 +1,5 @@
 """Anonymous yt-dlp download logic for Instagram Reels (relocated from
-src/pipeline/social_links/instagram_reel.py).
+src/pipeline/ingest/links/social_links/instagram_reel.py).
 
 Best-effort, no authentication: Instagram aggressively blocks anonymous
 scraping, so any failure (blocked, private, deleted, timeout) is raised to

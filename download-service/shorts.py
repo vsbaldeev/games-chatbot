@@ -1,7 +1,7 @@
-"""yt-dlp download logic for YouTube Shorts (relocated from src/pipeline/shorts.py).
+"""yt-dlp download logic for YouTube Shorts (relocated from src/pipeline/ingest/links/shorts.py).
 
 Dedup gates, the daily cap, and Whisper/vision processing stayed in the bot
-(src/pipeline/shorts.py) — none of that is yt-dlp-specific. This module owns
+(src/pipeline/ingest/links/shorts.py) — none of that is yt-dlp-specific. This module owns
 only the download mechanics.
 
 YouTube bot-detection («Sign in to confirm you're not a bot») on server IPs

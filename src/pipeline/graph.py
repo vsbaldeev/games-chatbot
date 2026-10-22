@@ -32,20 +32,20 @@ from telegram.ext import ContextTypes
 
 from src import config, log
 from src.llm import needs_russian_correction
-from src.pipeline.context_builder import ContextBuilder
-from src.pipeline.filter.budget import charge_budget
-from src.pipeline.filter.classify import ClassifyNode
-from src.pipeline.filter.link_check import check_link
-from src.pipeline.filter.media_check import check_media
-from src.pipeline.filter.overheard import OverheardNode
-from src.pipeline.guard_node import GuardNode
-from src.pipeline.ingest.node import MessageIngester
-from src.pipeline.language_correction_node import LanguageCorrectionNode
+from src.pipeline.respond.context_builder import ContextBuilder
+from src.pipeline.ingest.filter.budget import charge_budget
+from src.pipeline.ingest.filter.classify import ClassifyNode
+from src.pipeline.ingest.filter.link_check import check_link
+from src.pipeline.ingest.filter.media_check import check_media
+from src.pipeline.ingest.filter.overheard import OverheardNode
+from src.pipeline.respond.guard_node import GuardNode
+from src.pipeline.ingest.media.node import MessageIngester
+from src.pipeline.respond.reply.language_correction_node import LanguageCorrectionNode
 from src.pipeline.memory_writer import MemoryWriter, MIN_PASSIVE_LENGTH
-from src.pipeline.response_node import ResponseNode, no_text_reply
+from src.pipeline.respond.reply.response_node import ResponseNode, no_text_reply
 from src.pipeline.router import MessageRouter
 from src.pipeline.state import BotState
-from src.pipeline.worker_node import WorkerNode, skip_worker, worker_is_skipped
+from src.pipeline.respond.worker_node import WorkerNode, skip_worker, worker_is_skipped
 
 logger = log.get_logger(__name__)
 

@@ -1,0 +1,66 @@
+"""LanguageCorrectionNode — re-invokes the response agent when foreign script is detected."""
+
+from langchain_core.messages import HumanMessage
+
+from src import log
+from src.llm import DailyLimitError, RateLimitError, normalize_homoglyphs
+from src.config.prompts import LANGUAGE_CORRECTION_PROMPT
+from src.pipeline.respond.reply.response_node import persist_thread_turn
+from src.pipeline.state import BotState
+
+logger = log.get_logger(__name__)
+
+
+class LanguageCorrectionNode:
+    """Re-invokes the response agent in Russian when foreign script slips through.
+
+    Receives the original assembled message list from ``response_messages`` in
+    state and appends a correction instruction before re-invoking.
+    """
+
+    def __init__(self, response_agent) -> None:
+        """Initialize LanguageCorrectionNode.
+
+        Args:
+            response_agent: ``ResponseAgent`` instance used for the correction call.
+        """
+        self.__agent = response_agent
+
+    async def __call__(self, state: BotState) -> dict:
+        """Retry the response in Russian using the original message context.
+
+        Args:
+            state: Current pipeline state. ``response_messages`` must contain the
+                assembled LangChain messages from the preceding response node.
+
+        Returns:
+            Dict with ``response`` and ``response_trace`` (the trace from
+            ResponseNode, updated to the corrected text with
+            ``language_corrected=True``) when correction succeeds, or an
+            empty dict to keep the original response and trace if correction
+            itself fails.
+
+        Raises:
+            DailyLimitError: Propagated when the daily token quota is exhausted.
+            RateLimitError: Propagated when rate-limit retries are exhausted.
+        """
+        messages = state.get("response_messages") or []
+        correction_messages = messages + [HumanMessage(content=LANGUAGE_CORRECTION_PROMPT)]
+        try:
+            corrected = await self.__agent.invoke_response(correction_messages)
+            corrected = normalize_homoglyphs(corrected) if corrected else corrected
+        except (DailyLimitError, RateLimitError):
+            raise
+        except Exception as err:
+            logger.warning("Language correction failed: %s", err)
+            corrected = None
+        # Persist the reply the chat will actually see: the corrected text, or
+        # the original response when correction itself failed.
+        final_text = corrected or state.get("response") or ""
+        await persist_thread_turn(state, final_text)
+        if not corrected:
+            return {}
+        trace = dict(state.get("response_trace") or {})
+        trace["response"] = corrected
+        trace["language_corrected"] = True
+        return {"response": corrected, "response_trace": trace}

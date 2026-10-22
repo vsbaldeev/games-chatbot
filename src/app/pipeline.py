@@ -2,7 +2,7 @@
 
 from telegram.ext import Application
 
-from src.pipeline.agents import ResponseAgent, WorkerAgent
+from src.pipeline.respond.agents import ResponseAgent, WorkerAgent
 from src.pipeline.graph import PIPELINE_BOT_DATA_KEY, build_pipeline
 
 

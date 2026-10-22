@@ -112,7 +112,7 @@ packages, each with its own README:
 src/commands/         /help, /duel and other slash-command handlers
 src/events/           handle_text_message and friends — the per-media-type update handlers
 src/jobs/             the scheduled job bodies (weekly_roles_job, cleanup_messages_job, ...)
-src/pipeline/agents/  worker/response LLM agents, built by PipelineManager.attach
+src/pipeline/respond/agents/  worker/response LLM agents, built by PipelineManager.attach
 src/llm/              shared LLM-call toolkit: backoff, middleware, errors, language fixes, vision factory
 src/store/            Postgres access — db.init() opens the pool __on_startup depends on
 ```

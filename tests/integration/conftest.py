@@ -30,5 +30,5 @@ def worker_agent():
     Returns:
         WorkerAgent ready for invoke_worker calls.
     """
-    from src.pipeline.agents import WorkerAgent
+    from src.pipeline.respond.agents import WorkerAgent
     return WorkerAgent()

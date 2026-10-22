@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import groq
 import openai
 
-from src.pipeline.filter.classify import ClassifyNode
-from src.pipeline.filter.overheard import OverheardNode
+from src.pipeline.ingest.filter.classify import ClassifyNode
+from src.pipeline.ingest.filter.overheard import OverheardNode
 
 
 def make_telegram_message(

@@ -13,7 +13,7 @@ See `docs/superpowers/specs/2026-08-17-group-profiling-design.md` for the design
 a member asks in words, addressing the bot and naming the whole chat
     («@bot оцени всем счастье от 1 до 10»); the filter node classifies
     GROUP_PROFILE_REQUEST (trusted only when the text also matches
-    GROUP_PROFILE_MARKER_RE — src/pipeline/filter/classify.py — a deterministic
+    GROUP_PROFILE_MARKER_RE — src/pipeline/ingest/filter/classify.py — a deterministic
     floor under a one-word classifier already carrying six other labels),
     the response stays empty, and src/events/messages.py::deliver_group_profile
     generates and sends the result anchored to the request

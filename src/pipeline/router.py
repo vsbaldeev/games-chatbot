@@ -31,14 +31,14 @@ Respond when:
     This check runs before the forwarded-message guard (forwarding is the
     dominant way links arrive, and «tell me what this video is» does not
     put words in the sender's mouth), but is gated by a per-chat repost
-    dedup window and a daily summary cap (see ``src.pipeline.shorts``).
+    dedup window and a daily summary cap (see ``src.pipeline.ingest.links.shorts``).
   - A text message contains an Instagram Reel or long-form YouTube video
     link (checked after Shorts, which keeps top priority) —
     routed with response_trigger="social_link" so the pipeline fetches a
     lightweight metadata-only summary (title/caption/selftext + top
     comments, no transcript or vision). The first handler in priority
     order whose regex matches wins the whole message; same per-item repost
-    dedup window as Shorts (see ``src.pipeline.social_links``), but the
+    dedup window as Shorts (see ``src.pipeline.ingest.links.social_links``), but the
     daily cap is now per-handler — only Instagram has one (its anonymous
     fetch needs throttling against Instagram's anti-bot gate), and hitting
     it gets a canned reply instead of silence (``__daily_cap_reply``).
@@ -50,7 +50,7 @@ from typing import Any
 
 from src import log
 from src.feedback.replies import track_reply
-from src.pipeline import shorts, social_links
+from src.pipeline.ingest.links import shorts, social_links
 from src.pipeline.state import BotState, ContentKind, IncomingMessage
 from src.store import unified_messages
 

@@ -1,6 +1,6 @@
 HTTP client for the self-hosted download service (`download-service/`), used
-by `src/pipeline/shorts.py`, `src/pipeline/social_links/instagram_reel.py`,
-and `src/pipeline/social_links/youtube_video.py`.
+by `src/pipeline/ingest/links/shorts.py`, `src/pipeline/ingest/links/social_links/instagram_reel.py`,
+and `src/pipeline/ingest/links/social_links/youtube_video.py`.
 
 ## Contract
 
