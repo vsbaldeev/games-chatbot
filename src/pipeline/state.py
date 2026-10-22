@@ -1,8 +1,11 @@
 """
 Shared state types for the LangGraph pipeline.
 
-BotState flows through every node:
-  Router → Ingester → ContextBuilder → Agent → MemoryWriter
+BotState flows through the parent graph (router → ingest → respond → memory_writer).
+Each stage subgraph sees only its own schema: IngestState for the ingester and filter
+nodes, RespondState for guard → context → worker → response. LangGraph hides undeclared
+keys from a stage and silently drops undeclared keys a node returns, so a key a stage
+touches must be declared on its schema (tests/unit/pipeline/test_state_scoping.py).
 """
 
 from enum import StrEnum
@@ -78,24 +81,32 @@ class AssembledContext(TypedDict):
     mentioned_tags: dict[str, dict]    # username → {"tag", "reason"} for members @mentioned in the question
 
 
-class BotState(TypedDict):
-    """Full mutable state passed between LangGraph nodes."""
+class MessageState(TypedDict):
+    """Keys every stage reads: the message itself, who it is for and the reply it may produce."""
 
     incoming: IncomingMessage
     should_respond: bool
     response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (unprompted text reply), "youtube_short" (Shorts link) or "social_link" (Instagram/YouTube link)
-    blocked: bool                  # True when Guard Node rejects the message
-    context: AssembledContext | None
-    response: str | None
     context_types: Any             # telegram.ext.ContextTypes instance for sending replies
-    thread_id: NotRequired[str]    # derived from reply-chain root; scopes LLM history
-    is_flat_thread: NotRequired[bool]  # True when the message is not a reply; flat mentions read recent chat context, not thread history
-    worker_output: NotRequired[str | None] # raw facts gathered by the worker
-    worker_tools_used: NotRequired[bool]   # True when the worker actually ran at least one tool (mechanical ToolMessage scan)
-    search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator
-    response_messages: NotRequired[list]  # assembled LangChain messages forwarded to LanguageCorrectionNode
+    response: str | None
+    content_kind: NotRequired[ContentKind]  # set only by nodes that put a canned text in `response` (guard, filter, router); LLM-written kinds are derived at delivery
+    drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line
+
+
+class FilterOutcome(TypedDict):
+    """What the ingest stage decided; the respond stage reads it to shape the reply."""
+
+    filter_verdict: NotRequired[Verdict]  # set by the filter stage; see Verdict
     is_bot_insult: NotRequired[bool]  # True when the filter classified the message as an insult aimed at the bot
     wind_down: NotRequired[bool]   # True when the engagement gate wants a short conversation-closing reply instead of a full one
+    meme_request: NotRequired[bool]    # True when the filter accepted a meme request at the full tier; the response is empty and the events layer sends the meme itself
+    group_profile_request: NotRequired[bool]  # True when the filter accepted a group-profile request at the full tier; the response is empty and the events layer generates+sends the profile itself
+    voice_low_confidence: NotRequired[bool]  # True when Whisper's mean segment confidence was low for a voice transcript; response_node softens its reaction accordingly
+
+
+class IngestState(MessageState, FilterOutcome):
+    """Everything the ingest stage (ingester + filter nodes) reads or writes."""
+
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
     youtube_short_video: NotRequired[bytes | None]  # downloaded video bytes, set by Ingester
@@ -103,16 +114,28 @@ class BotState(TypedDict):
     social_link_url: NotRequired[str | None]        # canonical URL, set by Router
     social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester
     social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester
+    broadcast_reply: NotRequired[bool]  # True when the message replies to one of the bot's group-wide announcements (is_broadcast row) without @mentioning it; only then may the filter return NOT_ADDRESSED
+    engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node
+    media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified
+
+
+class RespondState(MessageState, FilterOutcome):
+    """Everything the respond stage (guard → context → worker → response) reads or writes."""
+
+    blocked: bool                  # True when Guard Node rejects the message
+    context: AssembledContext | None
+    thread_id: NotRequired[str]    # derived from reply-chain root; scopes LLM history
+    is_flat_thread: NotRequired[bool]  # True when the message is not a reply; flat mentions read recent chat context, not thread history
+    worker_output: NotRequired[str | None] # raw facts gathered by the worker
+    worker_tools_used: NotRequired[bool]   # True when the worker actually ran at least one tool (mechanical ToolMessage scan)
+    search_notification_msg: NotRequired[Any]  # Telegram Message sent as search indicator
+    worker_status: NotRequired[WorkerStatus]  # set by WorkerNode on every run; absent when the worker never finished
+    response_messages: NotRequired[list]  # assembled LangChain messages forwarded to LanguageCorrectionNode
+    response_trace: NotRequired[dict | None]  # exact prompt/response of the response LLM call, set by ResponseNode/LanguageCorrectionNode; None when no response LLM call ran (meme/group-profile requests)
+
+
+class BotState(IngestState, RespondState):
+    """Full state of one pipeline run: both stage schemas plus keys only the router and the events layer touch."""
+
     social_link_cap_remaining: NotRequired[int | None]  # daily_cap - used for this chat, set by Router; None when the matched handler has no cap
     link_message_is_bare: NotRequired[bool]  # True when the triggering message was the link and nothing else; only then may the events layer delete it
-    broadcast_reply: NotRequired[bool]  # True when the message replies to one of the bot's group-wide announcements (is_broadcast row) without @mentioning it; only then may the filter return NOT_ADDRESSED
-    filter_verdict: NotRequired[Verdict]  # set by the filter stage; see Verdict
-    meme_request: NotRequired[bool]    # True when the filter accepted a meme request at the full tier; the response is empty and the events layer sends the meme itself
-    group_profile_request: NotRequired[bool]  # True when the filter accepted a group-profile request at the full tier; the response is empty and the events layer generates+sends the profile itself
-    engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node
-    drop_reason: NotRequired[str]      # why the pipeline ended without a reply, for the canonical log line
-    media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified
-    voice_low_confidence: NotRequired[bool]  # True when Whisper's mean segment confidence was low for a voice transcript; response_node softens its reaction accordingly
-    content_kind: NotRequired[ContentKind]  # set only by nodes that put a canned text in `response` (guard, filter, router); LLM-written kinds are derived at delivery
-    worker_status: NotRequired[WorkerStatus]  # set by WorkerNode on every run; absent when the worker never finished
-    response_trace: NotRequired[dict | None]  # exact prompt/response of the response LLM call, set by ResponseNode/LanguageCorrectionNode; None when no response LLM call ran (meme/group-profile requests)
