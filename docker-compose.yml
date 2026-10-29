@@ -63,6 +63,9 @@ services:
       # Container stdout is not a tty; force ANSI colors so `docker compose
       # logs` renders them in a terminal.
       LOG_COLOR: always
+      # onnxruntime tries to persist a telemetry device ID on every start and
+      # warns when the container's filesystem refuses.
+      ORT_DISABLE_TELEMETRY: "1"
       ASYNCPG_LOG_LEVEL: WARNING
       TELEGRAM_APP_LOG_LEVEL: WARNING
       TELEGRAM_UPDATER_LOG_LEVEL: WARNING
