@@ -236,8 +236,8 @@ avg_logprob < −0.7 is passed on with `voice_low_confidence=True`.
 > 120 s → audio only. Without frames the transcript is labelled as a possibly music/off-screen
 audio track so lyrics are not read as the sender's words.
 
-**Vision LLM.** All vision calls go through `src.llm.vision.make_vision_llm` (Groq primary with
-an OpenRouter fallback; Groq-only without `OPENROUTER_API_KEY`).
+**Vision LLM.** All vision calls go through `src.llm.vision.make_vision_llm` (OpenRouter primary with
+a Groq reserve; Groq-only without `OPENROUTER_API_KEY`).
 
 **Lazy enrichment** (`ingest.enrichment.enrich_media_row`). The filter (replied-to row) and
 `context_builder` (every photo/sticker in the reply chain) enrich placeholder rows on demand
@@ -572,7 +572,7 @@ lacks.
 |---|---|---|
 | guard | `GUARD_MODEL` | `meta-llama/llama-prompt-guard-2-86m` |
 | classify / overheard confirm | `FILTER_MODEL`, `INSULT_CONFIRM_MODEL` | `qwen/qwen3.8-27b` |
-| vision | `VISION_MODEL` | `qwen/qwen3.8-27b` (OpenRouter fallback via `make_vision_llm`) |
+| vision | `VISION_PRIMARY_MODEL` / `VISION_RESERVE_MODEL` | `qwen/qwen3.7-plus` (OpenRouter) → `qwen/qwen3.8-27b` (Groq reserve) via `make_vision_llm` |
 | comment summary | `TAG_MODEL` | `qwen/qwen3.8-27b` |
 | transcription | `WHISPER_MODEL` | `whisper-large-v3` |
 | worker | `WORKER_MODEL_FALLBACKS` | `gpt-oss-120b` → `qwen3.8-27b` → `gpt-oss-20b` |

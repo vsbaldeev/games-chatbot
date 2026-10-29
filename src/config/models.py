@@ -15,19 +15,25 @@ WHISPER_MODEL = "whisper-large-v3"
 # Trade-off: genuinely English voice notes transcribe degraded.
 WHISPER_LANGUAGE = "ru"
 
-# Vision: image and video-frame description.
-# qwen/qwen3.8-27b is the only non-deprecated vision-capable model on the free tier.
-# Reasoning model: callers must pass reasoning_effort="none" or the whole
-# max_tokens budget is burned inside a <think> block.
-VISION_MODEL = "qwen/qwen3.8-27b"
+# Vision: image and video-frame description (see src.llm.vision.make_vision_llm).
+#
+# Primary is OpenRouter's qwen3.7-plus (paid, so no daily quota to run out of).
+# It replaced qwen/qwen3-vl-32b-instruct, which OpenRouter deprecated on
+# 2026-10-09 (404 on every call). Reasoning model: make_vision_llm sends
+# OpenRouter's reasoning-off field, or the whole max_tokens budget is burned
+# thinking and the description comes back empty (measured: 200 reasoning
+# tokens, 0 content). Requires OPENROUTER_API_KEY. Same OPENROUTER_BASE_URL
+# as the text filter's fallback.
+VISION_PRIMARY_MODEL = "qwen/qwen3.7-plus"
 
-# Cross-provider fallback for the vision model, used when Groq's daily quota
-# for VISION_MODEL is exhausted or the API is unreachable (see
-# src.llm.vision.make_vision_llm). Closest size match on OpenRouter, and an
-# "instruct" (non-reasoning) variant, so no reasoning_effort workaround is
-# needed on this leg. Requires OPENROUTER_API_KEY; without it vision calls
-# stay Groq-only. Same OPENROUTER_BASE_URL as the text filter's fallback.
-VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
+# Reserve, used when OpenRouter fails or is unreachable, and the only vision
+# model when OPENROUTER_API_KEY is unset. The only non-deprecated
+# vision-capable model on Groq's free tier. Made the reserve after one probe
+# on a single red square returned "three red squares" (OpenRouter's answer
+# was right) — one sample, not a measured error rate. Reasoning model:
+# callers must pass reasoning_effort="none" or the whole max_tokens budget is
+# burned inside a <think> block.
+VISION_RESERVE_MODEL = "qwen/qwen3.8-27b"
 
 # Meaningless-message filter. Was llama-3.1-8b-instant for its 14.4K RPD, but
 # measured against 30 days of this chat's real addressed messages the 8B model
@@ -42,12 +48,12 @@ VISION_FALLBACK_MODEL = "qwen/qwen3-vl-32b-instruct"
 # points at GPT-OSS/Qwen, not another Llama size). qwen/qwen3.8-27b is the
 # replacement — the same reasoning-model family already proven in this
 # codebase under a tight token budget via reasoning_effort="none" (see
-# VISION_MODEL, MEME_JUDGE_MAX_TOKENS=50, and make_filter_llm below), which is
+# VISION_RESERVE_MODEL, MEME_JUDGE_MAX_TOKENS=50, and make_filter_llm below), which is
 # why it was picked over openai/gpt-oss-120b: gpt-oss has no proven
 # "no thinking" mode here, and FILTER_MAX_TOKENS=10 leaves no room to find out.
 # Its classification accuracy on this chat's real messages is UNVALIDATED —
 # the 8/8-vs-3/8 comparison above no longer reflects the model in use, and it
-# now shares a Groq daily quota bucket with VISION_MODEL,
+# now shares a Groq daily quota bucket with VISION_RESERVE_MODEL,
 # MEMORY_MODEL_FALLBACKS[0], and TAG_MODEL (see below), undoing the original
 # point of picking a different model family for this call site. Re-split if
 # quota exhaustion starts correlating across them.
@@ -98,7 +104,7 @@ MEMORY_MODEL_FALLBACKS: list[str] = [
 # Russian-localized output in that same comparison. Called with
 # reasoning_effort="none", which Groq accepts for this model (unlike
 # gpt-oss-120b, which 400s on "none" — only low/medium/high). Shares this
-# Groq quota bucket with VISION_MODEL, FILTER_MODEL and
+# Groq quota bucket with VISION_RESERVE_MODEL, FILTER_MODEL and
 # MEMORY_MODEL_FALLBACKS[0]; accepted given this call site's low volume
 # (weekly roles, cooldown-gated group-profile requests) but unmeasured — see
 # FILTER_MODEL's note above on the same bucket getting crowded.
@@ -129,7 +135,7 @@ TAG_MODEL = "qwen/qwen3.8-27b"
 # array out): correct labels, valid JSON, zero reasoning tokens.
 #
 # It is a reasoning model with reasoning ON by default, so callers must pass
-# reasoning_effort="none" — the same idiom FILTER_MODEL, VISION_MODEL and
+# reasoning_effort="none" — the same idiom FILTER_MODEL, VISION_RESERVE_MODEL and
 # TAG_MODEL already carry here. Measured on the same probe: "none" yields 0
 # reasoning tokens, while "low" burned 293 and truncated the JSON mid-array.
 REPLY_LABEL_MODELS: list[str] = [

@@ -71,7 +71,7 @@ LLM (humor)  Groq openai/gpt-oss-120b → llama-3.3-70b-versatile → qwen3.8-27
 LLM (roles)  Groq openai/gpt-oss-120b (also used for on-request group profiling, src/group_profile/)
 LLM (filter) Groq qwen/qwen3.8-27b (reasoning disabled) → OpenRouter meta-llama/llama-3.3-70b-instruct (cross-provider fallback; the 8B model dropped real questions)
 STT          Groq whisper-large-v3
-Vision       Groq qwen/qwen3.8-27b (reasoning disabled — thinking would eat the whole token budget) → OpenRouter qwen/qwen3-vl-32b-instruct (cross-provider fallback; make_vision_llm)
+Vision       OpenRouter qwen/qwen3.7-plus (reasoning disabled — thinking would eat the whole token budget) → Groq qwen/qwen3.8-27b (reasoning disabled; cross-provider reserve; make_vision_llm)
 Security     Groq llama-prompt-guard-2-86m
 Video frames PyAV (in-process, no subprocess)
 Shorts DL    yt-dlp, self-hosted in download-service/ (self-updates on start + daily check; restarts only that container)

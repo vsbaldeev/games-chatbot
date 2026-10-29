@@ -3,6 +3,7 @@
 import logging
 from unittest.mock import patch
 
+import openai
 from langchain_core.runnables.fallbacks import RunnableWithFallbacks
 from langchain_groq import ChatGroq
 
@@ -17,7 +18,7 @@ class TestMakeVisionLlm:
         with patch(OPENROUTER_KEY_TARGET, ""):
             llm = make_vision_llm(max_tokens=200)
         assert isinstance(llm, ChatGroq)
-        assert llm.model_name == config.VISION_MODEL
+        assert llm.model_name == config.VISION_RESERVE_MODEL
         assert llm.max_tokens == 200
         assert llm.temperature == 0.1
 
@@ -33,8 +34,18 @@ class TestMakeVisionLlm:
         with patch(OPENROUTER_KEY_TARGET, "fake-key"):
             llm = make_vision_llm(max_tokens=150)
         assert isinstance(llm, RunnableWithFallbacks)
-        assert llm.runnable.model_name == config.VISION_MODEL
+        assert llm.runnable.model_name == config.VISION_PRIMARY_MODEL
         assert llm.runnable.max_tokens == 150
         assert len(llm.fallbacks) == 1
-        assert llm.fallbacks[0].model_name == config.VISION_FALLBACK_MODEL
+        assert llm.fallbacks[0].model_name == config.VISION_RESERVE_MODEL
         assert llm.fallbacks[0].max_tokens == 150
+
+    def test_primary_disables_reasoning(self):
+        with patch(OPENROUTER_KEY_TARGET, "fake-key"):
+            llm = make_vision_llm(max_tokens=150)
+        assert llm.runnable.extra_body == {"reasoning": {"enabled": False}}
+
+    def test_openrouter_errors_trigger_the_groq_reserve(self):
+        with patch(OPENROUTER_KEY_TARGET, "fake-key"):
+            llm = make_vision_llm(max_tokens=150)
+        assert openai.APIError in llm.exceptions_to_handle

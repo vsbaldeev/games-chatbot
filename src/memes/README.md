@@ -125,8 +125,8 @@ parse_verdict(data)      — 0-10 score, or None when missing/out of range.
 
 score_meme(bytes)        — one vision call with MEME_JUDGE_SYSTEM and the
     image alone (no caption: none will be sent, so none is judged), built via
-    the shared vision LLM factory (`src.llm.vision.make_vision_llm`, Groq
-    primary with an OpenRouter fallback).
+    the shared vision LLM factory (`src.llm.vision.make_vision_llm`, OpenRouter
+    primary with a Groq reserve).
     Logs the score at INFO so the threshold stays tunable. Returns None on
     any failure — "unknown", never zero.
 ```
@@ -145,7 +145,7 @@ send_meme(bot, chat_id, *, reply_to=None) -> bool
 ```
 
 **Known risk — Cyrillic OCR.** Most configured channels are Russian, so the
-gate depends on VISION_MODEL reading text rendered inside images. If that is
+gate depends on VISION_PRIMARY_MODEL reading text rendered inside images. If that is
 weak it rejects good memes. `scripts/calibrate_meme_judge.py` scores a live
 batch and prints the verdicts without sending anything, which is how
 MEME_JUDGE_PASS_SCORE should be re-tuned.
