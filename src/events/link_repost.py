@@ -42,7 +42,7 @@ class AmbiguousDeliveryError(Exception):
 
 CAPTION_LIMIT = 1024  # Telegram Bot API cap on media captions
 TEXT_LIMIT = 4096  # Telegram Bot API cap on a plain text message
-HOOK_CHAR_LIMIT = 150  # ceiling on the teaser line; the prompt asks for 120
+HOOK_CHAR_LIMIT = 90  # ceiling on the teaser line; the prompt asks for 70
 CAP_FOOTER_THRESHOLD = 5  # show the remaining-count footer only at or below this
 
 SENTENCE_END_RE = re.compile(r"[.!?…]")

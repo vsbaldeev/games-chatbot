@@ -16,9 +16,10 @@ the clip (Shorts, Reels and TikToks only — long-form YouTube never carries vid
 transcribes and looks at it (Shorts) or reads its title/caption and a short in-character
 summary of top comments (Reels, TikToks and long-form YouTube — never quoted
 verbatim, src/pipeline/ingest/links/comment_summary.py), and replies with a single
-message — the video with a one-line teaser as its caption (no retelling, no
-spoilers, no comment recap; written in English for English videos, Russian
-otherwise), or, when there's no video, a plain text message with a link
+message — the video with a short teaser as its caption (a plain ~70-character
+statement of who or what is in it plus one concrete detail: no retelling, no
+questions or invented mystery, no spoilers, no comment recap; written in
+English for English videos, Russian otherwise), or, when there's no video, a plain text message with a link
 preview. If the sender's message was nothing but the link, the bot deletes it
 once its own message has gone out and credits the sender inside the caption
 ("Скинул @username", then the teaser, then the link); if the sender wrote

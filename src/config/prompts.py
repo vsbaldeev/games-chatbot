@@ -411,22 +411,29 @@ WEEKLY_ROLES_RULE = (
 # Shared tail of both link-teaser instructions below. The reply is posted as
 # the caption on the reposted video (src/events/link_repost.py), or as the
 # body of the single message that replaces the user's link, so it is read
-# BEFORE anyone watches: a one-line teaser that makes people open the video,
-# never a retelling that spoils it. The ending, the punchline and the comment
-# reaction are left out on purpose. The language rule deliberately overrides
-# RESPONSE_PROMPT's «ТОЛЬКО русский» for this one reply. The 120-character
-# ask leaves headroom under HOOK_CHAR_LIMIT in src/events/link_repost.py,
-# which enforces the ceiling in code.
+# BEFORE anyone watches: a short label of who/what is in the video plus one
+# concrete detail, never a retelling that spoils it. Asking for "intrigue"
+# made the model invent mystery questions («Что скрывает…?») and copy the
+# author's own clickbait caption, so the rule is now a plain statement with
+# the bait words banned and the author's wording explicitly off-limits. The
+# language rule deliberately overrides RESPONSE_PROMPT's «ТОЛЬКО русский» for
+# this one reply. The 70-character ask leaves headroom under HOOK_CHAR_LIMIT
+# in src/events/link_repost.py, which enforces the ceiling in code.
 LINK_TEASER_RULES = (
-    "Напиши ОДНУ короткую фразу-тизер, после которой захочется открыть ролик. "
-    "Не пересказывай и не раскрывай концовку, развязку или шутку — только "
-    "завязка или интрига. Комментарии зрителей не упоминай. Не давай вердикт "
-    "«смотреть или нет», без хештегов и кликбейта капсом. Опирайся только на "
-    "материалы ниже: не выдумывай того, чего там нет, и не проверяй факты по "
-    "своим знаниям — они могут устареть. Если материала мало — просто назови "
-    "тему ролика. Язык: если ролик на английском — пиши тизер по-английски "
-    "(это исключение из правила про русский), иначе по-русски. Не длиннее "
-    "120 символов, без кавычек"
+    "Напиши подпись-тизер: одно короткое утвердительное предложение до 70 "
+    "символов — кто или что в ролике и одна конкретная деталь. Примеры формы: "
+    "«Face на «Вечернем Урганте» с треком из фильма «Юморист»», «Летающая "
+    "тарелка АЛА-40 на архивной съёмке из Ульяновска». Никаких вопросов и "
+    "пояснений через тире. Не выдумывай интригу: без слов «скрывает», "
+    "«загадочный», «тайна», «разгадка», «вы не поверите», «шок». Подпись "
+    "автора ролика — только источник фактов: не повторяй её формулировки и "
+    "кликбейт. Не раскрывай концовку или шутку, не упоминай комментарии, не "
+    "давай вердикт «смотреть или нет», без хештегов и эмодзи. Опирайся только "
+    "на материалы ниже: не выдумывай того, чего там нет, и не проверяй факты "
+    "по своим знаниям — они могут устареть. Если материала мало — просто "
+    "назови тему ролика. Язык: если ролик на английском — пиши по-английски "
+    "(это исключение из правила про русский), иначе по-русски. Не бери ответ "
+    "в кавычки"
 )
 
 # Framing for a YouTube Shorts trigger — see LINK_TEASER_RULES.
@@ -609,8 +616,9 @@ GROUP_PROFILE_FAILED_REPLIES = [
 # hook a hook — shorter, still no spoilers — rather than cutting it mid-word.
 CAPTION_COMPRESS_SYSTEM = (
     "Ты сокращаешь фразу-тизер под видео. Перепиши её короче, чтобы она "
-    "уложилась в {budget} символов. Сохрани интригу и тему ролика, не "
-    "раскрывай концовку и не добавляй новых фактов. Тон и язык оставь теми "
+    "уложилась в {budget} символов. Сохрани, кто или что в ролике, и главную "
+    "конкретную деталь; не превращай её в вопрос, не раскрывай концовку и не "
+    "добавляй новых фактов. Тон и язык оставь теми "
     "же. Ответь только готовым текстом, без пояснений и без кавычек."
 )
 

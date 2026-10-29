@@ -193,7 +193,7 @@ class TestTeaserRulesAreInPrompts:
         assert LINK_TEASER_RULES in SOCIAL_LINK_RETELL_INSTRUCTION
 
     def test_teaser_rules_state_the_character_budget(self):
-        assert "120 символов" in LINK_TEASER_RULES
+        assert "70 символов" in LINK_TEASER_RULES
 
 
 class TestLinkReplyGroundingPromptText:

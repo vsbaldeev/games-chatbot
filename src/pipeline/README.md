@@ -463,7 +463,7 @@ flowchart TD
 | Replied-to | Always rendered, except when that exact message was already printed in recent history. |
 | User facts, roles | From `context_builder`. |
 | Worker findings | Framed by provenance: «проверено через инструменты» if a tool ran, «из контекста разговора (НЕ проверялись)» otherwise. External-world numbers (prices, player counts, dates) are allowed only from the first frame. |
-| Trigger line | Voice: the transcript is the person's own words (softened for low confidence). Photo/video: framed as a description to react to. Shorts/social links: one-line teaser framing (no spoilers, no comment recap, no verdict, no fact-checking; English for English videos). |
+| Trigger line | Voice: the transcript is the person's own words (softened for low confidence). Photo/video: framed as a description to react to. Shorts/social links: short teaser framing (~70-char plain statement, no questions or invented mystery, no spoilers, no comment recap, no verdict, no fact-checking; English for English videos). |
 
 **Hints** (override the default persona): `is_bot_insult` → sharp comeback; `wind_down` → one short
 closing phrase, no questions. Insult and wind-down hints forbid counter-questions.

@@ -122,13 +122,15 @@ defaults sized for text, not video) so the race is rarer to begin with — the
 `AmbiguousDeliveryError` handling above is what makes the remaining cases
 safe rather than merely rare.
 
-The pipeline's reply for a link is a one-line teaser, not a retelling
-(`LINK_TEASER_RULES` in `src/config/prompts.py`: no spoilers, no comment
-recap, English for English videos, otherwise Russian, about 120 characters).
-`fit_caption` holds the teaser to `HOOK_CHAR_LIMIT` (150 characters) through a
+The pipeline's reply for a link is a short teaser, not a retelling
+(`LINK_TEASER_RULES` in `src/config/prompts.py`): one plain statement of
+who or what is in the video plus one concrete detail, about 70 characters —
+no questions, no invented mystery, no copying the author's clickbait caption,
+no spoilers, no comment recap; English for English videos, otherwise Russian.
+`fit_caption` holds the teaser to `HOOK_CHAR_LIMIT` (90 characters) through a
 three-rung ladder: send as composed when it already fits; otherwise compress
 the teaser against that budget via `src/llm/compress.py` (LLM-based
-compression that keeps the hook a hook); and only if the compressor still
+compression that keeps the subject and its key detail); and only if the compressor still
 overshoots, `truncate_at_sentence` cuts it deterministically at the last
 sentence boundary inside the budget (or appends an ellipsis when none exists)
 as a last-resort backstop that can never fail to fit. The budget also never
