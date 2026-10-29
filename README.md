@@ -22,7 +22,7 @@ questions or invented mystery, no spoilers, no comment recap; written in
 English for English videos, Russian otherwise), or, when there's no video, a plain text message with a link
 preview. If the sender's message was nothing but the link, the bot deletes it
 once its own message has gone out and credits the sender inside the caption
-("Скинул @username", then the teaser, then the link); if the sender wrote
+("Прислал: @username" and "Ссылка: <link>" lines, then the teaser); if the sender wrote
 anything else alongside the link, their message is left untouched and the
 bot's message replies to it instead, carrying just the teaser. Shorts, Reels
 and TikToks share one daily budget of 30 per chat; the caption warns

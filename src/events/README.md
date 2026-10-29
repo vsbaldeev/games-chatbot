@@ -79,8 +79,8 @@ link_repost.py
 
 When the triggering message was nothing but the link (`link_message_is_bare`,
 set by the router — see src/pipeline/README.md), the message is sent
-un-anchored and `build_caption` credits the sender ("Скинул @username", then
-the teaser, then the canonical link), then `try_delete_original` removes the user's
+un-anchored and `build_caption` credits the sender ("Прислал: @username" and
+"Ссылка: <canonical link>" lines, a blank line, then the teaser), then `try_delete_original` removes the user's
 original link message — only after the send already succeeded, never before,
 and never at all if the send failed. Deleting degrades quietly: it needs the
 bot to be a chat administrator with `can_delete_messages`, and a missing

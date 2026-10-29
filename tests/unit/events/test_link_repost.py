@@ -24,9 +24,9 @@ COMPRESS_PATCH_TARGET = "src.events.link_repost.compress_to_budget"
 
 
 class TestBuildCaption:
-    def test_credit_then_teaser_then_link(self):
+    def test_sender_and_link_lines_lead_the_teaser(self):
         caption = build_caption("Про котиков.", "vasya", "https://youtu.be/abc")
-        assert caption == "Скинул @vasya\nПро котиков.\nhttps://youtu.be/abc"
+        assert caption == "Прислал: @vasya\nСсылка: https://youtu.be/abc\n\nПро котиков."
 
     def test_summary_alone_when_the_original_survives(self):
         assert build_caption("Про котиков.", None, None) == "Про котиков."
@@ -43,7 +43,7 @@ class TestBuildCaption:
         caption = build_caption(
             "Про котиков.", "vasya", "https://youtu.be/abc", footer="Осталось: 5",
         )
-        assert caption == "Скинул @vasya\nПро котиков.\nhttps://youtu.be/abc\n\nОсталось: 5"
+        assert caption == "Прислал: @vasya\nСсылка: https://youtu.be/abc\n\nПро котиков.\n\nОсталось: 5"
 
     def test_no_footer_appended_when_none(self):
         assert build_caption("Про котиков.", None, None, footer=None) == "Про котиков."
@@ -108,7 +108,7 @@ class TestFitCaption:
                 "а" * (HOOK_CHAR_LIMIT + 1), "vasya", "https://youtu.be/abc", has_video=True,
             )
         assert compress.await_args.args[1] == HOOK_CHAR_LIMIT
-        assert caption == "Скинул @vasya\nСжато.\nhttps://youtu.be/abc"
+        assert caption == "Прислал: @vasya\nСсылка: https://youtu.be/abc\n\nСжато."
 
     async def test_compressor_overshooting_the_hook_limit_is_truncated(self):
         with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="б" * 400)):
@@ -217,7 +217,7 @@ class TestDeliverLinkMessageBare:
         )
         caption = msg.chat.send_video.await_args.kwargs["caption"]
         assert caption == (
-            "Скинул @vasya\nПро котиков.\nhttps://youtu.be/abc\n\n"
+            "Прислал: @vasya\nСсылка: https://youtu.be/abc\n\nПро котиков.\n\n"
             "Осталось видео на сегодня: 5"
         )
 

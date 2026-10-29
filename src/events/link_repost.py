@@ -82,7 +82,7 @@ def build_caption(
             as the credit line.
 
     Returns:
-        Credit line, then the teaser, then the link when the original is
+        Sender and link lines, then the teaser, when the original is
         being deleted, the bare teaser otherwise, plus ``footer`` when given.
     """
     if username is None or url is None:
@@ -94,7 +94,7 @@ def build_caption(
             )
         body = summary
     else:
-        body = f"Скинул @{username}\n{summary}\n{url}"
+        body = f"Прислал: @{username}\nСсылка: {url}\n\n{summary}"
     return f"{body}\n\n{footer}" if footer else body
 
 
