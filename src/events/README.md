@@ -69,7 +69,7 @@ link_repost.py
                           cap_remaining) —
                                       sends the bot's ONE combined message
                                       for a link trigger: the downloaded
-                                      video with the summary as its caption
+                                      video with the teaser as its caption
                                       when there is one (YouTube Shorts,
                                       Instagram Reel, TikTok), or a plain text
                                       message when there isn't (long-form
@@ -79,8 +79,8 @@ link_repost.py
 
 When the triggering message was nothing but the link (`link_message_is_bare`,
 set by the router — see src/pipeline/README.md), the message is sent
-un-anchored and `build_caption` credits the sender ("Скинул @username" + the
-canonical link + the summary), then `try_delete_original` removes the user's
+un-anchored and `build_caption` credits the sender ("Скинул @username", then
+the teaser, then the canonical link), then `try_delete_original` removes the user's
 original link message — only after the send already succeeded, never before,
 and never at all if the send failed. Deleting degrades quietly: it needs the
 bot to be a chat administrator with `can_delete_messages`, and a missing
@@ -122,22 +122,25 @@ defaults sized for text, not video) so the race is rarer to begin with — the
 `AmbiguousDeliveryError` handling above is what makes the remaining cases
 safe rather than merely rare.
 
-`fit_caption` fits the text inside the relevant Telegram limit through a
+The pipeline's reply for a link is a one-line teaser, not a retelling
+(`LINK_TEASER_RULES` in `src/config/prompts.py`: no spoilers, no comment
+recap, English for English videos, otherwise Russian, about 120 characters).
+`fit_caption` holds the teaser to `HOOK_CHAR_LIMIT` (150 characters) through a
 three-rung ladder: send as composed when it already fits; otherwise compress
-the summary against the remaining budget via `src/llm/compress.py`
-(LLM-based compression); and only if the compressor still overshoots,
-`truncate_at_sentence` cuts it deterministically at the last sentence
-boundary inside the budget (or appends an ellipsis when none exists) as a
-last-resort backstop that can never fail to fit. The limit itself depends on
-whether a video is attached: 1024 characters (Telegram's caption cap) when
-there is one, 4096 (the plain text-message cap) when there isn't — long-form
-YouTube links and any download failure that falls back to a text-only send
-are not bound by the tighter caption limit.
+the teaser against that budget via `src/llm/compress.py` (LLM-based
+compression that keeps the hook a hook); and only if the compressor still
+overshoots, `truncate_at_sentence` cuts it deterministically at the last
+sentence boundary inside the budget (or appends an ellipsis when none exists)
+as a last-resort backstop that can never fail to fit. The budget also never
+exceeds what Telegram's limit leaves after the credit line, link and footer —
+1024 characters (the caption cap) when a video is attached, 4096 (the plain
+text-message cap) when there isn't — so the result always fits.
 
-When the router (`src/pipeline/router.py`) computed a `social_link_cap_remaining`
-for the matched handler (Instagram and TikTok, which share one cap — see `src.pipeline.ingest.links.social_links`),
-`build_cap_remaining_footer` renders it as a trailing "Осталось рилсов сегодня: N"
-line, reserved out of the compression budget the same way the credit line is —
+When the router (`src/pipeline/router.py`) computed a `link_cap_remaining`
+(Shorts, Instagram and TikTok, which share one cap — see `src.pipeline.ingest.links.social_links`)
+and it is down to `CAP_FOOTER_THRESHOLD` (5) or fewer, `build_cap_remaining_footer`
+renders it as a trailing "Осталось видео на сегодня: N" line — above the
+threshold no footer is shown at all. The line is reserved out of the compression budget the same way the credit line is —
 it is never compressed or truncated away. Unlike the credit line, it is shown
 regardless of `is_bare`: it survives even when the original message is kept and
 the summary replies to it directly. A handler with no daily cap

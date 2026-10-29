@@ -73,4 +73,4 @@ def test_stage_sources_only_use_keys_of_their_schema(stage):
 
 def test_bot_state_is_exactly_the_union_of_the_stage_schemas_and_parent_keys():
     stage_keys = set(IngestState.__annotations__) | set(RespondState.__annotations__)
-    assert set(BotState.__annotations__) - stage_keys == {"social_link_cap_remaining", "link_message_is_bare"}
+    assert set(BotState.__annotations__) - stage_keys == {"link_cap_remaining", "link_message_is_bare"}

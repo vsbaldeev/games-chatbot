@@ -10,9 +10,10 @@ bytes for Telegram to repost.
 
 Each handler declares its own ``daily_cap`` (None means uncapped). The two
 short-video handlers (Instagram, TikTok) count against one shared
-``SHORT_VIDEO_DAILY_CAP_GATE`` — a chat gets 30 short-video summaries a day
-across both platforms, not 30 each. The YouTube handler is a single free
-metadata request with nothing to throttle.
+``SHORT_VIDEO_DAILY_CAP_GATE``, and so do YouTube Shorts (gated by the
+router, see src.pipeline.ingest.links.shorts) — a chat gets 30 short-video
+summaries a day across all three platforms, not 30 each. The long-form
+YouTube handler is a single free metadata request with nothing to throttle.
 
 The router consults HANDLERS in priority order: the first handler whose
 regex matches anything in the message wins the whole message — every other
@@ -27,10 +28,10 @@ from src.utils.ttl_gate import TtlGate
 
 SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT = 2000      # caps YouTube description length
 SOCIAL_LINK_DEDUP_WINDOW_SECONDS = 24 * 3600   # same item in the same chat -> one summary
-SHORT_VIDEO_DAILY_CAP = 30                     # Instagram + TikTok summaries per chat per sliding 24h window
+SHORT_VIDEO_DAILY_CAP = 30                     # Reels + TikTok + Shorts summaries per chat per sliding 24h window
 
-# One gate instance shared by every short-video handler, so Reels and TikToks
-# draw down the same per-chat budget.
+# One gate instance shared by every short-video link type, so Reels, TikToks
+# and Shorts draw down the same per-chat budget.
 SHORT_VIDEO_DAILY_CAP_GATE = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
 
 

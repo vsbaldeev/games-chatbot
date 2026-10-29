@@ -2,7 +2,12 @@
 
 import pytest
 
-from src.config.prompts import LINK_REPLY_GROUNDING_INSTRUCTION, SHORTS_TRIGGER_INSTRUCTION, SOCIAL_LINK_RETELL_INSTRUCTION
+from src.config.prompts import (
+    LINK_REPLY_GROUNDING_INSTRUCTION,
+    LINK_TEASER_RULES,
+    SHORTS_TRIGGER_INSTRUCTION,
+    SOCIAL_LINK_RETELL_INSTRUCTION,
+)
 from src.pipeline.respond.reply.response_prompt import ROW_CHAR_LIMIT, build_asking_user_tag_lines, build_directive_lines, build_recent_history_lines, build_response_input, build_trigger_line, neutralize_speaker_lines, render_row, resolve_group_profile_directive, resolve_meme_directive
 from tests.builders import make_incoming, make_state
 
@@ -180,12 +185,15 @@ class TestShortsTriggerFraming:
         assert SHORTS_TRIGGER_INSTRUCTION in line
 
 
-class TestCaptionBudgetIsInPrompts:
-    def test_shorts_instruction_states_the_character_budget(self):
-        assert "600 символов" in SHORTS_TRIGGER_INSTRUCTION
+class TestTeaserRulesAreInPrompts:
+    def test_shorts_instruction_carries_the_teaser_rules(self):
+        assert LINK_TEASER_RULES in SHORTS_TRIGGER_INSTRUCTION
 
-    def test_social_link_instruction_states_the_character_budget(self):
-        assert "600 символов" in SOCIAL_LINK_RETELL_INSTRUCTION
+    def test_social_link_instruction_carries_the_teaser_rules(self):
+        assert LINK_TEASER_RULES in SOCIAL_LINK_RETELL_INSTRUCTION
+
+    def test_teaser_rules_state_the_character_budget(self):
+        assert "120 символов" in LINK_TEASER_RULES
 
 
 class TestLinkReplyGroundingPromptText:

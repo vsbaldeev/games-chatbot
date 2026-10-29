@@ -31,7 +31,8 @@ Respond when:
     This check runs before the forwarded-message guard (forwarding is the
     dominant way links arrive, and «tell me what this video is» does not
     put words in the sender's mouth), but is gated by a per-chat repost
-    dedup window and a daily summary cap (see ``src.pipeline.ingest.links.shorts``).
+    dedup window (see ``src.pipeline.ingest.links.shorts``) and the shared
+    short-video daily cap.
   - A text message contains an Instagram Reel, TikTok or long-form YouTube
     video link (checked after Shorts, which keeps top priority) —
     routed with response_trigger="social_link" so the pipeline fetches a
@@ -40,8 +41,8 @@ Respond when:
     order whose regex matches wins the whole message; same per-item repost
     dedup window as Shorts (see ``src.pipeline.ingest.links.social_links``), but the
     daily cap is per-handler — Instagram and TikTok share one short-video
-    budget, YouTube has none — and hitting it gets a canned reply instead
-    of silence (``__daily_cap_reply``).
+    budget with Shorts, long-form YouTube has none — and hitting it gets a
+    canned reply instead of silence (``__daily_cap_reply``).
 """
 
 import random
@@ -56,13 +57,13 @@ from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
-# Only the short-video handlers (Instagram, TikTok) have a daily_cap, and they
-# share one (see social_links/__init__.py) — these acknowledge the limit instead of leaving a posted link answered with
-# silence, same tone as the honest-failure pools in filter/link_check.py and filter/media_check.py.
+# Shorts, Reels and TikToks share one daily cap (see social_links/__init__.py) — these acknowledge the limit
+# instead of leaving a posted link answered with silence, same tone as the honest-failure pools in
+# filter/link_check.py and filter/media_check.py.
 SHORT_VIDEO_DAILY_CAP_REPLIES = [
-    "На сегодня лимит рилсов исчерпан — эту ссылку не разбираю.",
-    "Дневной лимит рилсов выбран. Дальше сами, я на паузе до завтра.",
-    "Рилсы на сегодня закончились — лимит. Возвращайтесь завтра.",
+    "На сегодня лимит видео исчерпан — эту ссылку не разбираю.",
+    "Дневной лимит видео выбран. Дальше сами, я на паузе до завтра.",
+    "Видео на сегодня закончились — лимит. Возвращайтесь завтра.",
 ]
 
 
@@ -336,19 +337,21 @@ class MessageRouter:
         """Route a YouTube Shorts link to the summary pipeline, if gates allow.
 
         Runs before the normal routing decision (and therefore before the
-        forwarded-message guard). A gated link — repost within the dedup
-        window or a chat over its daily summary cap — returns ``None`` and
-        falls through to the normal decision, costing zero downloads and
-        zero LLM tokens.
+        forwarded-message guard). A repost within the dedup window returns
+        ``None`` and falls through to the normal decision; a chat over the
+        shared short-video cap gets the canned limit notice. Either way the
+        link costs zero downloads and zero LLM tokens.
 
         Args:
             msg: Normalised incoming-message dict from the pipeline state.
 
         Returns:
-            State update dict with the ``youtube_short`` trigger, or ``None``
-            when there is no Shorts link or a gate rejected it. The update
-            also carries ``link_message_is_bare``, which decides whether the
-            events layer may delete the original message.
+            State update dict with the ``youtube_short`` trigger, the cap
+            notice update when the cap is exhausted, or ``None`` when there
+            is no Shorts link or it is a repost. The trigger update also
+            carries ``link_message_is_bare``, which decides whether the
+            events layer may delete the original message, and
+            ``link_cap_remaining``.
         """
         video_id = shorts.extract_video_id(msg["raw_text"])
         if video_id is None:
@@ -356,12 +359,14 @@ class MessageRouter:
         if shorts.dedup_gate.seen((msg["chat_id"], video_id)):
             logger.info("Shorts repost in chat %s (%s) — skipping summary", msg["chat_id"], video_id)
             return None
-        if not shorts.under_daily_cap(msg["chat_id"]):
-            return None
+        used = social_links.SHORT_VIDEO_DAILY_CAP_GATE.hit(msg["chat_id"])
+        if used > social_links.SHORT_VIDEO_DAILY_CAP:
+            return self.__daily_cap_reply("youtube_short", msg["chat_id"], used, social_links.SHORT_VIDEO_DAILY_CAP)
         return {
             "should_respond": True,
             "response_trigger": "youtube_short",
             "youtube_short_url": shorts.extract_shorts_url(msg["raw_text"]),
+            "link_cap_remaining": social_links.SHORT_VIDEO_DAILY_CAP - used,
             "link_message_is_bare": social_links.is_bare_link_message(
                 msg["raw_text"], shorts.SHORTS_URL_RE
             ),
@@ -408,7 +413,7 @@ class MessageRouter:
             State update dict on a gate pass, or None on a gate rejection.
             The update also carries ``link_message_is_bare``, which decides
             whether the events layer may delete the original message, and
-            ``social_link_cap_remaining`` (None for an uncapped handler).
+            ``link_cap_remaining`` (None for an uncapped handler).
         """
         if handler.dedup_gate.seen((msg["chat_id"], handler.name, item_id)):
             logger.info(
@@ -420,32 +425,33 @@ class MessageRouter:
         if handler.daily_cap is not None:
             used = handler.daily_cap_gate.hit(msg["chat_id"])
             if used > handler.daily_cap:
-                return self.__daily_cap_reply(handler, msg["chat_id"], used)
+                return self.__daily_cap_reply(handler.name, msg["chat_id"], used, handler.daily_cap)
             cap_remaining = handler.daily_cap - used
         return {
             "should_respond": True,
             "response_trigger": "social_link",
             "social_link_handler": handler.name,
             "social_link_url": canonical_url,
-            "social_link_cap_remaining": cap_remaining,
+            "link_cap_remaining": cap_remaining,
             "link_message_is_bare": social_links.is_bare_link_message(
                 msg["raw_text"], handler.pattern
             ),
         }
 
-    def __daily_cap_reply(self, handler, chat_id: int, used: int) -> dict:
+    def __daily_cap_reply(self, link_type: str, chat_id: int, used: int, daily_cap: int) -> dict:
         """Log the cap rejection and answer with a canned limit notice.
 
-        Only the short-video handlers (Instagram, TikTok) carry a
-        daily_cap today, and they share one, so
-        ``SHORT_VIDEO_DAILY_CAP_REPLIES`` is the only pool needed — a
-        handler with a cap of a different kind would need its own pool
-        added here before this can serve it honestly.
+        Only short videos (Shorts, Instagram, TikTok) carry a daily cap
+        today, and they share one, so ``SHORT_VIDEO_DAILY_CAP_REPLIES`` is
+        the only pool needed — a cap of a different kind would need its own
+        pool added here before this can serve it honestly.
 
         Args:
-            handler: The matched ``LinkHandler`` whose cap was exceeded.
+            link_type: Name of the link type whose cap was exceeded (a
+                handler name, or ``"youtube_short"``).
             chat_id: Telegram chat id the link was posted in.
             used: Hits recorded for this chat in the current window.
+            daily_cap: The cap that was exceeded, for the log line.
 
         Returns:
             State update dict: no fetch, but a visible reply instead of
@@ -453,7 +459,7 @@ class MessageRouter:
         """
         logger.warning(
             "%s daily cap reached for chat %s (%d/%d) — skipping summary",
-            handler.name, chat_id, used, handler.daily_cap,
+            link_type, chat_id, used, daily_cap,
         )
         return {
             "should_respond": False,

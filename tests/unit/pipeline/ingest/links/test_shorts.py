@@ -25,17 +25,6 @@ class TestExtractShortsUrl:
         assert url == "https://www.youtube.com/shorts/dQw4w9WgXcQ"
 
 
-class TestUnderDailyCap:
-    def test_within_cap_returns_true(self):
-        assert shorts.under_daily_cap(chat_id=910001) is True
-
-    def test_exhausted_cap_returns_false(self):
-        chat_id = 910002
-        for _ in range(shorts.SHORTS_DAILY_CAP):
-            assert shorts.under_daily_cap(chat_id) is True
-        assert shorts.under_daily_cap(chat_id) is False
-
-
 DOWNLOAD_SHORT_TARGET = "src.pipeline.ingest.links.shorts.downloads.download_short"
 
 

@@ -137,5 +137,5 @@ class RespondState(MessageState, FilterOutcome):
 class BotState(IngestState, RespondState):
     """Full state of one pipeline run: both stage schemas plus keys only the router and the events layer touch."""
 
-    social_link_cap_remaining: NotRequired[int | None]  # daily_cap - used for this chat, set by Router; None when the matched handler has no cap
+    link_cap_remaining: NotRequired[int | None]  # shared short-video cap (Shorts/Reels/TikTok) - used for this chat, set by Router; None for an uncapped link type
     link_message_is_bare: NotRequired[bool]  # True when the triggering message was the link and nothing else; only then may the events layer delete it

@@ -146,8 +146,9 @@ flowchart TD
     store --> track["if it replies to the bot: track_reply<br/>(background label + feedback counter)"]
     track --> kind{"media type"}
 
-    kind -->|"text"| shorts{"YouTube Shorts link?<br/>dedup 24 h · cap 50/chat/24 h"}
+    kind -->|"text"| shorts{"YouTube Shorts link?<br/>dedup 24 h · shared short-video cap"}
     shorts -->|"yes"| t_short["trigger = youtube_short"]
+    shorts -->|"short-video cap hit"| cap
     shorts -->|"no"| social{"Instagram / TikTok / YouTube link?<br/>per-handler dedup + cap"}
     social -->|"yes"| t_social["trigger = social_link"]
     social -->|"short-video cap hit"| cap["canned cap reply (cap_notice)"]
@@ -169,7 +170,7 @@ flowchart TD
 | Trigger | `should_respond` | Meaning |
 |---|---|---|
 | `youtube_short` | True | Shorts link: summarized and re-posted as a video with caption. Checked first, even for forwarded messages (forwarding is how links usually arrive). |
-| `social_link` | True | Instagram Reel / TikTok / YouTube video link. First matching handler wins (Instagram > TikTok > YouTube); other links in the message are ignored. Instagram and TikTok share one daily cap (30/chat/24 h across both); YouTube has none. |
+| `social_link` | True | Instagram Reel / TikTok / YouTube video link. First matching handler wins (Instagram > TikTok > YouTube); other links in the message are ignored. Instagram, TikTok and Shorts share one daily cap (30/chat/24 h across all three); long-form YouTube has none. |
 | `explicit` | True | `@bot_username` (word-boundary regex, URLs and longer words don't count) or a reply to a bot message. |
 | `insult_check` | True | Text contains «бот»/"bot" without addressing the bot; the filter decides whether it is really an insult. |
 | `random` | False | Everything else, and every forwarded message. The run never reaches the filter stage with this trigger. |
@@ -462,7 +463,7 @@ flowchart TD
 | Replied-to | Always rendered, except when that exact message was already printed in recent history. |
 | User facts, roles | From `context_builder`. |
 | Worker findings | Framed by provenance: «проверено через инструменты» if a tool ran, «из контекста разговора (НЕ проверялись)» otherwise. External-world numbers (prices, player counts, dates) are allowed only from the first frame. |
-| Trigger line | Voice: the transcript is the person's own words (softened for low confidence). Photo/video: framed as a description to react to. Shorts/social links: retell framing (1–2 sentences, no verdict, no fact-checking). |
+| Trigger line | Voice: the transcript is the person's own words (softened for low confidence). Photo/video: framed as a description to react to. Shorts/social links: one-line teaser framing (no spoilers, no comment recap, no verdict, no fact-checking; English for English videos). |
 
 **Hints** (override the default persona): `is_bot_insult` → sharp comeback; `wind_down` → one short
 closing phrase, no questions. Insult and wind-down hints forbid counter-questions.
@@ -526,7 +527,7 @@ Fields grouped by the node that sets them (`state.py`).
 `BotState` is composed from per-stage schemas: `MessageState` (keys every stage reads: `incoming`,
 `should_respond`, `response_trigger`, `context_types`, `response`, `content_kind`, `drop_reason`),
 `FilterOutcome` (the verdict flags the respond stage reads), `IngestState`, `RespondState`, plus the
-keys only the router and the events layer touch (`social_link_cap_remaining`,
+keys only the router and the events layer touch (`link_cap_remaining`,
 `link_message_is_bare`). LangGraph shows a subgraph only the keys of its schema and **silently drops
 any other key a node returns**, so a key a stage touches must be declared on its schema;
 `tests/unit/pipeline/test_state_scoping.py` fails when a stage's source names a state key its schema
@@ -535,7 +536,7 @@ lacks.
 | Set by | Fields |
 |---|---|
 | entry (`build_pipeline_state`, `run_pipeline`) | `incoming` (`IncomingMessage`), `context_types`, `thread_id`, `is_flat_thread` |
-| router | `should_respond`, `response_trigger`, `broadcast_reply`, `youtube_short_url`, `social_link_handler`, `social_link_url`, `social_link_cap_remaining`, `link_message_is_bare`; `response` + `content_kind` for the short-video cap reply |
+| router | `should_respond`, `response_trigger`, `broadcast_reply`, `youtube_short_url`, `social_link_handler`, `social_link_url`, `link_cap_remaining`, `link_message_is_bare`; `response` + `content_kind` for the short-video cap reply |
 | ingester | `incoming.processed_text`, `media_is_real_person`, `voice_low_confidence`, `youtube_short_content`, `youtube_short_video`, `social_link_content`, `social_link_video` |
 | filter stage (`link_check`, `media_check`, `classify`, `budget`) | `should_respond`, `filter_verdict`, `is_bot_insult`, `wind_down`, `meme_request`, `group_profile_request`, `engagement_tier`, `drop_reason`; `response` + `content_kind` for canned replies |
 | guard | `blocked`, `drop_reason`; `response` + `content_kind = prompt_injection_reply` |

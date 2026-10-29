@@ -1,8 +1,9 @@
-"""Caption compression — fit an over-budget summary into a Telegram caption.
+"""Caption compression — fit an over-budget link teaser into its budget.
 
-Telegram caps media captions at 1024 characters. The response prompt already
-asks for a short summary, so this runs rarely; when it does, the summary is
-rewritten shorter rather than cut, so no meaning is lost mid-sentence.
+The link caption's teaser is capped at ``HOOK_CHAR_LIMIT`` (see
+src/events/link_repost.py). The response prompt already asks for a shorter
+line, so this runs rarely; when it does, the teaser is rewritten shorter
+rather than cut, so it never ends mid-sentence.
 
 Best effort by contract: any failure returns the input unchanged and the
 caller falls back to deterministic sentence-boundary truncation.

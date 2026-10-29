@@ -1,4 +1,4 @@
-"""One-message link repost: video + summary caption, then delete the original.
+"""One-message link repost: video + teaser caption, then delete the original.
 
 A link message used to produce three messages in chat — the user's link, the
 bot's bare video repost, and the bot's separate text reply. This module
@@ -42,6 +42,8 @@ class AmbiguousDeliveryError(Exception):
 
 CAPTION_LIMIT = 1024  # Telegram Bot API cap on media captions
 TEXT_LIMIT = 4096  # Telegram Bot API cap on a plain text message
+HOOK_CHAR_LIMIT = 150  # ceiling on the teaser line; the prompt asks for 120
+CAP_FOOTER_THRESHOLD = 5  # show the remaining-count footer only at or below this
 
 SENTENCE_END_RE = re.compile(r"[.!?…]")
 
@@ -49,18 +51,20 @@ SENTENCE_END_RE = re.compile(r"[.!?…]")
 def build_cap_remaining_footer(cap_remaining: int | None) -> str | None:
     """Render the daily-cap remaining-count line, or None to omit it.
 
+    The line is a warning, not a counter: it appears only once the chat is
+    down to :data:`CAP_FOOTER_THRESHOLD` videos or fewer.
+
     Args:
-        cap_remaining: Reels left in today's cap after this one, or None
-            when the matched handler has no cap (see
-            ``social_links.LinkHandler.daily_cap``) — only the
-            Instagram and TikTok handlers have one, and they share it.
+        cap_remaining: Videos left in today's cap after this one, or None
+            when the link type has no cap — Reels, TikToks and Shorts share
+            ``social_links.SHORT_VIDEO_DAILY_CAP``, long-form YouTube has none.
 
     Returns:
         A one-line status string, or None when there is nothing to show.
     """
-    if cap_remaining is None:
+    if cap_remaining is None or cap_remaining > CAP_FOOTER_THRESHOLD:
         return None
-    return f"Осталось рилсов сегодня: {cap_remaining}"
+    return f"Осталось видео на сегодня: {cap_remaining}"
 
 
 def build_caption(
@@ -78,8 +82,8 @@ def build_caption(
             as the credit line.
 
     Returns:
-        Credit line + link + summary when the original is being deleted, the
-        bare summary otherwise, plus ``footer`` when given.
+        Credit line, then the teaser, then the link when the original is
+        being deleted, the bare teaser otherwise, plus ``footer`` when given.
     """
     if username is None or url is None:
         if username is not None or url is not None:
@@ -90,7 +94,7 @@ def build_caption(
             )
         body = summary
     else:
-        body = f"Скинул @{username}\n{url}\n\n{summary}"
+        body = f"Скинул @{username}\n{summary}\n{url}"
     return f"{body}\n\n{footer}" if footer else body
 
 
@@ -124,11 +128,12 @@ async def fit_caption(
     summary: str, username: str | None, url: str | None, has_video: bool,
     footer: str | None = None,
 ) -> str:
-    """Compose a caption guaranteed to fit Telegram's relevant length limit.
+    """Compose a caption whose teaser fits :data:`HOOK_CHAR_LIMIT`.
 
-    Three rungs: send as composed when it already fits; otherwise compress the
-    summary against the budget left by the credit line, link and footer; and
-    only if the compressor still overshoots, truncate at a sentence boundary.
+    Three rungs: send as composed when the teaser is short enough; otherwise
+    compress it against the smaller of :data:`HOOK_CHAR_LIMIT` and what
+    Telegram's limit leaves after the credit line, link and footer; and only
+    if the compressor still overshoots, truncate at a sentence boundary.
 
     Args:
         summary: The pipeline's summary text.
@@ -145,9 +150,9 @@ async def fit_caption(
     """
     limit = CAPTION_LIMIT if has_video else TEXT_LIMIT
     caption = build_caption(summary, username, url, footer)
-    if len(caption) <= limit:
+    budget = min(HOOK_CHAR_LIMIT, limit - (len(caption) - len(summary)))
+    if len(summary) <= budget:
         return caption
-    budget = limit - (len(caption) - len(summary))
     if budget <= 0:
         # The credit line, URL and footer alone overflow the cap. Canonical
         # link URLs run about 50 characters and the footer about 30, so this
@@ -157,10 +162,9 @@ async def fit_caption(
         logger.warning("Link caption overhead alone exceeds the caption limit")
         return caption[:limit]
     compressed = await compress_to_budget(summary, budget)
-    caption = build_caption(compressed, username, url, footer)
-    if len(caption) <= limit:
-        return caption
-    logger.warning("Caption still over the limit after compression, truncating")
+    if len(compressed) <= budget:
+        return build_caption(compressed, username, url, footer)
+    logger.warning("Teaser still over its budget after compression, truncating")
     return build_caption(truncate_at_sentence(compressed, budget), username, url, footer)
 
 
@@ -253,7 +257,7 @@ async def deliver_link_message(
         username: Sender's display name, credited only when deleting.
         url: Canonical link, carried only when deleting; see :func:`resolve_bare_deletion`.
         is_bare: True when the message was the link and nothing else.
-        cap_remaining: Reels left in today's cap, or None — see
+        cap_remaining: Videos left in today's cap, or None — see
             :func:`build_cap_remaining_footer`. Shown regardless of
             ``is_bare``, unlike the credit line.
 

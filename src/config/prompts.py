@@ -408,37 +408,39 @@ WEEKLY_ROLES_RULE = (
     "нет — не выдумывай. Про чужие роли говори только если о них спросили.]"
 )
 
-# Framing for a YouTube Shorts trigger. The reply is posted as the caption on
-# the downloaded video itself (src/events/link_repost.py), so it is read
-# BEFORE anyone watches — retell, never react. The character budget keeps the
-# common case inside Telegram's 1024-char caption limit without needing the
-# compression pass in src/llm/compress.py.
+# Shared tail of both link-teaser instructions below. The reply is posted as
+# the caption on the reposted video (src/events/link_repost.py), or as the
+# body of the single message that replaces the user's link, so it is read
+# BEFORE anyone watches: a one-line teaser that makes people open the video,
+# never a retelling that spoils it. The ending, the punchline and the comment
+# reaction are left out on purpose. The language rule deliberately overrides
+# RESPONSE_PROMPT's «ТОЛЬКО русский» for this one reply. The 120-character
+# ask leaves headroom under HOOK_CHAR_LIMIT in src/events/link_repost.py,
+# which enforces the ceiling in code.
+LINK_TEASER_RULES = (
+    "Напиши ОДНУ короткую фразу-тизер, после которой захочется открыть ролик. "
+    "Не пересказывай и не раскрывай концовку, развязку или шутку — только "
+    "завязка или интрига. Комментарии зрителей не упоминай. Не давай вердикт "
+    "«смотреть или нет», без хештегов и кликбейта капсом. Опирайся только на "
+    "материалы ниже: не выдумывай того, чего там нет, и не проверяй факты по "
+    "своим знаниям — они могут устареть. Если материала мало — просто назови "
+    "тему ролика. Язык: если ролик на английском — пиши тизер по-английски "
+    "(это исключение из правила про русский), иначе по-русски. Не длиннее "
+    "120 символов, без кавычек"
+)
+
+# Framing for a YouTube Shorts trigger — see LINK_TEASER_RULES.
 SHORTS_TRIGGER_INSTRUCTION = (
     "скинул ссылку на YouTube Shorts. Ниже — его текст и то, что удалось "
     "вытащить из ролика (расшифровка звука и описание кадров могут быть "
-    "неполными или ошибаться в деталях). В 1–2 предложениях перескажи, о чём "
-    "ролик. Если есть блок топ-комментариев — добавь 1–2 предложения о реакции "
-    "зрителей: общее настроение и за что зацепились. Не давай вердикт "
-    "«смотреть или нет». Опирайся только на материалы ниже: не выдумывай "
-    "детали, которых там нет, и не проверяй факты из ролика по своим знаниям — "
-    "они могут устареть; никогда не утверждай, что показанное в ролике не "
-    "существует или ещё не вышло. Если материала мало — так и скажи. Твой "
-    "текст уйдёт подписью под само видео, поэтому уложись в 600 символов"
+    "неполными или ошибаться в деталях). " + LINK_TEASER_RULES
 )
 
-# Framing for a social-link trigger (Instagram Reel / TikTok / long-form YouTube). Same
-# reasoning as SHORTS_TRIGGER_INSTRUCTION: the reply is the caption on the
-# reposted video, or the body of the single message that replaces the user's
-# link, so it always retells rather than reacts.
+# Framing for a social-link trigger (Instagram Reel / TikTok / long-form
+# YouTube) — see LINK_TEASER_RULES.
 SOCIAL_LINK_RETELL_INSTRUCTION = (
     "скинул ссылку. Ниже — то, что удалось вытащить (может быть неполным или "
-    "ошибаться в деталях). В 1–2 предложениях перескажи, о чём это. Если есть "
-    "блок топ-комментариев — переведи их на русский и добавь 1 предложение о "
-    "реакции: общее настроение и за что зацепились. Не давай вердикт «смотреть "
-    "или нет». Опирайся только на материалы ниже: не выдумывай детали, которых "
-    "там нет, и не проверяй факты по своим знаниям — они могут устареть. Если "
-    "материала мало — так и скажи. Твой текст уйдёт подписью под само видео, "
-    "поэтому уложись в 600 символов"
+    "ошибаться в деталях). " + LINK_TEASER_RULES
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -602,14 +604,14 @@ GROUP_PROFILE_FAILED_REPLIES = [
 # Caption compression (src/llm/compress.py)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Formatted with the remaining character budget. Compression, not truncation:
-# the budget is a hard ceiling, but every fact in the input has to survive.
+# Formatted with the remaining character budget. Runs only when the link
+# teaser overshoots HOOK_CHAR_LIMIT (src/events/link_repost.py): it keeps the
+# hook a hook — shorter, still no spoilers — rather than cutting it mid-word.
 CAPTION_COMPRESS_SYSTEM = (
-    "Ты сокращаешь подпись под видео. Перепиши текст короче, чтобы он "
-    "уложился в {budget} символов. Сохрани весь смысл: о чём ролик и какая "
-    "была реакция зрителей. Не выбрасывай факты — убирай воду, объединяй "
-    "предложения, режь длинноты. Тон и язык оставь теми же. Ответь только "
-    "готовым текстом, без пояснений и без кавычек."
+    "Ты сокращаешь фразу-тизер под видео. Перепиши её короче, чтобы она "
+    "уложилась в {budget} символов. Сохрани интригу и тему ролика, не "
+    "раскрывай концовку и не добавляй новых фактов. Тон и язык оставь теми "
+    "же. Ответь только готовым текстом, без пояснений и без кавычек."
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

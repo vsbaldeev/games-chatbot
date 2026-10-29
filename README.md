@@ -16,14 +16,16 @@ the clip (Shorts, Reels and TikToks only — long-form YouTube never carries vid
 transcribes and looks at it (Shorts) or reads its title/caption and a short in-character
 summary of top comments (Reels, TikToks and long-form YouTube — never quoted
 verbatim, src/pipeline/ingest/links/comment_summary.py), and replies with a single
-message — the video with a 1–2 sentence summary and comment-reaction recap
-as its caption, or, when there's no
-video, a plain text message with a link preview. If the sender's message was
-nothing but the link, the bot deletes it once its own message has gone out and
-credits the sender inside the caption ("Скинул @username" + the link + the
-summary); if the sender wrote anything else alongside the link, their message is
-left untouched and the bot's message replies to it instead, carrying just the
-summary. A failed combined send falls back to an ordinary text reply, and the
+message — the video with a one-line teaser as its caption (no retelling, no
+spoilers, no comment recap; written in English for English videos, Russian
+otherwise), or, when there's no video, a plain text message with a link
+preview. If the sender's message was nothing but the link, the bot deletes it
+once its own message has gone out and credits the sender inside the caption
+("Скинул @username", then the teaser, then the link); if the sender wrote
+anything else alongside the link, their message is left untouched and the
+bot's message replies to it instead, carrying just the teaser. Shorts, Reels
+and TikToks share one daily budget of 30 per chat; the caption warns
+"Осталось видео на сегодня: N" only once 5 or fewer are left. A failed combined send falls back to an ordinary text reply, and the
 original is never deleted when that happens. Deleting the original requires the
 bot to be a chat administrator with the `can_delete_messages` permission — without
 it, everything else still works and the link message simply stays in the chat.

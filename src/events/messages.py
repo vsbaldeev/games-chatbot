@@ -261,7 +261,7 @@ async def deliver_response(final_state: BotState, msg, clean: str) -> tuple[int,
             username=final_state["incoming"]["username"],
             url=url,
             is_bare=bool(final_state.get("link_message_is_bare")),
-            cap_remaining=final_state.get("social_link_cap_remaining"),
+            cap_remaining=final_state.get("link_cap_remaining"),
         )
     sent = await msg.reply_text(clean)
     return sent.message_id, msg.message_id, "text"

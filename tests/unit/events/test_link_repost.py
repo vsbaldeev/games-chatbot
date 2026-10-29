@@ -1,4 +1,4 @@
-"""Caption composition and the 1024-character fitting ladder."""
+"""Caption composition and the teaser-fitting ladder."""
 
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -6,7 +6,9 @@ import pytest
 import telegram.error
 
 from src.events.link_repost import (
+    CAP_FOOTER_THRESHOLD,
     CAPTION_LIMIT,
+    HOOK_CHAR_LIMIT,
     TEXT_LIMIT,
     AmbiguousDeliveryError,
     build_cap_remaining_footer,
@@ -22,9 +24,9 @@ COMPRESS_PATCH_TARGET = "src.events.link_repost.compress_to_budget"
 
 
 class TestBuildCaption:
-    def test_credit_and_link_lead_the_caption(self):
+    def test_credit_then_teaser_then_link(self):
         caption = build_caption("Про котиков.", "vasya", "https://youtu.be/abc")
-        assert caption == "Скинул @vasya\nhttps://youtu.be/abc\n\nПро котиков."
+        assert caption == "Скинул @vasya\nПро котиков.\nhttps://youtu.be/abc"
 
     def test_summary_alone_when_the_original_survives(self):
         assert build_caption("Про котиков.", None, None) == "Про котиков."
@@ -41,7 +43,7 @@ class TestBuildCaption:
         caption = build_caption(
             "Про котиков.", "vasya", "https://youtu.be/abc", footer="Осталось: 5",
         )
-        assert caption == "Скинул @vasya\nhttps://youtu.be/abc\n\nПро котиков.\n\nОсталось: 5"
+        assert caption == "Скинул @vasya\nПро котиков.\nhttps://youtu.be/abc\n\nОсталось: 5"
 
     def test_no_footer_appended_when_none(self):
         assert build_caption("Про котиков.", None, None, footer=None) == "Про котиков."
@@ -51,11 +53,16 @@ class TestBuildCapRemainingFooter:
     def test_none_remaining_yields_no_footer(self):
         assert build_cap_remaining_footer(None) is None
 
-    def test_remaining_count_is_rendered(self):
-        assert build_cap_remaining_footer(5) == "Осталось рилсов сегодня: 5"
+    def test_plenty_remaining_yields_no_footer(self):
+        assert build_cap_remaining_footer(CAP_FOOTER_THRESHOLD + 1) is None
+
+    def test_remaining_at_the_threshold_is_rendered(self):
+        assert build_cap_remaining_footer(CAP_FOOTER_THRESHOLD) == (
+            f"Осталось видео на сегодня: {CAP_FOOTER_THRESHOLD}"
+        )
 
     def test_zero_remaining_still_renders(self):
-        assert build_cap_remaining_footer(0) == "Осталось рилсов сегодня: 0"
+        assert build_cap_remaining_footer(0) == "Осталось видео на сегодня: 0"
 
 
 class TestTruncateAtSentence:
@@ -83,7 +90,7 @@ class TestFitCaption:
                 "Коротко.", "vasya", "https://youtu.be/abc", has_video=True,
             )
         compress.assert_not_awaited()
-        assert caption.endswith("Коротко.")
+        assert "Коротко." in caption
 
     async def test_overflow_is_compressed(self):
         long_summary = "а" * 1200
@@ -91,8 +98,22 @@ class TestFitCaption:
             caption = await fit_caption(
                 long_summary, "vasya", "https://youtu.be/abc", has_video=True,
             )
-        assert caption.endswith("Сжато.")
+        assert "Сжато." in caption
         assert len(caption) <= CAPTION_LIMIT
+
+    async def test_teaser_over_the_hook_limit_is_compressed_to_it(self):
+        compress = AsyncMock(return_value="Сжато.")
+        with patch(COMPRESS_PATCH_TARGET, new=compress):
+            caption = await fit_caption(
+                "а" * (HOOK_CHAR_LIMIT + 1), "vasya", "https://youtu.be/abc", has_video=True,
+            )
+        assert compress.await_args.args[1] == HOOK_CHAR_LIMIT
+        assert caption == "Скинул @vasya\nСжато.\nhttps://youtu.be/abc"
+
+    async def test_compressor_overshooting_the_hook_limit_is_truncated(self):
+        with patch(COMPRESS_PATCH_TARGET, new=AsyncMock(return_value="б" * 400)):
+            caption = await fit_caption("а" * 400, None, None, has_video=True)
+        assert len(caption) <= HOOK_CHAR_LIMIT
 
     async def test_compressor_gets_the_budget_minus_overhead(self):
         compress = AsyncMock(return_value="Сжато.")
@@ -121,13 +142,12 @@ class TestFitCaption:
             )
         assert len(caption) <= CAPTION_LIMIT
 
-    async def test_text_only_send_uses_the_larger_text_limit(self):
-        long_summary = "а" * 1200
-        compress = AsyncMock()
+    async def test_text_only_send_is_held_to_the_hook_limit_too(self):
+        compress = AsyncMock(return_value="Сжато.")
         with patch(COMPRESS_PATCH_TARGET, new=compress):
-            caption = await fit_caption(long_summary, None, None, has_video=False)
-        compress.assert_not_awaited()
-        assert len(caption) <= TEXT_LIMIT
+            caption = await fit_caption("а" * 1200, None, None, has_video=False)
+        assert compress.await_args.args[1] == HOOK_CHAR_LIMIT
+        assert caption == "Сжато."
 
     async def test_text_only_overflow_past_4096_is_still_compressed(self):
         long_summary = "а" * 4200
@@ -197,8 +217,8 @@ class TestDeliverLinkMessageBare:
         )
         caption = msg.chat.send_video.await_args.kwargs["caption"]
         assert caption == (
-            "Скинул @vasya\nhttps://youtu.be/abc\n\nПро котиков.\n\n"
-            "Осталось рилсов сегодня: 5"
+            "Скинул @vasya\nПро котиков.\nhttps://youtu.be/abc\n\n"
+            "Осталось видео на сегодня: 5"
         )
 
     async def test_no_video_sends_an_unanchored_text_message(self):
@@ -282,7 +302,7 @@ class TestDeliverLinkMessageNotBare:
             url="https://youtu.be/abc", is_bare=False, cap_remaining=5,
         )
         caption = msg.reply_video.await_args.kwargs["caption"]
-        assert caption == "Про котиков.\n\nОсталось рилсов сегодня: 5"
+        assert caption == "Про котиков.\n\nОсталось видео на сегодня: 5"
 
     async def test_send_failure_keeps_the_original_and_replies_with_text(self):
         msg = make_msg()
