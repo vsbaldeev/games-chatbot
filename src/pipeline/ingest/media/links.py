@@ -1,4 +1,4 @@
-"""Summaries of Shorts and social links (Instagram, long-form YouTube, …).
+"""Summaries of Shorts and social links (Instagram, TikTok, long-form YouTube, …).
 
 The block is built from the downloaded media's transcript and keyframes plus
 the top comments as audience reaction."""
@@ -87,7 +87,8 @@ async def summarize_social_link(handler_name: str, url: str) -> tuple[str, bytes
 
     Args:
         handler_name: Name of the handler the router matched
-            (``"instagram_reel"`` or ``"youtube_video"``).
+            (``"instagram_reel"``, ``"tiktok_video"`` or
+            ``"youtube_video"``).
         url: Canonical URL to fetch, set by the router.
 
     Returns:

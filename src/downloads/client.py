@@ -15,6 +15,7 @@ logger = log.get_logger(__name__)
 
 SHORTS_TIMEOUT_SECONDS = 90
 REEL_TIMEOUT_SECONDS = 60
+TIKTOK_TIMEOUT_SECONDS = 60
 YOUTUBE_VIDEO_TIMEOUT_SECONDS = 30
 
 
@@ -44,6 +45,18 @@ async def download_reel(url: str) -> tuple[bytes, dict] | None:
     return await post_download(url, "instagram_reel", REEL_TIMEOUT_SECONDS)
 
 
+async def download_tiktok(url: str) -> tuple[bytes, dict] | None:
+    """Download one TikTok video via the download service.
+
+    Args:
+        url: Canonical TikTok video URL or a short link.
+
+    Returns:
+        ``(video_bytes, info)`` on success, or None on any failure.
+    """
+    return await post_download(url, "tiktok_video", TIKTOK_TIMEOUT_SECONDS)
+
+
 async def fetch_youtube_video(url: str) -> dict | None:
     """Fetch a long-form YouTube video's metadata via the download service.
 
@@ -62,7 +75,8 @@ async def post_download(url: str, kind: str, timeout_seconds: float) -> tuple[by
 
     Args:
         url: Canonical URL to hand the service.
-        kind: One of "youtube_short", "instagram_reel", "youtube_video".
+        kind: One of "youtube_short", "instagram_reel", "tiktok_video",
+            "youtube_video".
         timeout_seconds: Request timeout, sized per kind.
 
     Returns:

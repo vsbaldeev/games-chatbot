@@ -18,13 +18,13 @@ class ContentKind(StrEnum):
     """Why a bot message exists — one value per row of bot_message_content."""
 
     RESPONSE = "response"                          # free-form reply written by the response LLM
-    LINK_SUMMARY = "link_summary"                  # Shorts / Instagram / YouTube summary, nobody asked a question
+    LINK_SUMMARY = "link_summary"                  # Shorts / Instagram / TikTok / YouTube summary, nobody asked a question
     WIND_DOWN_REPLY = "wind_down_reply"            # LLM reply under the wind-down directive
     INSULT_REPLY = "insult_reply"                  # LLM reply under the BOT_INSULT directive
     PROMPT_INJECTION_REPLY = "prompt_injection_reply"  # canned reply after the guard flagged the message (may be a false positive)
     LIMIT_NOTICE = "limit_notice"                  # Groq daily-quota / rate-limit notice
     CONTEXT_LIMIT_NOTICE = "context_limit_notice"  # context-window overflow notice
-    CAP_NOTICE = "cap_notice"                      # Instagram daily cap, group-profile cooldown
+    CAP_NOTICE = "cap_notice"                      # Instagram + TikTok shared daily cap, group-profile cooldown
     MEDIA_FAILURE_NOTICE = "media_failure_notice"  # could not transcribe / see / fetch
     ERROR = "error"                                # generic failure line
 
@@ -40,7 +40,7 @@ class Verdict(StrEnum):
     GROUP_PROFILE_REQUEST = "GROUP_PROFILE_REQUEST"  # judge every member against a theme
     NOT_ADDRESSED = "NOT_ADDRESSED"                # author is talking about the bot, not to it
     SHORTS = "SHORTS"                              # YouTube Shorts link with fetched content
-    SOCIAL_LINK = "SOCIAL_LINK"                    # Instagram / YouTube link with fetched content
+    SOCIAL_LINK = "SOCIAL_LINK"                    # Instagram / TikTok / YouTube link with fetched content
 
 
 class WorkerStatus(StrEnum):
@@ -86,7 +86,7 @@ class MessageState(TypedDict):
 
     incoming: IncomingMessage
     should_respond: bool
-    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (unprompted text reply), "youtube_short" (Shorts link) or "social_link" (Instagram/YouTube link)
+    response_trigger: str          # "explicit" (@mention/reply), "insult_check" (bot-word mention), "random" (unprompted text reply), "youtube_short" (Shorts link) or "social_link" (Instagram/TikTok/YouTube link)
     context_types: Any             # telegram.ext.ContextTypes instance for sending replies
     response: str | None
     content_kind: NotRequired[ContentKind]  # set only by nodes that put a canned text in `response` (guard, filter, router); LLM-written kinds are derived at delivery
@@ -110,10 +110,10 @@ class IngestState(MessageState, FilterOutcome):
     youtube_short_url: NotRequired[str | None]      # canonical Shorts URL, set by Router
     youtube_short_content: NotRequired[str | None]  # labelled transcript/frames/comments block, set by Ingester
     youtube_short_video: NotRequired[bytes | None]  # downloaded video bytes, set by Ingester
-    social_link_handler: NotRequired[str | None]    # matched handler name ("instagram_reel"/"youtube_video"), set by Router
+    social_link_handler: NotRequired[str | None]    # matched handler name ("instagram_reel"/"tiktok_video"/"youtube_video"), set by Router
     social_link_url: NotRequired[str | None]        # canonical URL, set by Router
     social_link_content: NotRequired[str | None]    # labelled content block, set by Ingester
-    social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram only), set by Ingester
+    social_link_video: NotRequired[bytes | None]    # downloaded video bytes (Instagram/TikTok only), set by Ingester
     broadcast_reply: NotRequired[bool]  # True when the message replies to one of the bot's group-wide announcements (is_broadcast row) without @mentioning it; only then may the filter return NOT_ADDRESSED
     engagement_tier: NotRequired[int]  # wind-down tier charged by the engagement gate, set by the filter node
     media_is_real_person: NotRequired[bool | None]  # vision classification for photo/video_note/video, set by Ingester; None = text/voice/unclassified

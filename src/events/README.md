@@ -71,7 +71,7 @@ link_repost.py
                                       for a link trigger: the downloaded
                                       video with the summary as its caption
                                       when there is one (YouTube Shorts,
-                                      Instagram Reel), or a plain text
+                                      Instagram Reel, TikTok), or a plain text
                                       message when there isn't (long-form
                                       YouTube never carries video, and a
                                       failed download degrades the same way)
@@ -135,7 +135,7 @@ YouTube links and any download failure that falls back to a text-only send
 are not bound by the tighter caption limit.
 
 When the router (`src/pipeline/router.py`) computed a `social_link_cap_remaining`
-for the matched handler (Instagram only today — see `src.pipeline.ingest.links.social_links`),
+for the matched handler (Instagram and TikTok, which share one cap — see `src.pipeline.ingest.links.social_links`),
 `build_cap_remaining_footer` renders it as a trailing "Осталось рилсов сегодня: N"
 line, reserved out of the compression budget the same way the credit line is —
 it is never compressed or truncated away. Unlike the credit line, it is shown
@@ -145,8 +145,8 @@ the summary replies to it directly. A handler with no daily cap
 so no footer is shown for it.
 
 The content block computed for the caption (transcript/frame
-descriptions/comments for a Short, description/comments for a Reel or
-long-form YouTube link) is also persisted on the bot's own message row
+descriptions/comments for a Short, description/comments for a Reel, TikTok
+or long-form YouTube link) is also persisted on the bot's own message row
 (`link_material` on `unified_messages`, written by `deliver_and_record` in
 `messages.py`). When a member replies directly to that message,
 `response_node.py` injects it back into the prompt with a no-fabrication

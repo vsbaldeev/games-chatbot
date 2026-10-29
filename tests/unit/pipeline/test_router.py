@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.pipeline.router import INSTAGRAM_REEL_DAILY_CAP_REPLIES, MessageRouter
-from src.pipeline.ingest.links.social_links.instagram_reel import INSTAGRAM_REEL_DAILY_CAP
+from src.pipeline.router import SHORT_VIDEO_DAILY_CAP_REPLIES, MessageRouter
+from src.pipeline.ingest.links.social_links import SHORT_VIDEO_DAILY_CAP
 from src.pipeline.state import ContentKind
 from tests.builders import make_incoming, make_telegram_message
 
@@ -175,7 +175,7 @@ class TestMediaMessages:
 
 
 class TestSocialLinkDetection:
-    """Instagram/YouTube link auto-detection (mirrors Shorts detection).
+    """Instagram/TikTok/YouTube link auto-detection (mirrors Shorts detection).
 
     Each test uses a distinct link id so the handlers' module-level TtlGate
     singletons (shared across the whole test session, same as shorts.dedup_gate)
@@ -202,6 +202,13 @@ class TestSocialLinkDetection:
             "social_link_url": "https://www.instagram.com/reel/RouterTest01/",
             "link_message_is_bare": True,
         }
+
+    def test_tiktok_link_triggers_social_link(self, router):
+        msg = make_incoming(raw_text="https://www.tiktok.com/@someone/video/7000000000000000001?is_from_webapp=1")
+        result = router._MessageRouter__detect_social_link(msg)
+        assert result["social_link_handler"] == "tiktok_video"
+        assert result["social_link_url"] == "https://www.tiktok.com/@someone/video/7000000000000000001"
+        assert result["link_message_is_bare"] is True
 
     def test_youtube_watch_link_triggers_social_link(self, router):
         msg = make_incoming(raw_text="https://www.youtube.com/watch?v=RouterTest03")
@@ -245,7 +252,7 @@ class TestSocialLinkDetection:
 
 
 class TestSocialLinkDailyCap:
-    """Instagram alone is throttled; YouTube's handler has no cap at all.
+    """Instagram and TikTok share one cap; YouTube's handler has no cap at all.
 
     Distinct chat ids per test, same reason as TestSocialLinkDetection: the
     handlers' daily_cap_gate TtlGate singletons are module-level and shared
@@ -254,7 +261,7 @@ class TestSocialLinkDailyCap:
 
     def test_instagram_cap_exceeded_replies_instead_of_silence(self, router):
         chat_id = 90001
-        for index in range(INSTAGRAM_REEL_DAILY_CAP):
+        for index in range(SHORT_VIDEO_DAILY_CAP):
             msg = make_incoming(
                 chat_id=chat_id,
                 raw_text=f"https://www.instagram.com/reel/DailyCapA{index:03d}/",
@@ -266,7 +273,7 @@ class TestSocialLinkDailyCap:
         )
         result = router._MessageRouter__detect_social_link(over_cap_msg)
         assert result["should_respond"] is False
-        assert result["response"] in INSTAGRAM_REEL_DAILY_CAP_REPLIES
+        assert result["response"] in SHORT_VIDEO_DAILY_CAP_REPLIES
         assert result["content_kind"] == ContentKind.CAP_NOTICE
 
     def test_cap_remaining_counts_down_from_a_clean_chat(self, router):
@@ -274,16 +281,43 @@ class TestSocialLinkDailyCap:
         first = router._MessageRouter__detect_social_link(
             make_incoming(chat_id=chat_id, raw_text="https://www.instagram.com/reel/DailyCapB000/")
         )
-        assert first["social_link_cap_remaining"] == INSTAGRAM_REEL_DAILY_CAP - 1
+        assert first["social_link_cap_remaining"] == SHORT_VIDEO_DAILY_CAP - 1
 
         second = router._MessageRouter__detect_social_link(
             make_incoming(chat_id=chat_id, raw_text="https://www.instagram.com/reel/DailyCapB001/")
         )
-        assert second["social_link_cap_remaining"] == INSTAGRAM_REEL_DAILY_CAP - 2
+        assert second["social_link_cap_remaining"] == SHORT_VIDEO_DAILY_CAP - 2
+
+    def test_tiktok_and_instagram_draw_down_the_same_cap(self, router):
+        chat_id = 90004
+        reel = router._MessageRouter__detect_social_link(
+            make_incoming(chat_id=chat_id, raw_text="https://www.instagram.com/reel/DailyCapC000/")
+        )
+        tiktok = router._MessageRouter__detect_social_link(
+            make_incoming(chat_id=chat_id, raw_text="https://vm.tiktok.com/DailyCapC001/")
+        )
+        assert reel["social_link_cap_remaining"] == SHORT_VIDEO_DAILY_CAP - 1
+        assert tiktok["social_link_cap_remaining"] == SHORT_VIDEO_DAILY_CAP - 2
+
+    def test_tiktok_over_shared_cap_replies_instead_of_silence(self, router):
+        chat_id = 90005
+        for index in range(SHORT_VIDEO_DAILY_CAP):
+            msg = make_incoming(
+                chat_id=chat_id,
+                raw_text=f"https://www.instagram.com/reel/DailyCapD{index:03d}/",
+            )
+            assert router._MessageRouter__detect_social_link(msg) is not None
+
+        over_cap_msg = make_incoming(
+            chat_id=chat_id, raw_text="https://www.tiktok.com/@someone/video/7000000000000000099",
+        )
+        result = router._MessageRouter__detect_social_link(over_cap_msg)
+        assert result["should_respond"] is False
+        assert result["response"] in SHORT_VIDEO_DAILY_CAP_REPLIES
 
     def test_youtube_video_handler_is_never_capped(self, router):
         chat_id = 90002
-        for index in range(INSTAGRAM_REEL_DAILY_CAP + 5):
+        for index in range(SHORT_VIDEO_DAILY_CAP + 5):
             msg = make_incoming(
                 chat_id=chat_id,
                 raw_text=f"https://www.youtube.com/watch?v=DailyCapY{index:03d}",

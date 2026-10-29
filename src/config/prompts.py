@@ -426,7 +426,7 @@ SHORTS_TRIGGER_INSTRUCTION = (
     "текст уйдёт подписью под само видео, поэтому уложись в 600 символов"
 )
 
-# Framing for a social-link trigger (Instagram Reel / long-form YouTube). Same
+# Framing for a social-link trigger (Instagram Reel / TikTok / long-form YouTube). Same
 # reasoning as SHORTS_TRIGGER_INSTRUCTION: the reply is the caption on the
 # reposted video, or the body of the single message that replaces the user's
 # link, so it always retells rather than reacts.

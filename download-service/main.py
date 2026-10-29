@@ -1,8 +1,8 @@
 """FastAPI app for the self-hosted yt-dlp download service.
 
 Owns every yt-dlp download for the bot (YouTube Shorts, Instagram Reels,
-long-form YouTube metadata) so a yt-dlp version bump restarts only this
-container, never the bot. See README.md for the full contract.
+TikTok videos, long-form YouTube metadata) so a yt-dlp version bump
+restarts only this container, never the bot. See README.md for the full contract.
 """
 
 import asyncio
@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 import instagram_reel
 import shorts
+import tiktok_video
 import youtube_video
 from ytdlp_update import check_and_update
 
@@ -89,7 +90,7 @@ class DownloadRequest(BaseModel):
     """
 
     url: str
-    kind: Literal["youtube_short", "instagram_reel", "youtube_video"]
+    kind: Literal["youtube_short", "instagram_reel", "tiktok_video", "youtube_video"]
 
 
 class DownloadResponse(BaseModel):
@@ -111,6 +112,7 @@ class DownloadResponse(BaseModel):
 DOWNLOADERS = {
     "youtube_short": (shorts, "download_short"),
     "instagram_reel": (instagram_reel, "download_reel"),
+    "tiktok_video": (tiktok_video, "download_tiktok"),
     "youtube_video": (youtube_video, "fetch_metadata"),
 }
 

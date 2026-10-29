@@ -10,11 +10,11 @@ as noise and wanted a helpful assistant (see the 2026-10-13 removal). The name
 survives only as a handle: addressing the bot by «Жора»/«НейроЖора» or its
 `@username` still counts as talking to it. It speaks only when spoken to.
 Tracks per-user stats, extracts long-term memories, and routes every message through
-a typed LangGraph pipeline. YouTube Shorts, Instagram Reels, and long-form YouTube
-links posted in the chat are watched for everyone: the bot downloads the clip
-(Shorts and Reels only — long-form YouTube never carries video), transcribes and
-looks at it (Shorts) or reads its title/caption and a short in-character
-summary of top comments (Reels and long-form YouTube — never quoted
+a typed LangGraph pipeline. YouTube Shorts, Instagram Reels, TikTok videos, and
+long-form YouTube links posted in the chat are watched for everyone: the bot downloads
+the clip (Shorts, Reels and TikToks only — long-form YouTube never carries video),
+transcribes and looks at it (Shorts) or reads its title/caption and a short in-character
+summary of top comments (Reels, TikToks and long-form YouTube — never quoted
 verbatim, src/pipeline/ingest/links/comment_summary.py), and replies with a single
 message — the video with a 1–2 sentence summary and comment-reaction recap
 as its caption, or, when there's no
@@ -51,7 +51,7 @@ video notes are transcribed and answered in text.
 | [src/tools/](src/tools/README.md) | MCP tool server — IGDB, Steam, PS Store, TMDB, AniList, web search |
 | [src/store/](src/store/README.md) | asyncpg data access — messages, memories, thread history, embeddings |
 | [src/achievements/](src/achievements/README.md) | Duel achievements + stat counters (consumed by roast material) |
-| [src/downloads/](src/downloads/README.md) | HTTP client for the download service — never-raise, Shorts/Reel/YouTube summaries degrade to silence |
+| [src/downloads/](src/downloads/README.md) | HTTP client for the download service — never-raise, Shorts/Reel/TikTok/YouTube summaries degrade to silence |
 | [download-service/](download-service/README.md) | Self-hosted yt-dlp downloads — FastAPI, separate container, self-updating |
 | [src/config/](src/config/) | Configuration — credentials, model registry ([models.py](src/config/models.py)), and every LLM prompt text ([prompts.py](src/config/prompts.py)) |
 | [alembic/](alembic/) | Database schema migrations (Alembic) — the sole owner of the schema |

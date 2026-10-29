@@ -25,7 +25,7 @@ LLM-written:
 
 ```
 response               normal reply, the model chose freely
-link_summary           Shorts / Instagram / YouTube summary — nobody asked a question
+link_summary           Shorts / Instagram / TikTok / YouTube summary — nobody asked a question
 wind_down_reply        written under the wind-down directive (also the wind-down
                        meme / group-profile refusals)
 insult_reply           written under the BOT_INSULT directive (full tier only)
@@ -37,7 +37,7 @@ Canned (fixed text, no LLM):
 prompt_injection_reply guard flagged the message — includes guard false positives
 limit_notice           Groq daily quota / rate limit
 context_limit_notice   context window exceeded
-cap_notice             Instagram daily cap, group-profile cooldown
+cap_notice             Instagram + TikTok shared daily cap, group-profile cooldown
 media_failure_notice   could not transcribe / see / fetch (voice, photo, Shorts, links)
 error                  generic failure line
 ```

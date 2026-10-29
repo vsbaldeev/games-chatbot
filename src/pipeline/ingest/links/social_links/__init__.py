@@ -1,17 +1,18 @@
 """Shared handler abstraction for lightweight social-link summaries.
 
-Instagram Reel and long-form YouTube video links both follow the same
+Instagram Reel, TikTok and long-form YouTube video links all follow the same
 shape: regex-detect a link in chat, gate it (repost dedup, same TtlGate
 pattern as src.pipeline.ingest.links.shorts), fetch metadata + top comments (no
 transcript/audio/vision analysis — that stays exclusive to shorts.py, kept
 deliberately separate; see the design doc), and inject a labelled text
-block into the pipeline. Instagram alone may also attach downloaded video
+block into the pipeline. Instagram and TikTok also attach downloaded video
 bytes for Telegram to repost.
 
-Each handler owns its own ``daily_cap`` (None means uncapped) — they are no
-longer forced to share one number. Instagram's anonymous yt-dlp fetch hits a
-flaky Instagram-side anti-bot gate worth throttling around; the YouTube
-handler is a single free metadata request with nothing to throttle.
+Each handler declares its own ``daily_cap`` (None means uncapped). The two
+short-video handlers (Instagram, TikTok) count against one shared
+``SHORT_VIDEO_DAILY_CAP_GATE`` — a chat gets 30 short-video summaries a day
+across both platforms, not 30 each. The YouTube handler is a single free
+metadata request with nothing to throttle.
 
 The router consults HANDLERS in priority order: the first handler whose
 regex matches anything in the message wins the whole message — every other
@@ -26,6 +27,11 @@ from src.utils.ttl_gate import TtlGate
 
 SOCIAL_LINK_DESCRIPTION_CHAR_LIMIT = 2000      # caps YouTube description length
 SOCIAL_LINK_DEDUP_WINDOW_SECONDS = 24 * 3600   # same item in the same chat -> one summary
+SHORT_VIDEO_DAILY_CAP = 30                     # Instagram + TikTok summaries per chat per sliding 24h window
+
+# One gate instance shared by every short-video handler, so Reels and TikToks
+# draw down the same per-chat budget.
+SHORT_VIDEO_DAILY_CAP_GATE = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
 
 
 class SocialLinkContent(TypedDict):
@@ -114,9 +120,10 @@ def is_bare_link_message(text: str | None, pattern: re.Pattern) -> bool:
     return not drop_platform_links(text, pattern).strip()
 
 
-from src.pipeline.ingest.links.social_links import instagram_reel, youtube_video  # noqa: E402
+from src.pipeline.ingest.links.social_links import instagram_reel, tiktok_video, youtube_video  # noqa: E402
 
 HANDLERS: list[LinkHandler] = [
     instagram_reel.HANDLER,
+    tiktok_video.HANDLER,
     youtube_video.HANDLER,
 ]

@@ -65,6 +65,11 @@ class TestPerKindWrappers:
             await client.download_reel("https://x")
         mock_post.assert_awaited_once_with("https://x", "instagram_reel", client.REEL_TIMEOUT_SECONDS)
 
+    async def test_download_tiktok_uses_tiktok_video_kind(self):
+        with patch("src.downloads.client.post_download", new=AsyncMock(return_value=(b"v", {}))) as mock_post:
+            await client.download_tiktok("https://x")
+        mock_post.assert_awaited_once_with("https://x", "tiktok_video", client.TIKTOK_TIMEOUT_SECONDS)
+
     async def test_fetch_youtube_video_returns_info_only(self):
         with patch("src.downloads.client.post_download", new=AsyncMock(return_value=(None, {"title": "x"}))):
             result = await client.fetch_youtube_video("https://x")

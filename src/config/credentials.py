@@ -52,7 +52,7 @@ TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 
 # Base URL of the self-hosted download service (download-service/) that
-# owns all yt-dlp downloads (YouTube Shorts, Instagram Reels, long-form
-# YouTube metadata). Empty disables all three — links then fall through to
-# normal routing.
+# owns all yt-dlp downloads (YouTube Shorts, Instagram Reels, TikTok
+# videos, long-form YouTube metadata). Empty disables all of them — links
+# then fall through to normal routing.
 DOWNLOAD_SERVICE_URL: str = os.getenv("DOWNLOAD_SERVICE_URL", "")

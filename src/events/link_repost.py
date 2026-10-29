@@ -52,8 +52,8 @@ def build_cap_remaining_footer(cap_remaining: int | None) -> str | None:
     Args:
         cap_remaining: Reels left in today's cap after this one, or None
             when the matched handler has no cap (see
-            ``social_links.LinkHandler.daily_cap``) — only Instagram's
-            handler has one today.
+            ``social_links.LinkHandler.daily_cap``) — only the
+            Instagram and TikTok handlers have one, and they share it.
 
     Returns:
         A one-line status string, or None when there is nothing to show.

@@ -4,6 +4,7 @@ message may be deleted. Fail-safe: anything left over counts as user text."""
 from src.pipeline.ingest.links.shorts import SHORTS_URL_RE
 from src.pipeline.ingest.links.social_links import HANDLERS, is_bare_link_message
 from src.pipeline.ingest.links.social_links.instagram_reel import INSTAGRAM_URL_RE
+from src.pipeline.ingest.links.social_links.tiktok_video import TIKTOK_URL_RE
 from src.pipeline.ingest.links.social_links.youtube_video import YOUTUBE_VIDEO_URL_RE
 
 
@@ -25,6 +26,15 @@ class TestBareLinkMessage:
 
     def test_short_youtu_be_form_is_bare(self):
         assert is_bare_link_message("https://youtu.be/abc123", YOUTUBE_VIDEO_URL_RE)
+
+    def test_tiktok_short_link_is_bare(self):
+        assert is_bare_link_message("https://vm.tiktok.com/ZMabc123/", TIKTOK_URL_RE)
+
+    def test_tiktok_full_link_with_tracking_params_is_bare(self):
+        assert is_bare_link_message(
+            "https://www.tiktok.com/@cat/video/7234567890123456789?is_from_webapp=1&sender_device=pc",
+            TIKTOK_URL_RE,
+        )
 
     def test_user_words_are_not_bare(self):
         assert not is_bare_link_message(

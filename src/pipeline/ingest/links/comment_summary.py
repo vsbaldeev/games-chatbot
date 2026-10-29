@@ -2,7 +2,8 @@
 
 Replaces quoting comments verbatim: one cheap TAG_MODEL round trip produces
 a 1-2 sentence audience-reaction line in the bot's own voice instead. Shared
-by src.pipeline.ingest.links.shorts, src.pipeline.ingest.links.social_links.instagram_reel and
+by src.pipeline.ingest.links.shorts, src.pipeline.ingest.links.social_links.instagram_reel,
+src.pipeline.ingest.links.social_links.tiktok_video and
 src.pipeline.ingest.links.social_links.youtube_video — previously each had its own
 verbatim-quote implementation (two near-duplicates, one per label).
 

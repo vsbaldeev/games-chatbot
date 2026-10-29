@@ -86,7 +86,7 @@ sentiment.py  — POSITIVE_REACTIONS (❤👍😂🔥💯😅😁) and
 - Changing `POSITIVE_REACTIONS` only affects reactions counted afterwards: emoji
   are not stored individually, so past rows cannot be recounted.
 - A deleted reply is never uncounted; only reactions can be removed.
-- `social_link` messages (Reels and long-form YouTube summaries) have rows but
+- `social_link` messages (Reels, TikToks and long-form YouTube summaries) have rows but
   never accumulate reply counters; their reactions are still counted.
 - The newest messages read as ignored until someone responds.
 - A failed or unclear label is counted in `unlabelled_replies`, not retried. Read

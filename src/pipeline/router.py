@@ -32,16 +32,16 @@ Respond when:
     dominant way links arrive, and «tell me what this video is» does not
     put words in the sender's mouth), but is gated by a per-chat repost
     dedup window and a daily summary cap (see ``src.pipeline.ingest.links.shorts``).
-  - A text message contains an Instagram Reel or long-form YouTube video
-    link (checked after Shorts, which keeps top priority) —
+  - A text message contains an Instagram Reel, TikTok or long-form YouTube
+    video link (checked after Shorts, which keeps top priority) —
     routed with response_trigger="social_link" so the pipeline fetches a
     lightweight metadata-only summary (title/caption/selftext + top
     comments, no transcript or vision). The first handler in priority
     order whose regex matches wins the whole message; same per-item repost
     dedup window as Shorts (see ``src.pipeline.ingest.links.social_links``), but the
-    daily cap is now per-handler — only Instagram has one (its anonymous
-    fetch needs throttling against Instagram's anti-bot gate), and hitting
-    it gets a canned reply instead of silence (``__daily_cap_reply``).
+    daily cap is per-handler — Instagram and TikTok share one short-video
+    budget, YouTube has none — and hitting it gets a canned reply instead
+    of silence (``__daily_cap_reply``).
 """
 
 import random
@@ -56,10 +56,10 @@ from src.store import unified_messages
 
 logger = log.get_logger(__name__)
 
-# Only Instagram's handler still has a daily_cap (see social_links/__init__.py) —
-# these acknowledge the limit instead of leaving a posted link answered with
+# Only the short-video handlers (Instagram, TikTok) have a daily_cap, and they
+# share one (see social_links/__init__.py) — these acknowledge the limit instead of leaving a posted link answered with
 # silence, same tone as the honest-failure pools in filter/link_check.py and filter/media_check.py.
-INSTAGRAM_REEL_DAILY_CAP_REPLIES = [
+SHORT_VIDEO_DAILY_CAP_REPLIES = [
     "На сегодня лимит рилсов исчерпан — эту ссылку не разбираю.",
     "Дневной лимит рилсов выбран. Дальше сами, я на паузе до завтра.",
     "Рилсы на сегодня закончились — лимит. Возвращайтесь завтра.",
@@ -368,7 +368,7 @@ class MessageRouter:
         }
 
     def __detect_social_link(self, msg: IncomingMessage) -> dict | None:
-        """Route the first matching Instagram/YouTube link, if gates allow.
+        """Route the first matching Instagram/TikTok/YouTube link, if gates allow.
 
         Mirrors __detect_shorts: runs only when Shorts found nothing (Shorts
         keeps top priority) and tries social_links.HANDLERS in registry
@@ -436,9 +436,10 @@ class MessageRouter:
     def __daily_cap_reply(self, handler, chat_id: int, used: int) -> dict:
         """Log the cap rejection and answer with a canned limit notice.
 
-        Only Instagram's handler carries a daily_cap today, so
-        ``INSTAGRAM_REEL_DAILY_CAP_REPLIES`` is the only pool needed — a
-        capped ``handler`` other than Instagram would need its own pool
+        Only the short-video handlers (Instagram, TikTok) carry a
+        daily_cap today, and they share one, so
+        ``SHORT_VIDEO_DAILY_CAP_REPLIES`` is the only pool needed — a
+        handler with a cap of a different kind would need its own pool
         added here before this can serve it honestly.
 
         Args:
@@ -456,7 +457,7 @@ class MessageRouter:
         )
         return {
             "should_respond": False,
-            "response": random.choice(INSTAGRAM_REEL_DAILY_CAP_REPLIES),
+            "response": random.choice(SHORT_VIDEO_DAILY_CAP_REPLIES),
             "content_kind": ContentKind.CAP_NOTICE,
         }
 

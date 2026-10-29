@@ -94,7 +94,7 @@ flowchart TD
 Things the arrows do not show:
 
 - **`END` is not always silence.** A node can end the run *and* leave a canned `response`
-  (guard deflection, media_check's «не расслышал…», router's Instagram-cap reply) or fire an emoji
+  (guard deflection, media_check's «не расслышал…», router's short-video cap reply) or fire an emoji
   reaction. `run_pipeline` (`src/events/messages.py`) delivers whatever `response` the final
   state holds.
 - **Unaddressed media still costs work.** `route_after_router` sends *all* non-text media to
@@ -148,9 +148,9 @@ flowchart TD
 
     kind -->|"text"| shorts{"YouTube Shorts link?<br/>dedup 24 h · cap 50/chat/24 h"}
     shorts -->|"yes"| t_short["trigger = youtube_short"]
-    shorts -->|"no"| social{"Instagram / YouTube link?<br/>per-handler dedup + cap"}
+    shorts -->|"no"| social{"Instagram / TikTok / YouTube link?<br/>per-handler dedup + cap"}
     social -->|"yes"| t_social["trigger = social_link"]
-    social -->|"Instagram cap hit"| cap["canned cap reply (cap_notice)"]
+    social -->|"short-video cap hit"| cap["canned cap reply (cap_notice)"]
     social -->|"no"| fwd{"forwarded?"}
     fwd -->|"yes"| t_rand["should_respond = False<br/>trigger = random"]
     fwd -->|"no"| addr{"@bot or reply to bot?"}
@@ -169,7 +169,7 @@ flowchart TD
 | Trigger | `should_respond` | Meaning |
 |---|---|---|
 | `youtube_short` | True | Shorts link: summarized and re-posted as a video with caption. Checked first, even for forwarded messages (forwarding is how links usually arrive). |
-| `social_link` | True | Instagram Reel / YouTube video link. First matching handler wins; other links in the message are ignored. Only Instagram has a daily cap (30/chat/24 h). |
+| `social_link` | True | Instagram Reel / TikTok / YouTube video link. First matching handler wins (Instagram > TikTok > YouTube); other links in the message are ignored. Instagram and TikTok share one daily cap (30/chat/24 h across both); YouTube has none. |
 | `explicit` | True | `@bot_username` (word-boundary regex, URLs and longer words don't count) or a reply to a bot message. |
 | `insult_check` | True | Text contains «бот»/"bot" without addressing the bot; the filter decides whether it is really an insult. |
 | `random` | False | Everything else, and every forwarded message. The run never reaches the filter stage with this trigger. |
@@ -210,7 +210,7 @@ does:
 |---|---|
 | text | `processed_text = raw_text`. |
 | text, `youtube_short` | Download via the `download-service` sidecar (≤ 180 s, ≤ 25 MB), Whisper transcript + frame descriptions + a short summary of the top-10 comments (`comment_summary`, one `TAG_MODEL` call). Success flag: `youtube_short_content` (None = no transcript and no frames). |
-| text, `social_link` | Metadata-only fetch through the matched handler (title/caption + comment summary, no transcript or vision). Instagram also keeps the Reel's bytes in `social_link_video`. |
+| text, `social_link` | Metadata-only fetch through the matched handler (title/caption + comment summary, no transcript or vision). Instagram and TikTok also keep the video's bytes in `social_link_video`. |
 | voice | Groq Whisper → transcript. |
 | video_note, video | Whisper + frame extraction, frames described by the vision LLM. |
 | photo | Vision description, combined with the caption as `<description>\n(подпись: <caption>)`. |
@@ -535,7 +535,7 @@ lacks.
 | Set by | Fields |
 |---|---|
 | entry (`build_pipeline_state`, `run_pipeline`) | `incoming` (`IncomingMessage`), `context_types`, `thread_id`, `is_flat_thread` |
-| router | `should_respond`, `response_trigger`, `broadcast_reply`, `youtube_short_url`, `social_link_handler`, `social_link_url`, `social_link_cap_remaining`, `link_message_is_bare`; `response` + `content_kind` for the Instagram cap reply |
+| router | `should_respond`, `response_trigger`, `broadcast_reply`, `youtube_short_url`, `social_link_handler`, `social_link_url`, `social_link_cap_remaining`, `link_message_is_bare`; `response` + `content_kind` for the short-video cap reply |
 | ingester | `incoming.processed_text`, `media_is_real_person`, `voice_low_confidence`, `youtube_short_content`, `youtube_short_video`, `social_link_content`, `social_link_video` |
 | filter stage (`link_check`, `media_check`, `classify`, `budget`) | `should_respond`, `filter_verdict`, `is_bot_insult`, `wind_down`, `meme_request`, `group_profile_request`, `engagement_tier`, `drop_reason`; `response` + `content_kind` for canned replies |
 | guard | `blocked`, `drop_reason`; `response` + `content_kind = prompt_injection_reply` |

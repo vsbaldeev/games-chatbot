@@ -16,7 +16,12 @@ import re
 
 from src import downloads, log
 from src.pipeline.ingest.links.comment_summary import summarize_comments
-from src.pipeline.ingest.links.social_links import SOCIAL_LINK_DEDUP_WINDOW_SECONDS, SocialLinkContent
+from src.pipeline.ingest.links.social_links import (
+    SHORT_VIDEO_DAILY_CAP,
+    SHORT_VIDEO_DAILY_CAP_GATE,
+    SOCIAL_LINK_DEDUP_WINDOW_SECONDS,
+    SocialLinkContent,
+)
 from src.utils.ttl_gate import TtlGate
 
 logger = log.get_logger(__name__)
@@ -26,11 +31,6 @@ INSTAGRAM_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Own cap, not shared with youtube_video: only Instagram fetches hit the
-# download service's flaky anonymous access gate, so only Instagram gets
-# throttled.
-INSTAGRAM_REEL_DAILY_CAP = 30  # summaries per chat per sliding 24h window
-
 
 class InstagramReelHandler:
     """Downloads an Instagram Reel via the download service; caption + comments, best effort."""
@@ -39,10 +39,10 @@ class InstagramReelHandler:
     pattern = INSTAGRAM_URL_RE
 
     def __init__(self) -> None:
-        """Initialise this handler's own dedup and daily-cap gates."""
+        """Initialise this handler's own dedup gate and the shared short-video cap."""
         self.dedup_gate = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
-        self.daily_cap_gate = TtlGate(SOCIAL_LINK_DEDUP_WINDOW_SECONDS)
-        self.daily_cap = INSTAGRAM_REEL_DAILY_CAP
+        self.daily_cap_gate = SHORT_VIDEO_DAILY_CAP_GATE
+        self.daily_cap = SHORT_VIDEO_DAILY_CAP
 
     def extract(self, text: str) -> tuple[str, str] | None:
         """Extract the Reel id and canonical URL from message text.

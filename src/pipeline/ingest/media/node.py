@@ -86,7 +86,7 @@ async def ingest_shorts(raw_text: str, short_url: str) -> IngestResult:
 
 
 async def ingest_social_link(raw_text: str, handler_name: str, url: str) -> IngestResult:
-    """Summarize an Instagram/YouTube link and append it to the raw text.
+    """Summarize an Instagram/TikTok/YouTube link and append it to the raw text.
 
     Args:
         raw_text: The sender's original text (containing the link).

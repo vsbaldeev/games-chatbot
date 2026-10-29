@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.pipeline.ingest.links.social_links.instagram_reel import INSTAGRAM_REEL_DAILY_CAP, InstagramReelHandler
+from src.pipeline.ingest.links.social_links import SHORT_VIDEO_DAILY_CAP, SHORT_VIDEO_DAILY_CAP_GATE
+from src.pipeline.ingest.links.social_links.instagram_reel import InstagramReelHandler
 
 
 @pytest.fixture
@@ -14,7 +15,10 @@ def handler() -> InstagramReelHandler:
 
 class TestDailyCap:
     def test_daily_cap_is_thirty(self, handler):
-        assert handler.daily_cap == INSTAGRAM_REEL_DAILY_CAP == 30
+        assert handler.daily_cap == SHORT_VIDEO_DAILY_CAP == 30
+
+    def test_daily_cap_gate_is_the_shared_short_video_gate(self, handler):
+        assert handler.daily_cap_gate is SHORT_VIDEO_DAILY_CAP_GATE
 
 
 class TestExtract:

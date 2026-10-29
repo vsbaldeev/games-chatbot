@@ -1,7 +1,7 @@
 """
 check_link — filter-stage node for Shorts and social-link triggers.
 
-YouTube Shorts (``response_trigger="youtube_short"``) and Instagram/YouTube
+YouTube Shorts (``response_trigger="youtube_short"``) and Instagram/TikTok/YouTube
 links (``response_trigger="social_link"``) bypass LLM classification entirely:
 a bare link would be classified MEANINGLESS and dropped, but the trigger is
 deterministic. A successful fetch passes through; a failed one gets a canned
@@ -27,8 +27,9 @@ SHORTS_FAILED_REPLIES = [
     "Не дотянулся до ролика. Перекиньте другую ссылку или смотрите так.",
 ]
 
-# Honest canned acknowledgements for an explicitly addressed Instagram/YouTube
-# link the bot failed to fetch — same principle as SHORTS_FAILED_REPLIES.
+# Honest canned acknowledgements for an explicitly addressed
+# Instagram/TikTok/YouTube link the bot failed to fetch — same principle as
+# SHORTS_FAILED_REPLIES.
 SOCIAL_LINK_FAILED_REPLIES = [
     "Не смог посмотреть — сайт не отдал. Сами гляньте по ссылке.",
     "Ссылка не открылась. Придётся смотреть вслепую.",
@@ -77,7 +78,7 @@ def handle_youtube_short(state: BotState) -> dict:
 
 
 def handle_social_link(state: BotState) -> dict:
-    """Pass a fetched Instagram/YouTube summary through; degrade honestly on failure.
+    """Pass a fetched Instagram/TikTok/YouTube summary through; degrade honestly on failure.
 
     Kept apart from ``handle_youtube_short``: the two triggers are handled by
     entirely separate code paths by design (see the design doc's "Why Shorts

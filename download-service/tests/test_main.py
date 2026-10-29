@@ -37,6 +37,12 @@ class TestDownloadDispatch:
         mock_download.assert_called_once_with("https://x")
         assert response.status_code == 200
 
+    def test_tiktok_video_kind_calls_tiktok_download(self):
+        with patch("main.tiktok_video.download_tiktok", return_value=(b"video", {"description": "x"})) as mock_download:
+            response = client.post("/download", json={"url": "https://x", "kind": "tiktok_video"})
+        mock_download.assert_called_once_with("https://x")
+        assert response.status_code == 200
+
     def test_youtube_video_kind_returns_null_video_bytes(self):
         with patch("main.youtube_video.fetch_metadata", return_value=(None, {"title": "x"})):
             response = client.post("/download", json={"url": "https://x", "kind": "youtube_video"})

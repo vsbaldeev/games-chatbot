@@ -36,8 +36,8 @@ services:
         max-size: "10m"
         max-file: "2"
 
-  # Self-hosted yt-dlp downloads for YouTube Shorts, Instagram Reels, and
-  # long-form YouTube metadata (download-service/). A yt-dlp version bump
+  # Self-hosted yt-dlp downloads for YouTube Shorts, Instagram Reels, TikTok
+  # videos, and long-form YouTube metadata (download-service/). A yt-dlp version bump
   # restarts only this container — the bot, its Telegram connection, and
   # every other feature stay up.
   download-service:
@@ -73,7 +73,7 @@ services:
       # down — Shorts summaries degrade to silence, everything else works.
       pot-provider:
         condition: service_started
-      # Same: Shorts/Reel/YouTube summaries degrade to silence when the
+      # Same: Shorts/Reel/TikTok/YouTube summaries degrade to silence when the
       # download service is down — everything else works.
       download-service:
         condition: service_started
